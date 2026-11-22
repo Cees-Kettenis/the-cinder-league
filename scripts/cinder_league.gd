@@ -8,6 +8,8 @@ const Stage = preload("res://scripts/stage.gd")
 const Foley = preload("res://scripts/foley.gd")
 const BattleHud = preload("res://scripts/battle_hud.gd")
 const Symbol = preload("res://scripts/ui_symbol.gd")
+const TITLE_ART = preload("res://art/title-splash.png")
+const TITLE_THEME = preload("res://audio/title-theme.ogg")
 
 const SAND := Color("#e1b880")
 const TEXT := Color("#f3e8d6")
@@ -30,6 +32,9 @@ var game: RefCounted
 var simulations: RefCounted
 var shell: VBoxContainer
 var content: VBoxContainer
+var title_art: TextureRect
+var title_music := AudioStreamPlayer.new()
+var music_enabled := true
 var serif: SystemFont
 var current_screen := ""
 var notification := ""
@@ -81,6 +86,10 @@ func _ready() -> void:
 		display_mode = clampi(int(settings.get_value("display", "mode", previous_mode)), DisplayMode.WINDOWED, DisplayMode.FULLSCREEN)
 	elif settings.load("user://audio.cfg") == OK:
 		sound.enabled = bool(settings.get_value("audio", "enabled", true))
+	music_enabled = bool(settings.get_value("audio", "title_music", sound.enabled))
+	title_music.stream = TITLE_THEME
+	title_music.volume_db = -5.0
+	add_child(title_music)
 	if get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]:
 		display_mode = DisplayMode.FULLSCREEN
 	var color := ColorRect.new()
@@ -88,6 +97,14 @@ func _ready() -> void:
 	color.mouse_filter = MOUSE_FILTER_IGNORE
 	add_child(color)
 	color.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	title_art = TextureRect.new()
+	title_art.texture = TITLE_ART
+	title_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	title_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	title_art.mouse_filter = MOUSE_FILTER_IGNORE
+	title_art.hide()
+	add_child(title_art)
+	title_art.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	var margin := MarginContainer.new()
 	add_child(margin)
 	margin.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
@@ -105,6 +122,19 @@ func _ready() -> void:
 	game = Campaign.new(data)
 	simulations = Simulator.new(data)
 	show_menu()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not event.is_action_pressed("ui_cancel"):
+		return
+	if is_instance_valid(settings_popup):
+		settings_popup.hide()
+	else:
+		match current_screen:
+			"menu", "town": _show_pause()
+			"slots": show_menu()
+			"shop", "arena", "scout", "result": show_town()
+			_: return
+	get_viewport().set_input_as_handled()
 
 func _make_theme() -> void:
 	serif = SystemFont.new()
@@ -246,15 +276,21 @@ func _page(key: String, heading: String) -> void:
 		battle_layer = null
 		shell.show()
 	current_screen = key
+	title_art.visible = key in ["menu", "slots"]
+	_sync_title_music.call_deferred()
 	_apply_display_mode()
 	_clear(shell)
 	var nav := _row(shell, 8)
-	_title(nav, heading, 32)
+	if not heading.is_empty():
+		_title(nav, heading, 32)
 	_space(nav)
 	if not game.state.is_empty() and key in ["town", "arena", "scout", "shop", "result"]:
 		var gold := str(int(game.state.gold))
 		_token(nav, "coin", gold + " gold" if key == "shop" else gold, "Gold")
-	_icon_button(nav, "settings", "Settings", _show_settings)
+	if key in ["menu", "town"]:
+		_icon_button(nav, "settings", "Pause menu", _show_pause)
+	else:
+		_icon_button(nav, "settings", "Settings", _show_settings)
 	if key not in ["menu", "allocate"]:
 		_icon_button(nav, "home", "Title screen", show_menu)
 	if not notification.is_empty():
@@ -265,21 +301,63 @@ func _page(key: String, heading: String) -> void:
 	content = _column(shell, 10)
 	_fill(content, true)
 
+func _show_pause() -> void:
+	_show_popup("Paused")
+
 func _show_settings() -> void:
+	_show_popup("Settings")
+
+func _show_popup(section: String, back: String = "") -> void:
 	if is_instance_valid(settings_popup):
-		return
-	settings_popup = PopupPanel.new()
-	settings_popup.theme = theme
-	settings_popup.transient = true
-	settings_popup.exclusive = true
-	add_child(settings_popup)
-	var menu := _card(settings_popup, 14)
-	menu.get_parent().set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	_title(menu, "Settings", 30)
-	var audio := CheckButton.new()
-	audio.text = "Game sounds"
-	audio.button_pressed = sound.enabled
-	menu.add_child(audio)
+		_clear(settings_popup)
+	else:
+		settings_popup = PopupPanel.new()
+		settings_popup.theme = theme
+		settings_popup.transient = true
+		settings_popup.exclusive = true
+		add_child(settings_popup)
+		settings_popup.window_input.connect(func(event: InputEvent) -> void:
+			if event.is_action_pressed("ui_cancel"):
+				settings_popup.set_input_as_handled()
+				settings_popup.hide())
+		settings_popup.popup_hide.connect(func() -> void:
+			settings_popup.queue_free()
+			settings_popup = null)
+	var menu := _card(settings_popup, 12)
+	var panel: Control = menu.get_parent()
+	panel.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	_title(menu, section, 30)
+	var primary: Button
+	match section:
+		"Paused":
+			primary = _button(menu, "Resume", settings_popup.hide, true)
+			_button(menu, "Settings", _show_popup.bind("Settings", section))
+			_button(menu, "Audio", _show_popup.bind("Audio", section))
+			_button(menu, "Quit", _quit_game)
+		"Settings":
+			_display_settings(menu)
+			if back.is_empty():
+				_button(menu, "Audio", _show_popup.bind("Audio", section))
+			if current_screen in ["menu", "slots"]:
+				_button(menu, "Simulator", func() -> void:
+					settings_popup.hide()
+					show_simulator())
+				_button(menu, "Playtest balance", func() -> void:
+					settings_popup.hide()
+					show_balance())
+		"Audio":
+			_audio_settings(menu)
+	if primary == null:
+		primary = _button(menu, "Done" if back.is_empty() else "Back", settings_popup.hide if back.is_empty() else _show_popup.bind(back), true)
+	settings_popup.popup_centered(Vector2i(360, ceili(panel.get_combined_minimum_size().y)))
+	primary.grab_focus()
+
+func _settings_notice(menu: VBoxContainer) -> Label:
+	var notice := _wrapped(menu, "Settings could not be saved.", 15, RED)
+	notice.hide()
+	return notice
+
+func _display_settings(menu: VBoxContainer) -> void:
 	var display_row := _row(menu, 12)
 	_label(display_row, "Display").size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var display := OptionButton.new()
@@ -290,30 +368,44 @@ func _show_settings() -> void:
 	display.select(display_mode)
 	display_row.add_child(display)
 	_fill(display)
-	var save_notice := _wrapped(menu, "Settings could not be saved.", 15, RED)
-	save_notice.hide()
-	audio.toggled.connect(func(enabled: bool) -> void:
-		sound.enabled = enabled
-		if not enabled:
-			sound.stop()
-		save_notice.visible = not _save_settings())
+	var save_notice := _settings_notice(menu)
 	display.item_selected.connect(func(index: int) -> void:
 		display_mode = display.get_item_id(index)
 		save_notice.visible = not _save_settings()
 		_apply_display_mode.call_deferred())
-	if current_screen == "menu":
-		_button(menu, "Simulator", func() -> void:
-			settings_popup.hide()
-			show_simulator())
-		_button(menu, "Playtest balance", func() -> void:
-			settings_popup.hide()
-			show_balance())
-	var done := _button(menu, "Done", settings_popup.hide, true)
-	settings_popup.popup_hide.connect(func() -> void:
-		settings_popup.queue_free()
-		settings_popup = null)
-	settings_popup.popup_centered(Vector2i(360, 0))
-	done.grab_focus()
+
+func _audio_settings(menu: VBoxContainer) -> void:
+	var effects := CheckButton.new()
+	effects.text = "Game sounds"
+	effects.button_pressed = sound.enabled
+	menu.add_child(effects)
+	var music := CheckButton.new()
+	music.text = "Title music"
+	music.button_pressed = music_enabled
+	menu.add_child(music)
+	var save_notice := _settings_notice(menu)
+	effects.toggled.connect(func(enabled: bool) -> void:
+		sound.enabled = enabled
+		if not enabled:
+			sound.stop()
+		save_notice.visible = not _save_settings())
+	music.toggled.connect(func(enabled: bool) -> void:
+		music_enabled = enabled
+		_sync_title_music()
+		save_notice.visible = not _save_settings())
+
+func _sync_title_music() -> void:
+	if music_enabled and current_screen in ["menu", "slots"]:
+		if not title_music.playing:
+			title_music.play()
+	elif title_music.playing:
+		title_music.stop()
+
+func _quit_game() -> void:
+	title_music.stop()
+	# The mixer releases the looping stream after playback stops.
+	await get_tree().create_timer(.30).timeout
+	get_tree().quit()
 
 func _apply_display_mode() -> void:
 	if DisplayServer.get_name() == "headless":
@@ -331,6 +423,7 @@ func _save_settings() -> bool:
 	var settings := ConfigFile.new()
 	settings.load(USER_SETTINGS)
 	settings.set_value("audio", "enabled", sound.enabled)
+	settings.set_value("audio", "title_music", music_enabled)
 	settings.set_value("display", "mode", display_mode)
 	return settings.save(USER_SETTINGS) == OK
 
@@ -374,8 +467,28 @@ func _stage(parent: Node, kind: String, height: int = 205) -> Control:
 	return stage
 
 func show_menu() -> void:
-	_page("menu", "The Cinder League")
-	_stage(content, "town", 310)
+	_show_title(false)
+
+func _show_title(selecting_slot: bool) -> void:
+	_page("slots" if selecting_slot else "menu", "")
+	var hero := Control.new()
+	content.add_child(hero)
+	_fill(hero, true)
+	var lockup := _column(hero, 20)
+	lockup.anchor_left = .06
+	lockup.anchor_top = .29
+	var nameplate := _title(lockup, "The Cinder\nLeague", 86)
+	nameplate.add_theme_color_override("font_color", Color("#ffe2ad"))
+	nameplate.add_theme_color_override("font_shadow_color", Color("#150f14"))
+	nameplate.add_theme_constant_override("shadow_offset_y", 4)
+	nameplate.add_theme_constant_override("line_spacing", -12)
+	if not selecting_slot:
+		var play := _button(lockup, "Play", _show_title.bind(true), true)
+		play.custom_minimum_size = Vector2(186, 56)
+		play.size_flags_horizontal = SIZE_SHRINK_BEGIN
+		play.add_theme_font_size_override("font_size", 23)
+		play.grab_focus()
+		return
 	var slots := _row(content)
 	for number in range(1, Campaign.SLOT_COUNT + 1):
 		var card := _card(slots)
@@ -931,6 +1044,8 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	fight_locked = bout.active != 0
 	fight_generation += 1
 	current_screen = "battle"
+	title_art.hide()
+	_sync_title_music()
 	shell.hide()
 	battle_layer = Control.new()
 	add_child(battle_layer)

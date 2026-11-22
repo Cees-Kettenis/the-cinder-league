@@ -19,7 +19,7 @@ godot --path .
 
 ## Play
 
-Choose a save slot, enter a name, and assign the starting points. New gladiators start with a dagger that deals 7 base damage. The weaponsmith sells the short sword for 15 gold. It deals 10 base damage. Click the buildings on the town map to open the **Armory**, **Weaponsmith**, **Magic shop**, or **Arena**. Select an armor slot and a piece to see the try-on and armor-point change before purchasing. The magic shop plays spell previews, including locked spells. Gear, potions, and spell uses are reset for each new bout. Ember Etching is equipped separately from your active spell.
+Select **Play** on the title screen, then choose a save slot. Enter a name and assign the starting points for a new gladiator. New gladiators start with a dagger that deals 7 base damage. The weaponsmith sells the short sword for 15 gold. It deals 10 base damage. Click the buildings on the town map to open the **Armory**, **Weaponsmith**, **Magic shop**, or **Arena**. Select an armor slot and a piece to see the try-on and armor-point change before purchasing. The magic shop plays spell previews, including locked spells. Gear, potions, and spell uses are reset for each new bout. Ember Etching is equipped separately from your active spell.
 
 Duels have action icons around your gladiator. Hover over an icon for its name or to see why it is unavailable. The sword with speed lines is **Rush attack**. It moves you into weapon reach and strikes in one turn if a leap can cover the gap. It costs the stamina of a leap and a regular attack. The heart, shield, and lightning bolt mark the health, armor, and stamina bars. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
 
@@ -31,13 +31,13 @@ Losing a regular bout costs up to 8 gold. At an arena's level cap, regular wins 
 
 Amber Ring has one preliminary round before Idra Vale. Iron Court has two before Oren Voss. Preliminary builds are seeded for each tournament. The two champions have fixed builds. Tournament rounds started from **Fight to the death** are fatal on defeat. Tournament bouts already in progress before this update can finish without the new death rule. The fallen gladiator remains in the save slot until you create a new one there. The game archives the previous save under `user://fallen/`.
 
-Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. Open **Settings** with the gear icon to change game sounds or choose **Windowed**, **Full-screen fights**, or **Full screen** under **Display**.
+Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. Press **Esc** to return to town from shops, the arena, and the pre-fight or results screens. On the title screen or in town, **Esc** opens the pause menu. **Settings** controls the display mode. **Audio** controls game sounds and title music separately.
 
 Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. A fight ends in victory or defeat. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying a regular bout restores its saved starting conditions. Practice replays carry no fees or risk to the gladiator and leave campaign progress intact.
 
 ## Simulate
 
-Open **Settings** from the title screen and choose **Simulator**. Choose fighter presets, level, seed, and number of bouts. Run a matchup batch or a campaign across both arenas. A campaign seed reproduces the rival draws and fight rolls. The result includes a turn-by-turn trace of the first bout.
+Open the pause menu from the title screen and choose **Settings** → **Simulator**. Choose fighter presets, level, seed, and number of bouts. Run a matchup batch or a campaign across both arenas. A campaign seed reproduces the rival draws and fight rolls. The result includes a turn-by-turn trace of the first bout.
 
 The same combat rules are available from a terminal. Standalone simulator matchups can end in a draw.
 

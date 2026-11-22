@@ -288,6 +288,8 @@ func _check_game_buttons() -> void:
 	root.add_child(ui)
 	ui.sound.enabled = false
 	ui.game.create(0, "Gladiator", 0, 0, ui.data.build_stats("weapon", 10))
+	_find_button(ui, "Play").pressed.emit()
+	_check(ui.current_screen == "slots" and _find_button(ui, "Create gladiator") != null, "Play should open the save slots")
 	ui.show_town()
 	var button := _find_button(ui, "Magic shop")
 	if _check(button != null, "Town should have a Magic shop button"):
@@ -298,6 +300,13 @@ func _check_game_buttons() -> void:
 	_check(ui.shop_stage.left_loadout.weapon == "mace" and ui.game.state.loadout.weapon == ui.data.rules.starter_weapon,
 		"The locked mace should appear in the preview without changing the equipped weapon")
 	_check(ui.shop_buy.disabled and ui.shop_buy.text.begins_with("Requires level"), "The mace's unlock requirement should be visible")
+	_press_escape()
+	_check(ui.current_screen == "town", "Escape should return from a shop to town")
+	_press_escape()
+	if _check(is_instance_valid(ui.settings_popup), "Escape in town should open the pause menu"):
+		_check(_find_button(ui.settings_popup, "Settings") != null and _find_button(ui.settings_popup, "Audio") != null
+			and _find_button(ui.settings_popup, "Quit") != null, "Pause should offer settings, audio, and quit")
+		_find_button(ui.settings_popup, "Resume").pressed.emit()
 	ui.game.state.xp = int(ui.data.rules.xp_levels[1]) - 1
 	ui.show_arena()
 	_find_button(ui, "Scout rival").pressed.emit()
@@ -310,6 +319,8 @@ func _check_game_buttons() -> void:
 	_find_button(ui, "Fight").pressed.emit()
 	_check(ui.current_screen == "battle" and not ui.shell.visible and _find_button(ui, "Leave bout") == null,
 		"Combat must occupy the game view and offer no way back during the bout")
+	_press_escape()
+	_check(ui.current_screen == "battle" and not is_instance_valid(ui.settings_popup), "Escape should keep the player in the bout")
 	_check(not ui.battle_hud.action_buttons.rush.disabled and ui.battle_hud.action_buttons.attack.disabled,
 		"The HUD should offer a rush when the fighter can close the gap, with a normal attack still out of reach")
 	for action_button: Button in ui.battle_hud.action_buttons.values():
@@ -329,11 +340,20 @@ func _check_game_buttons() -> void:
 	ui.bout_result = ui.game.record_turn("attack", 0)
 	ui._finish_bout()
 	_check(ui.current_screen == "result" and _find_button(ui, "Spend level-up points") != null, "Finishing a bout should show the required allocation")
-	ui.show_arena()
-	_check(ui.current_screen == "allocate", "A pending level-up should block the arena")
+	_press_escape()
+	_check(ui.current_screen == "allocate", "Escape from results should respect a pending level-up")
 	ui._retry(true)
 	_check(ui.current_screen == "allocate", "A pending level-up should block practice")
 	ui.queue_free()
+
+func _press_escape() -> void:
+	var event := InputEventKey.new()
+	event.keycode = KEY_ESCAPE
+	event.pressed = true
+	root.push_input(event, true)
+	event = event.duplicate()
+	event.pressed = false
+	root.push_input(event, true)
 
 func _find_button(node: Node, caption: String) -> Button:
 	if node is Button and (node.text == caption or node.accessibility_name == caption):

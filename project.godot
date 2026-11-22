@@ -4,6 +4,8 @@ config_version=5
 config/name="The Cinder League"
 run/main_scene="res://cinder_league.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.055, 0.061, 0.065, 1)
 
 [display]
 window/size/viewport_width=1200
