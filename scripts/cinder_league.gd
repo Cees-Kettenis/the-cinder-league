@@ -6,6 +6,7 @@ const Duel = preload("res://scripts/duel.gd")
 const Simulator = preload("res://scripts/simulator.gd")
 const Stage = preload("res://scripts/stage.gd")
 const Foley = preload("res://scripts/foley.gd")
+const BattleHud = preload("res://scripts/battle_hud.gd")
 
 const SAND := Color("#e1b880")
 const TEXT := Color("#f3e8d6")
@@ -16,7 +17,7 @@ const BORDER := Color("#343f3d")
 const GREEN := Color("#96d4ad")
 const RED := Color("#e38d79")
 const SLOTS := {"helmet": "Helmet", "chest": "Chest plate", "pants": "Pants", "shoes": "Shoes", "shield": "Shield"}
-const OPPONENT_STYLES := {"brute": "Heavy hitter", "guard": "Defensive", "mage": "Spellcaster", "skirmish": "Mobile fighter"}
+const OPPONENT_STYLES := {"brute": "Heavy hitter", "guard": "Defensive", "mage": "Spellcaster", "skirmish": "Mobile fighter", "weapon": "Weapon fighter"}
 const USER_BALANCE := "user://balance.override.json"
 
 var data := Data.new()
@@ -49,12 +50,11 @@ var shop_price: Label
 var shop_buy: Button
 var shop_entries: Dictionary = {}
 var bout: RefCounted
+var battle_layer: Control
 var battle_stage: Control
-var action_buttons: Dictionary = {}
-var player_status: VBoxContainer
-var opponent_status: VBoxContainer
-var fight_log: RichTextLabel
-var fight_heading: Label
+var battle_hud: Control
+var fullscreen_bouts := true
+var window_mode_before_bout := Window.MODE_WINDOWED
 var character_name: Label
 var fight_locked := false
 var fight_generation := 0
@@ -183,6 +183,13 @@ func _clear(node: Node) -> void:
 		child.queue_free()
 
 func _page(key: String, heading: String, subheading: String = "") -> void:
+	if is_instance_valid(battle_layer):
+		remove_child(battle_layer)
+		battle_layer.queue_free()
+		battle_layer = null
+		if DisplayServer.get_name() != "headless":
+			get_window().mode = window_mode_before_bout
+		shell.show()
 	current_screen = key
 	_clear(shell)
 	var nav := _row(shell, 8)
@@ -216,7 +223,7 @@ func _show_progress(parent: Node) -> void:
 	var xp := int(game.state.xp)
 	var cap := int(game.arena().cap)
 	if game.state.complete:
-		_label(status, "%d XP   ·   Both tournaments won" % xp, 14, GREEN)
+		_label(status, "%d XP   ·   League champion" % xp, 14, GREEN)
 	elif game.state.pending:
 		_label(status, "%d XP   ·   Level %d ready" % [xp, level + 1], 14, GREEN)
 	elif level >= cap:
@@ -276,6 +283,8 @@ func _resume(number: int) -> void:
 		return
 	if game.state.pending:
 		_allocate_level()
+	elif game.has_active_bout():
+		_open_bout(game.state.snapshot, game.state.active_bout.practice)
 	else:
 		show_town()
 
@@ -300,7 +309,7 @@ func _character_form() -> void:
 	_fill(row, true)
 	var preview := _card(row)
 	_fill(preview.get_parent(), true)
-	creation_stage = _stage(preview, "avatar", 370)
+	creation_stage = _stage(preview, "avatar", 340)
 	if not level_mode:
 		creation_stage.left_loadout = {}
 	character_name = _title(preview, game.state.name if level_mode else "New gladiator", 23)
@@ -342,7 +351,7 @@ func _character_form() -> void:
 	_draw_allocations()
 
 func _point_limit() -> int:
-	return int(data.rules.points_per_level if level_mode else data.rules.starting_points)
+	return game.points_to_allocate() if level_mode else int(data.rules.starting_points)
 
 func _points_left() -> int:
 	var remaining := _point_limit()
@@ -374,14 +383,44 @@ func _draw_allocations() -> void:
 func _update_point_total() -> void:
 	points_notice.text = "%d points left" % _points_left()
 	var values := draft.duplicate()
+	var previous_stats := data.stats_empty()
+	var previous_level := 1
+	var loadout := {"weapon": data.rules.starter_weapon}
 	if level_mode:
+		previous_stats = game.state.stats
+		previous_level = int(game.state.level)
+		loadout = game.state.loadout
 		for stat in Data.STATS:
-			values[stat] += int(game.state.stats[stat])
-	var health := int(data.rules.base_health + values.Vitality * data.rules.health_per_vitality)
-	var energy := int(data.rules.base_energy + values.Stamina * data.rules.energy_per_stamina)
-	var hit := roundi(clampf(data.rules.base_hit + values.Attack * data.rules.hit_per_attack,
-		data.rules.minimum_hit, data.rules.maximum_hit) * 100)
-	projected_stats.text = "%d health  ·  %d stamina  ·  %d%% base hit" % [health, energy, hit]
+			values[stat] += int(previous_stats[stat])
+	var rule: Dictionary = data.rules
+	var projected: Dictionary = data.fighter("", values, loadout)
+	var stats_text := [
+		"Health %d  ·  +%d HP per turn" % [projected.max_hp, Duel.regeneration(rule, values.Vitality)],
+		"Stamina %d  ·  +%d per sleep" % [projected.max_energy, Duel.recovery(rule, values.Stamina)],
+		"Weapon %d damage  ·  %d%% hit  ·  %d%% crit (×%.2f)" % [
+			roundi(Duel.strike_damage(rule, projected, false)), roundi(Duel.hit_chance(rule, values, false) * 100),
+			roundi(Duel.crit_chance(rule, values.Attack) * 100), Duel.crit_multiplier(rule, values.Attack)],
+		"Defence %d%% block  ·  %d%% when guarding" % [
+			roundi(Duel.block_chance(rule, values.Defence) * 100), roundi(Duel.block_chance(rule, values.Defence, true) * 100)],
+		"Spells +%d damage  ·  %d%% hit (%d%% under threat)" % [
+			roundi(values.Magic * rule.damage_per_magic), roundi(Duel.hit_chance(rule, values, true) * 100),
+			roundi(Duel.hit_chance(rule, values, true, false, true) * 100)],
+		"Taunt %d damage or %d%% provoke  ·  +%d win gold" % [
+			Duel.taunt_damage(rule, values.Charisma), roundi(Duel.taunt_chance(rule, values.Charisma) * 100),
+			roundi(values.Charisma * rule.gold_per_charisma)],
+	]
+	var before := {"level": previous_level, "stats": previous_stats}
+	var after := {"level": previous_level + int(level_mode), "stats": values}
+	var unlocked := PackedStringArray()
+	for item in data.items.values():
+		if not data.lock_reason(before, item).is_empty() and data.lock_reason(after, item).is_empty():
+			unlocked.append(item.name)
+	if not unlocked.is_empty():
+		var names := ", ".join(unlocked.slice(0, 3))
+		if unlocked.size() > 3:
+			names += " and %d more" % (unlocked.size() - 3)
+		stats_text.append("Newly eligible · " + names)
+	projected_stats.text = "\n".join(stats_text)
 	confirm_button.disabled = _points_left() != 0 or (not level_mode and name_input.text.strip_edges().is_empty())
 
 func _change_point(stat: String, delta: int) -> void:
@@ -414,7 +453,7 @@ func show_town() -> void:
 	_show_progress(content)
 	_stage(content, "town", 350)
 	var destinations := _row(content)
-	for pair in [["Weaponsmith", "weapon"], ["Armory", "armor"], ["Magic shop", "magic"]]:
+	for pair in [["Weaponsmith", "weapon"], ["Armory", "armor"], ["Magic shop", "spell"]]:
 		_fill(_button(destinations, pair[0], _enter_shop.bind(pair[1])))
 	_fill(_button(destinations, "Arena", show_arena, true))
 
@@ -424,6 +463,9 @@ func _enter_shop(kind: String) -> void:
 	show_shop()
 
 func show_shop() -> void:
+	if game.state.pending:
+		_allocate_level()
+		return
 	var title: String = {"armor": "Armory", "weapon": "Weaponsmith", "spell": "Magic shop"}[shop_type]
 	_page("shop", title)
 	var nav := _row(content)
@@ -603,6 +645,9 @@ func _buy_item() -> void:
 	show_shop()
 
 func show_arena() -> void:
+	if game.state.pending:
+		_allocate_level()
+		return
 	var arena: Dictionary = game.arena()
 	_page("arena", arena.name, arena.descriptor)
 	_show_progress(content)
@@ -613,7 +658,6 @@ func show_arena() -> void:
 	var next: Dictionary = game.next_opponent(false)
 	var contender: Dictionary = data.opponent(next, int(game.state.level), game.arena_index())
 	stage.right_loadout = contender.loadout
-	stage.right_style = contender.style
 	var cards := _row(content)
 	var regular := _card(cards)
 	_fill(regular.get_parent())
@@ -624,7 +668,7 @@ func show_arena() -> void:
 	var tournament := _card(cards)
 	_fill(tournament.get_parent())
 	_title(tournament, "Tournament", 20)
-	var winner_label := "Champion of both arenas" if game.state.complete else (
+	var winner_label := "League champion" if game.state.complete else (
 		"Bout %d of %d   ·   %s" % [int(game.state.tournament) + 1, arena.tournament.size(), game.next_opponent(true).name]
 		if game.can_tournament() else "Opens at level %d" % arena.cap)
 	_label(tournament, winner_label, 14, SAND)
@@ -632,10 +676,8 @@ func show_arena() -> void:
 	tournament_button.disabled = not game.can_tournament()
 	var nav := _row(content)
 	_button(nav, "Town square", show_town)
-	if not game.state.snapshot.is_empty():
-		if game.state.outcome.is_empty():
-			_button(nav, "Restart open bout", _retry.bind(false))
-		elif game.state.outcome.winner == 0:
+	if not game.state.outcome.is_empty():
+		if game.state.outcome.winner == 0:
 			_button(nav, "Practice last bout", _retry.bind(true))
 		else:
 			_button(nav, "Retry last bout", _retry.bind(false))
@@ -646,94 +688,82 @@ func _new_bout(tournament: bool) -> void:
 		_open_bout(snapshot, false)
 
 func _retry(practice: bool) -> void:
-	_open_bout(game.state.snapshot, practice)
+	if game.state.pending:
+		_allocate_level()
+	elif game.retry_bout(practice):
+		_open_bout(game.state.snapshot, practice)
 
 func _open_bout(snapshot: Dictionary, practice: bool) -> void:
-	bout = Duel.new(data, snapshot.fighters[0], snapshot.fighters[1], int(snapshot.seed))
+	if game.state.pending:
+		_allocate_level()
+		return
+	bout = game.open_bout(snapshot)
+	if bout == null:
+		notification = "The saved bout could not be resumed."
+		show_menu()
+		return
 	practicing = practice
 	bout_result = {}
-	fight_locked = false
+	fight_locked = bout.active != 0
 	fight_generation += 1
-	var title: String = data.arenas[int(snapshot.arena)].name
-	_page("battle", title, "Practice duel" if practice else ("Tournament bout" if snapshot.tournament else "Regular bout"))
-	var status := _row(content, 9)
-	player_status = _card(status, 3)
-	opponent_status = _card(status, 3)
-	_fill(player_status.get_parent())
-	_fill(opponent_status.get_parent())
-	battle_stage = _stage(content, "battle", 220)
+	current_screen = "battle"
+	shell.hide()
+	battle_layer = Control.new()
+	add_child(battle_layer)
+	battle_layer.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	battle_stage = _stage(battle_layer, "battle", 0)
+	battle_stage.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	battle_stage.full_arena = true
 	battle_stage.arena = int(snapshot.arena)
-	battle_stage.arena_width = int(data.rules.arena_size)
+	battle_stage.arena_width = int(bout.rules.arena_size)
+	battle_stage.bout_items = snapshot.equipment
 	battle_stage.left_loadout = bout.fighters[0].loadout
 	battle_stage.right_loadout = bout.fighters[1].loadout
-	battle_stage.right_style = bout.fighters[1].style
-	fight_heading = _label(content, "", 17, SAND)
-	var box := GridContainer.new()
-	box.columns = 5
-	content.add_child(box)
-	_fill(box)
-	box.add_theme_constant_override("h_separation", 6)
-	box.add_theme_constant_override("v_separation", 6)
-	action_buttons.clear()
-	for action in Duel.ACTIONS:
-		var button := _button(box, Duel.LABELS[action], _player_action.bind(action))
-		_fill(button)
-		button.custom_minimum_size.y = 37
-		action_buttons[action] = button
-	var log_panel := _card(content)
-	fight_log = RichTextLabel.new()
-	fight_log.fit_content = false
-	fight_log.scroll_following = true
-	fight_log.custom_minimum_size.y = 58
-	log_panel.add_child(fight_log)
-	fight_log.add_text("Bout opens. Choose your move.")
-	var bottom := _row(content)
-	_button(bottom, "Leave bout", _leave_bout)
-	_space(bottom)
-	_label(bottom, "Seed %s" % snapshot.seed, 13, MUTED)
+	battle_hud = BattleHud.new()
+	battle_layer.add_child(battle_hud)
+	battle_hud.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	battle_hud.build(snapshot.arena_name, snapshot.seed, serif)
+	battle_hud.action_selected.connect(_player_action)
+	battle_hud.window_toggled.connect(_toggle_battle_window)
+	battle_hud.sound_toggled.connect(_toggle_battle_sound)
+	battle_hud.resized.connect(_place_battle_actions)
+	if not bout.history.is_empty():
+		battle_hud.event_label.text = bout.history.back().message
+	window_mode_before_bout = get_window().mode
+	if (DisplayServer.get_name() != "headless" and fullscreen_bouts
+			and window_mode_before_bout not in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]):
+		get_window().mode = Window.MODE_FULLSCREEN
+	_refresh_battle_settings()
 	_refresh_battle()
-
-func _fighter_status(panel: VBoxContainer, fighter: Dictionary) -> void:
-	_clear(panel)
-	_title(panel, fighter.name, 19)
-	var attributes := _row(panel, 10)
-	for status in [["hp", "max_hp", "Health", RED], ["armor", "max_armor", "Armor", SAND], ["energy", "max_energy", "Stamina", GREEN]]:
-		var column := _column(attributes, 2)
-		_fill(column)
-		_label(column, "%s  %d / %d" % [status[2], fighter[status[0]], fighter[status[1]]], 13, status[3])
-		var meter := ProgressBar.new()
-		meter.show_percentage = false
-		meter.custom_minimum_size.y = 6
-		meter.max_value = maxi(1, int(fighter[status[1]]))
-		meter.value = fighter[status[0]]
-		meter.add_theme_stylebox_override("background", _style(BG, BORDER, 2))
-		meter.add_theme_stylebox_override("fill", _style(status[3], status[3], 2))
-		column.add_child(meter)
+	if bout.active == 1:
+		_play_opponent_turn(fight_generation)
 
 func _refresh_battle() -> void:
-	_fighter_status(player_status, bout.fighters[0])
-	_fighter_status(opponent_status, bout.fighters[1])
 	battle_stage.positions = bout.positions.duplicate()
 	battle_stage.queue_redraw()
-	var side: String = "Your turn" if bout.active == 0 else bout.fighters[1].name + " takes a turn"
-	fight_heading.text = "%s   ·   Distance %d" % [side, bout.distance()]
-	for action in Duel.ACTIONS:
-		var button: Button = action_buttons[action]
-		var why: String = bout.reason(action) if bout.active == 0 else "Opponent's turn"
-		var title: String = Duel.LABELS[action]
-		if action == "cast" and not bout.fighters[0].spell.is_empty():
-			title = "%s (%d)" % [bout.fighters[0].spell.name, bout.fighters[0].casts]
-		button.disabled = fight_locked or not why.is_empty()
-		var description := why if not why.is_empty() else ("%d stamina" % bout.cost(action, 0) if bout.cost(action, 0) > 0 else "")
-		if why.is_empty() and action in ["attack", "cast"]:
-			description += " · %d%% hit" % roundi(bout.chance(action) * 100)
-		button.text = title if description.is_empty() else title + "\n" + description
-		button.tooltip_text = why
+	battle_hud.refresh(bout, fight_locked)
+	battle_hud.save_notice.text = game.save_error
+	battle_hud.save_notice.visible = not game.save_error.is_empty()
+	_place_battle_actions()
 
-func _leave_bout() -> void:
-	fight_generation += 1
-	sound.stop()
-	show_arena()
+func _place_battle_actions() -> void:
+	battle_hud.place_actions(battle_stage.fighter_feet(0), battle_stage.fighter_height())
+
+func _refresh_battle_settings() -> void:
+	var mode := get_window().mode
+	battle_hud.window_button.text = "Windowed" if mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN] else "Full screen"
+	battle_hud.sound_button.text = "Sound on" if sound.enabled else "Sound off"
+
+func _toggle_battle_window() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	fullscreen_bouts = get_window().mode not in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
+	get_window().mode = Window.MODE_FULLSCREEN if fullscreen_bouts else Window.MODE_WINDOWED
+	_refresh_battle_settings()
+
+func _toggle_battle_sound() -> void:
+	sound.toggle()
+	_refresh_battle_settings()
 
 func _player_action(action: String) -> void:
 	if fight_locked or bout.active != 0 or not bout.reason(action).is_empty():
@@ -746,6 +776,9 @@ func _player_action(action: String) -> void:
 	if bout.winner != -2:
 		_finish_bout()
 		return
+	await _play_opponent_turn(generation)
+
+func _play_opponent_turn(generation: int) -> void:
 	var choice: String = bout.choose(bout.fighters[1].style)
 	await _animate_turn(bout.act(choice), generation)
 	if current_screen != "battle" or generation != fight_generation:
@@ -757,28 +790,25 @@ func _player_action(action: String) -> void:
 	_refresh_battle()
 
 func _animate_turn(event: Dictionary, generation: int) -> void:
-	if bout.winner != -2 and bout_result.is_empty():
-		bout_result = game.settle(bout.winner, practicing)
-	for button: Button in action_buttons.values():
-		button.disabled = true
+	bout_result = game.record_turn(event.action, bout.winner)
+	battle_hud.action_layer.hide()
 	var fighter: Dictionary = bout.fighters[event.side]
-	fight_heading.text = "%s   ·   %s" % [fighter.name, event.title]
+	battle_hud.turn_label.text = "%s   ·   %s" % [fighter.name, event.title]
 	battle_stage.animate(event)
 	sound.begin_turn(event, int(fighter.spell.get("art", 0)))
 	await get_tree().create_timer(Stage.IMPACT_TIME).timeout
 	if current_screen != "battle" or generation != fight_generation:
 		return
 	sound.impact(event, int(fighter.weapon.get("art", 0)))
-	fight_log.add_text("\n%02d   %s" % [event.turn, event.message])
+	battle_hud.event_label.text = event.message
 	_refresh_battle()
 	await get_tree().create_timer(Stage.ACTION_TIME - Stage.IMPACT_TIME).timeout
 
 func _finish_bout() -> void:
 	var snapshot: Dictionary = game.state.snapshot.duplicate(true)
-	var outcome: Dictionary = game.settle(bout.winner, practicing) if bout_result.is_empty() else bout_result
-	var title := "Victory" if bout.winner == 0 else "Draw" if bout.winner == -1 else "Defeat"
-	if bout.winner != -1:
-		sound.play("victory" if bout.winner == 0 else "defeat")
+	var outcome := bout_result
+	var title := "Victory" if bout.winner == 0 else "Defeat"
+	sound.play("victory" if bout.winner == 0 else "defeat")
 	_page("result", title, "Practice result" if practicing else snapshot.opponent)
 	var card := _card(content)
 	_title(card, "Bout results", 22)
@@ -786,9 +816,9 @@ func _finish_bout() -> void:
 		_label(card, "+%d gold    +%d XP" % [outcome.gold, outcome.xp], 19, SAND)
 		_show_progress(card)
 	if outcome.get("unlocked", false):
-		_wrapped(card, "You won the tournament. The Iron Court is open.", 17, GREEN)
+		_wrapped(card, "You won the tournament. %s is open." % game.arena().name, 17, GREEN)
 	if outcome.get("complete", false) and bout.winner == 0:
-		_wrapped(card, "You won both tournaments. You're the Cinder League champion.", 17, GREEN)
+		_wrapped(card, "You won the final tournament. You're the Cinder League champion.", 17, GREEN)
 	if not bout.history.is_empty():
 		var messages := RichTextLabel.new()
 		messages.custom_minimum_size.y = 240
@@ -822,11 +852,11 @@ func _styles(parent: Node, label: String, initial: int) -> OptionButton:
 	return selector
 
 func show_simulator() -> void:
-	_page("simulator", "Simulator", "Run a seeded matchup or test how a build progresses through both arenas.")
+	_page("simulator", "Simulator", "Run a seeded matchup or test how a build progresses through the campaign.")
 	var buttons := _row(content, 9)
 	var left := _styles(buttons, "Fighter", 0)
 	var right := _styles(buttons, "Opponent", 2)
-	var level := _number(buttons, "Level", 1, 8, 4)
+	var level := _number(buttons, "Level", 1, data.max_level(), int(data.rules.arena_caps.front()))
 	var seeds := _number(buttons, "Seed", 0, 99999999, 42)
 	var runs := _number(buttons, "Bouts", 1, 500, 20)
 	var actions := _row(content)
@@ -850,7 +880,7 @@ func _simulate(left: OptionButton, right: OptionButton, level: SpinBox, seeds: S
 	if result.has("error"):
 		lines.append(result.error)
 	elif campaign:
-		var status := "Both tournaments won" if result.complete else "Run ended at the bout limit"
+		var status := "All tournaments won" if result.complete else "Run ended at the bout limit"
 		lines.append("%s  ·  Level %d  ·  Arena %d" % [status, result.level, result.arena])
 		for entry in result.bouts:
 			var bout_status := "win" if entry.winner == 0 else "draw" if entry.winner == -1 else "loss"

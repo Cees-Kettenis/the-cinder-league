@@ -1,12 +1,12 @@
 extends Control
 
 const GEAR = preload("res://art/gear.png")
+const GLADIATOR = preload("res://art/gladiator-base.png")
 const TRIM = preload("res://art/try-on.png")
 const MAIL = preload("res://art/mail.png")
 const ARENAS = preload("res://art/arenas.png")
 const MOTION = preload("res://art/motion.png")
 const MAIL_MOTION = preload("res://art/motion-mail.png")
-const MAGE_MOTION = preload("res://art/motion-mage.png")
 const SPELLS = preload("res://art/spells.png")
 const TOWN = preload("res://art/town.png")
 const STOCK = preload("res://art/stock.png")
@@ -17,21 +17,33 @@ const POSE_PIVOT := [230.0, 228.0, 218.0, 174.0, 226.0, 175.0, 218.0, 212.0]
 const POSE_FLOOR := [419.0, 419.0, 419.0, 419.0, 420.0, 439.0, 439.0, 440.0]
 const ACTION_TIME := .66
 const IMPACT_TIME := .29
+const KIT_SIZE := Vector2(768, 1024)
+const BASE_SIZE := Vector2(1024, 1536)
+const BASE_SCALE := Vector2(2.0 / 3.0, 2.0 / 3.0)
+const BASE_ORIGIN := Vector2(-341, -1024)
+const GRIP := Vector2(855, 649)
+const SKIN_TINTS := [Color.WHITE, Color(1.12, 1.09, 1.08), Color("#d2ad94"), Color("#a57862")]
+const HAIR_TINTS := [Color.WHITE, Color(1.23, .86, .65), Color(.95, 1.05, 1.25)]
+const SKIN_MASKS := [
+	[Vector2(.441,.093),Vector2(.513,.084),Vector2(.563,.068),Vector2(.627,.094),Vector2(.624,.171),Vector2(.583,.205),Vector2(.555,.227),Vector2(.472,.198),Vector2(.390,.175),Vector2(.427,.129)],
+	[Vector2(.175,.273),Vector2(.244,.273),Vector2(.339,.315),Vector2(.299,.364),Vector2(.264,.370),Vector2(.264,.446),Vector2(.229,.497),Vector2(.279,.522),Vector2(.270,.587),Vector2(.130,.587),Vector2(.126,.397)],
+	[Vector2(.612,.336),Vector2(.689,.313),Vector2(.728,.347),Vector2(.816,.375),Vector2(.940,.373),Vector2(.940,.482),Vector2(.766,.472),Vector2(.649,.429)],
+]
+const HAIR_MASK := [Vector2(.338,.009),Vector2(.649,.009),Vector2(.649,.089),Vector2(.596,.093),Vector2(.566,.064),Vector2(.520,.087),Vector2(.497,.106),Vector2(.458,.103),Vector2(.434,.095),Vector2(.436,.125),Vector2(.469,.140),Vector2(.419,.159),Vector2(.365,.171),Vector2(.338,.158)]
+const SWORD_MASK := [Vector2(.724,.377),Vector2(.744,.363),Vector2(.762,.381),Vector2(.864,.252),Vector2(.977,.202),Vector2(.969,.223),Vector2(.802,.411),Vector2(.830,.425),Vector2(.824,.441),Vector2(.799,.444),Vector2(.741,.414)]
+const MACE_MASK := [Vector2(.744,.400),Vector2(.832,.288),Vector2(.842,.267),Vector2(.830,.242),Vector2(.856,.229),Vector2(.864,.208),Vector2(.892,.214),Vector2(.928,.203),Vector2(.945,.226),Vector2(.963,.240),Vector2(.953,.260),Vector2(.955,.277),Vector2(.930,.282),Vector2(.917,.301),Vector2(.893,.291),Vector2(.781,.423)]
 const MASKS := {
-	"base": [Vector2(0,0),Vector2(1,0),Vector2(1,.27),Vector2(.93,.34),Vector2(.93,1),Vector2(0,1)],
 	"helmet": [Vector2(.30,0),Vector2(.63,0),Vector2(.62,.09),Vector2(.51,.10),Vector2(.48,.17),Vector2(.39,.18),Vector2(.32,.14)],
-	"chest": [Vector2(.08,.23),Vector2(.19,.17),Vector2(.40,.17),Vector2(.46,.22),Vector2(.57,.22),Vector2(.67,.32),Vector2(.59,.37),Vector2(.57,.49),Vector2(.69,.62),Vector2(.61,.66),Vector2(.37,.60),Vector2(.35,.34),Vector2(.14,.35)],
-	"pants": [Vector2(.36,.56),Vector2(.59,.54),Vector2(.67,.65),Vector2(.66,.76),Vector2(.54,.81),Vector2(.46,.78),Vector2(.48,.67),Vector2(.36,.68),Vector2(.25,.83),Vector2(.10,.83),Vector2(.09,.72),Vector2(.31,.68)],
+	"chest": [Vector2(.123,.25),Vector2(.173,.203),Vector2(.30,.173),Vector2(.405,.170),Vector2(.47,.221),Vector2(.565,.216),Vector2(.629,.258),Vector2(.655,.307),Vector2(.593,.356),Vector2(.55,.387),Vector2(.543,.453),Vector2(.605,.489),Vector2(.66,.562),Vector2(.663,.622),Vector2(.587,.645),Vector2(.391,.64),Vector2(.399,.527),Vector2(.384,.436),Vector2(.352,.351),Vector2(.223,.331),Vector2(.143,.329)],
+	"pants": [Vector2(.336,.646),Vector2(.494,.564),Vector2(.615,.55),Vector2(.663,.69),Vector2(.66,.761),Vector2(.577,.794),Vector2(.465,.788),Vector2(.441,.761),Vector2(.478,.667),Vector2(.384,.685),Vector2(.273,.795),Vector2(.116,.794),Vector2(.089,.722),Vector2(.171,.690),Vector2(.285,.689)],
 	"shoe_left": [Vector2(.105,.75),Vector2(.24,.785),Vector2(.22,.89),Vector2(.245,1),Vector2(.03,1),Vector2(.03,.91),Vector2(.085,.86)],
 	"shoe_right": [Vector2(.455,.76),Vector2(.65,.75),Vector2(.67,.85),Vector2(.77,.91),Vector2(.79,1),Vector2(.46,1),Vector2(.445,.91)],
-	"face": [Vector2(.515,.108),Vector2(.557,.109),Vector2(.558,.132),Vector2(.575,.149),Vector2(.55,.155),Vector2(.552,.176),Vector2(.53,.193),Vector2(.49,.176),Vector2(.46,.153),Vector2(.477,.124)],
-	"hair": [Vector2(.564,.095),Vector2(.585,.103),Vector2(.563,.132),Vector2(.549,.129),Vector2(.535,.117),Vector2(.515,.12),Vector2(.504,.13),Vector2(.484,.117),Vector2(.507,.101),Vector2(.545,.096)],
 }
 var kind := "town"
 var data: RefCounted
+var bout_items: Dictionary = {}
 var left_loadout: Dictionary = {}
 var right_loadout: Dictionary = {}
-var right_style := ""
 var skin := 0
 var hair := 0
 var arena := 0
@@ -42,11 +54,16 @@ var event: Dictionary = {}
 var elapsed := 0.0
 var spell_art := 0
 var demo := false
+var full_arena := false
+var shield_mask: Array[Vector2] = []
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	resized.connect(queue_redraw)
+	for point in 36:
+		var angle := TAU * point / 36.0
+		shield_mask.append(Vector2(.199 + cos(angle) * .195, .507 + sin(angle) * .181))
 
 func _process(delta: float) -> void:
 	if kind == "town" or demo or (not event.is_empty() and elapsed <= ACTION_TIME):
@@ -71,13 +88,13 @@ func _draw() -> void:
 			_avatar(Vector2(size.x * .5, size.y * .96), minf(size.y * .89, size.x * 1.25), left_loadout, false, skin, hair)
 		"battle":
 			var half := ARENAS.get_height() * .5
-			_cover(ARENAS, Rect2(0, arena * half + 2, ARENAS.get_width(), half - 4))
+			_cover(ARENAS, Rect2(0, mini(arena, 1) * half + 2, ARENAS.get_width(), half - 4))
 			_draw_battle()
 		"spell":
 			_avatar(Vector2(size.x * .24, size.y * .9), size.y * .63, left_loadout, false, skin, hair)
 			_draw_spell(Vector2(size.x * .32, size.y * .60), Vector2(size.x * .70, size.y * .81), spell_art, fmod(elapsed, 1.9) / 1.9)
 		"weapon":
-			var item: Dictionary = data.items.get(left_loadout.get("weapon", ""), {})
+			var item := _item(left_loadout.get("weapon", ""))
 			draw_texture_rect_region(STOCK, Rect2(size * .16, size * .68), _cell(STOCK, 3, 2, int(item.get("art", 0))), Color.WHITE)
 
 func _cover(texture: Texture2D, region: Rect2) -> void:
@@ -94,60 +111,74 @@ func _cover(texture: Texture2D, region: Rect2) -> void:
 		crop.position.x += (region.size.x - crop.size.x) * .5
 	draw_texture_rect_region(texture, Rect2(Vector2.ZERO, size), crop)
 
-func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0, lean: float = 0.0) -> void:
+func _item(id: String) -> Dictionary:
+	var catalog: Dictionary = data.items if bout_items.is_empty() else bout_items
+	return catalog.get(id, {})
+
+func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0, lean: float = 0.0, swing: float = 0.0) -> void:
 	if height <= 0:
 		return
 	var scale_value := height / 1024.0
 	draw_set_transform(feet, -lean if facing_left else lean, Vector2(-scale_value if facing_left else scale_value, scale_value))
-	var top_left := Vector2(-310, -1024)
-	var weapon: Dictionary = data.items.get(gear.get("weapon", ""), {})
-	var holds_mace := int(weapon.get("art", 0)) == 1
-	var base: Array = MASKS.base
-	if holds_mace:
-		base = [Vector2(0,0),Vector2(.72,0),Vector2(.73,.37),Vector2(.79,.42),
-			Vector2(.80,.50),Vector2(.67,.54),Vector2(.69,1),Vector2(0,1)]
-	_mesh(GEAR, top_left, base)
+	_draw_weapon(gear, swing)
+	draw_texture_rect(GLADIATOR, Rect2(BASE_ORIGIN, BASE_SIZE * BASE_SCALE), false)
+	if skin_index > 0:
+		for mask: Array in SKIN_MASKS:
+			_mesh(GLADIATOR, mask, BASE_SIZE, BASE_ORIGIN, BASE_SCALE, SKIN_TINTS[skin_index])
+	if hair_index > 0:
+		_mesh(GLADIATOR, HAIR_MASK, BASE_SIZE, BASE_ORIGIN, BASE_SCALE, HAIR_TINTS[hair_index])
 	var armor: Dictionary = gear.get("armor", {})
 	for slot in ["pants", "shoes", "chest", "helmet", "shield"]:
-		var item: Dictionary = data.items.get(armor.get(slot, ""), {})
+		var item := _item(armor.get(slot, ""))
+		if item.is_empty():
+			continue
 		var tier := int(item.get("tier", 0))
 		var texture := MAIL if tier >= 2 else (TRIM if tier == 1 else GEAR)
-		var tint := Color("#928676") if item.is_empty() and not gear.is_empty() else Color.WHITE
-		if slot == "shield":
-			var oval: Array[Vector2] = []
-			for point in 30:
-				var theta := TAU * point / 30.0
-				oval.append(Vector2(.199 + cos(theta) * .195, .507 + sin(theta) * .182))
-			_mesh(texture, top_left, oval, tint)
-		elif slot == "shoes":
-			_mesh(texture, top_left, MASKS.shoe_left, tint)
-			_mesh(texture, top_left, MASKS.shoe_right, tint)
-		else:
-			_mesh(texture, top_left, MASKS[slot], tint)
-	if holds_mace:
-		_mesh(MAIL, top_left, [Vector2(.67,.48),Vector2(.71,.35),Vector2(.80,.18),Vector2(.99,.18),
-			Vector2(.99,.29),Vector2(.86,.37),Vector2(.8,.51),Vector2(.67,.53)])
-	if not str(gear.get("enchant", "")).is_empty():
-		_weapon_glow(Vector2(334, -680), 52.0, .6 + sin(elapsed * 4.0) * .12)
-	if skin_index > 0:
-		var tones := [Color.WHITE, Color("#e8bb9c"), Color("#c89270"), Color("#a57862")]
-		_mesh(GEAR, top_left, MASKS.face, tones[clampi(skin_index, 0, tones.size() - 1)])
-	if hair_index > 0:
-		var hues := [Color.WHITE, Color("#d28b62"), Color("#cfd2df")]
-		_mesh(GEAR, top_left, MASKS.hair, hues[clampi(hair_index, 0, hues.size() - 1)])
+		match slot:
+			"helmet": _mesh(texture, MASKS.helmet, KIT_SIZE, Vector2(-359, -1010))
+			"chest": _mesh(texture, MASKS.chest, KIT_SIZE, Vector2(-296, -1034), Vector2(.89, .99))
+			"pants": _mesh(texture, MASKS.pants, KIT_SIZE, Vector2(-307, -975))
+			"shoes":
+				_mesh(texture, MASKS.shoe_left, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68))
+				_mesh(texture, MASKS.shoe_right, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68))
+			"shield": _mesh(texture, shield_mask, KIT_SIZE, Vector2(-319, -1029))
 	draw_set_transform(Vector2.ZERO)
 
-func _mesh(texture: Texture2D, origin: Vector2, mask: Array, tint: Color = Color.WHITE) -> void:
+func _draw_weapon(gear: Dictionary, swing: float) -> void:
+	var weapon := _item(gear.get("weapon", ""))
+	if weapon.is_empty():
+		return
+	var mace := int(weapon.art) == 1
+	var grip := BASE_ORIGIN + GRIP * BASE_SCALE
+	var source_grip := Vector2(551, 459)
+	var origin := grip - source_grip.rotated(swing)
+	_mesh(MAIL if mace else GEAR, MACE_MASK if mace else SWORD_MASK, KIT_SIZE, origin, Vector2.ONE, Color.WHITE, swing)
+	if not str(gear.get("enchant", "")).is_empty():
+		var edge := grip + Vector2(141, -177).rotated(swing)
+		_weapon_glow(edge, 52.0, .6 + sin(elapsed * 4.0) * .12)
+
+func _mesh(texture: Texture2D, mask: Array, source_size: Vector2, origin: Vector2, stretch: Vector2 = Vector2.ONE, tint: Color = Color.WHITE, angle: float = 0.0) -> void:
 	var vertices := PackedVector2Array()
 	var uv := PackedVector2Array()
+	var texture_size := texture.get_size()
 	for point: Vector2 in mask:
-		vertices.append(origin + Vector2(point.x * 768, point.y * 1024))
-		uv.append(Vector2(point.x * .5, point.y))
+		var pixel := point * source_size
+		vertices.append(origin + (pixel * stretch).rotated(angle))
+		uv.append(pixel / texture_size)
 	draw_polygon(vertices, PackedColorArray([tint]), uv, texture)
+
+func fighter_height() -> float:
+	return minf(size.y * .34, size.x * .255) if full_arena else minf(size.y * .76, size.x * .265)
+
+func fighter_feet(index: int) -> Vector2:
+	return _feet_at(float(positions[index]))
+
+func _feet_at(position: float) -> Vector2:
+	return Vector2(size.x * (.15 + .70 * position / arena_width), size.y * (.73 if full_arena else .88))
 
 func _draw_battle() -> void:
 	var feet: Array[Vector2] = []
-	var height := minf(size.y * .76, size.x * .265)
+	var height := fighter_height()
 	var side := int(event.get("side", -1))
 	var action := str(event.get("action", ""))
 	var phase := clampf(elapsed / ACTION_TIME, 0, 1)
@@ -157,40 +188,54 @@ func _draw_battle() -> void:
 		var distance := float(positions[index])
 		if animating and previous_positions.size() == 2:
 			distance = lerpf(float(previous_positions[index]), distance, shift)
-		var x := size.x * (.15 + .70 * distance / arena_width)
-		var foot := Vector2(x, size.y * .88)
+		var foot := _feet_at(distance)
 		feet.append(foot)
 		draw_set_transform(foot + Vector2(height * .06, height * .008), 0.0, Vector2(1, .24))
 		draw_circle(Vector2.ZERO, height * .24, Color(0.08, 0.07, 0.055, .26))
 		draw_set_transform(Vector2.ZERO)
+	if full_arena and not animating:
+		var marker := feet[0] + Vector2(0, 7)
+		draw_set_transform(marker, 0.0, Vector2(1, .24))
+		draw_arc(Vector2.ZERO, height * .24, 0, TAU, 40, Color(1.0, .75, .42, .8), 2.5, true)
+		draw_set_transform(Vector2.ZERO)
 	for index in 2:
 		var loadout := left_loadout if index == 0 else right_loadout
 		_draw_fighter(feet[index], height, loadout, index, side, action, phase)
-	if action == "cast" and animating and not event.get("miss", false):
-		var attack_art: int = int(data.items.get((left_loadout if side == 0 else right_loadout).get("spell", ""), {}).get("art", 0))
-		_draw_spell(feet[side] - Vector2(0, height * .58), feet[1 - side], attack_art, phase, side == 1)
+	if action == "cast" and animating:
+		var kit := left_loadout if side == 0 else right_loadout
+		var attack_art := int(_item(kit.get("spell", "")).get("art", 0))
+		var target := feet[1 - side]
+		if event.miss:
+			target.x += height * (.52 if side == 0 else -.52)
+		_draw_spell(feet[side] - Vector2(0, height * .58), target, attack_art, phase, side == 1)
 	if animating and elapsed >= IMPACT_TIME:
 		_draw_impact(feet, height, side, phase)
 
-func _motion_atlas(loadout: Dictionary, side: int) -> Texture2D:
-	if side == 1 and right_style == "mage":
-		return MAGE_MOTION
-	var chest: Dictionary = data.items.get(loadout.get("armor", {}).get("chest", ""), {})
-	var weapon: Dictionary = data.items.get(loadout.get("weapon", ""), {})
-	var tier := int(chest.get("tier", 0))
-	var mace := int(weapon.get("art", 0)) == 1
-	if tier >= 2 and mace:
-		return MAIL_MOTION
-	if tier == 0 and not mace:
-		return MOTION
-	return null
+func _motion_atlas(loadout: Dictionary, skin_index: int, hair_index: int) -> Texture2D:
+	if skin_index != 0 or hair_index != 0 or not str(loadout.get("enchant", "")).is_empty():
+		return null
+	var weapon: String = loadout.get("weapon", "")
+	if weapon not in ["sword", "mace"]:
+		return null
+	var mace := weapon == "mace"
+	if int(_item(weapon).get("art", -1)) != int(mace):
+		return null
+	var prefix := "mail_" if mace else "leather_"
+	var armor: Dictionary = loadout.get("armor", {})
+	for slot in ["pants", "shoes", "chest", "helmet", "shield"]:
+		if armor.get(slot, "") != prefix + slot or int(_item(prefix + slot).get("tier", -1)) != (2 if mace else 0):
+			return null
+	return MAIL_MOTION if mace else MOTION
 
 func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int, actor: int, action: String, phase: float) -> void:
-	var motion := _motion_atlas(loadout, index)
+	var skin_index := skin if index == 0 else 0
+	var hair_index := hair if index == 0 else 0
+	var motion := _motion_atlas(loadout, skin_index, hair_index)
 	var facing_left := index == 1
 	var direction := -1.0 if facing_left else 1.0
 	var lean := 0.0
-	var pose := 0 if index == 1 and motion in [MAGE_MOTION, MAIL_MOTION] else -1
+	var pose := 0
+	var swing := 0.0
 	if actor == index and phase < 1:
 		match action:
 			"attack": pose = 1 if phase < .37 else 2
@@ -209,17 +254,16 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			lean = sin(phase * PI) * (-.16 if action in ["guard", "sleep"] else .12)
 			if action == "sleep":
 				height *= .83
-		if action == "attack" and pose == 2 and not str(loadout.get("enchant", "")).is_empty():
-			var glow := feet + Vector2(height * .6 * direction, -height * .65)
-			_weapon_glow(glow, height * .14, 1.0 - phase * .58)
+			if action == "attack":
+				swing = lerpf(-.8, .9, smoothstep(.14, .64, phase)) * sin(phase * PI)
 	elif actor >= 0 and phase < 1 and elapsed >= IMPACT_TIME and event.damage + event.armor_hit > 0:
 		var recoil := sin((phase - IMPACT_TIME / ACTION_TIME) * TAU) * height * .085
 		feet.x -= recoil * direction
 		lean = -.09 * recoil / maxf(1.0, height * .085)
-	if motion != null and pose >= 0:
+	if motion != null:
 		_pose(motion, feet, height, pose, facing_left)
 	else:
-		_avatar(feet, height, loadout, facing_left, skin if index == 0 else 2, hair if index == 0 else 1, lean)
+		_avatar(feet, height, loadout, facing_left, skin_index, hair_index, lean, swing)
 
 func _draw_impact(feet: Array[Vector2], height: float, side: int, phase: float) -> void:
 	var message := ""

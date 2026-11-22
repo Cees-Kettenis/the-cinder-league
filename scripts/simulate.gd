@@ -37,7 +37,8 @@ func _initialize() -> void:
 		options = read
 	var seed_value := int(args.get("seed", 42))
 	var result := simulator.campaign(left, seed_value, clampi(int(args.get("bouts", 40)), 1, 10000)) if args.has("campaign") else simulator.batch(
-		left, right, clampi(int(args.get("level", 4)), 1, 8), seed_value, clampi(int(args.get("bouts", 10)), 1, 10000), options
+		left, right, clampi(int(args.get("level", data.rules.arena_caps.front())), 1, data.max_level()),
+		seed_value, clampi(int(args.get("bouts", 10)), 1, 10000), options
 	)
 	print(JSON.stringify(result, "  "))
 	quit(1 if result.has("error") else 0)

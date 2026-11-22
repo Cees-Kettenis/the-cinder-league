@@ -24,6 +24,9 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	for section in ["rules", "moves", "distances", "items", "arenas"]:
 		if not profile.has(section) or typeof(profile[section]) != typeof(reference[section]):
 			return "Missing or invalid balance section: " + section
+	for key in ["spell_close_penalty", "crit_power_cap"]:
+		if not profile.rules.has(key):
+			profile.rules[key] = reference.rules[key]
 	for section in ["rules", "moves", "distances"]:
 		for key in reference[section]:
 			if not profile[section].has(key) or typeof(profile[section][key]) != typeof(reference[section][key]):
@@ -33,8 +36,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	rules = profile.rules
 	moves = profile.moves
 	distances = profile.distances
-	if rules.arena_caps != [4.0, 8.0] or profile.arenas.size() != 2 or rules.xp_levels.size() != 8:
-		return "The playtest requires two arenas and level thresholds for levels 1–8."
+	if rules.arena_caps != reference.rules.arena_caps or profile.arenas.size() != reference.arenas.size() or rules.xp_levels.size() != max_level():
+		return "Keep the bundled arena gates and provide an XP threshold for each level through %d." % int(reference.rules.arena_caps.back())
 	var previous_xp := -1
 	for xp in rules.xp_levels:
 		if not xp is float or xp <= previous_xp:
@@ -42,6 +45,13 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		previous_xp = int(xp)
 	if rules.base_health < 1 or rules.base_energy < 1 or rules.arena_size < 5 or rules.turn_limit < 2 or rules.minimum_hit > rules.maximum_hit:
 		return "Check starting resources, arena size, turn limit, and hit chance limits."
+	if moves.sleep != 0 or rules.base_rest < 1:
+		return "Sleep must be free and restore at least 1 stamina."
+	if rules.crit_power_cap < 1 or rules.maximum_hit > 1 or rules.spell_close_penalty > 1:
+		return "Check the critical multiplier cap and hit probabilities."
+	for move in ["advance", "retreat", "jump"]:
+		if distances[move] < 1 or distances[move] != floor(distances[move]):
+			return "Movement distances must be positive whole numbers."
 	var item_types := {}
 	for item in reference.items:
 		item_types[item.kind] = item
@@ -77,6 +87,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		var arena = arenas[index]
 		if not arena is Dictionary:
 			return "Arena must be an object."
+		if not arena.has("opponent_gear_level"):
+			arena.opponent_gear_level = reference.arenas[index].opponent_gear_level
 		for field in reference.arenas[index]:
 			if not arena.has(field) or typeof(arena[field]) != typeof(reference.arenas[index][field]):
 				return "Missing or invalid arena field: " + field
@@ -86,9 +98,16 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			for fighter in arena[field]:
 				if not fighter is Dictionary or not fighter.get("name") is String or not fighter.get("style") is String:
 					return "Every opponent needs a name and style."
-		if arena.cap != rules.arena_caps[index] or arena.xp <= 0 or arena.gold < 0:
+				if fighter.has("armor_level") and (not fighter.armor_level is float or fighter.armor_level < 1 or fighter.armor_level != floor(fighter.armor_level)):
+					return "Opponent armor level must be a positive whole number."
+				if fighter.has("point_multiplier") and (not fighter.point_multiplier is float or fighter.point_multiplier <= 0):
+					return "Opponent point multiplier must be positive."
+		if arena.cap != rules.arena_caps[index] or arena.xp <= 0 or arena.gold < 0 or arena.opponent_gear_level < 1:
 			return "An arena has invalid progression or rewards."
 	return ""
+
+func max_level() -> int:
+	return int(rules.arena_caps.back())
 
 func stats_empty() -> Dictionary:
 	var stats := {}
@@ -128,7 +147,7 @@ func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String
 		"guarding": false, "exposed": false, "provoked": false,
 	}
 
-func build_stats(style: String, points: int) -> Dictionary:
+func build_stats(style: String, points: int, offset: int = 0) -> Dictionary:
 	var stats := stats_empty()
 	var patterns := {
 		"weapon": ["Strength", "Vitality", "Stamina", "Attack", "Defence"],
@@ -142,12 +161,14 @@ func build_stats(style: String, points: int) -> Dictionary:
 	}
 	var pattern: Array = patterns.get(style, patterns.weapon)
 	for index in points:
-		stats[pattern[index % pattern.size()]] += 1
+		stats[pattern[(offset + index) % pattern.size()]] += 1
 	return stats
 
-func eligible_loadout(level: int, stats: Dictionary, style: String) -> Dictionary:
+func eligible_loadout(level: int, stats: Dictionary, style: String, armor_level: int = -1) -> Dictionary:
 	var loadout := {"weapon": rules.starter_weapon, "armor": {}, "spell": "", "potion": false, "enchant": ""}
 	for item in items.values():
+		if item.kind == "armor" and armor_level >= 0 and item.level > armor_level:
+			continue
 		if not lock_reason({"level": level, "stats": stats}, item).is_empty():
 			continue
 		match item.kind:
@@ -171,10 +192,14 @@ func eligible_loadout(level: int, stats: Dictionary, style: String) -> Dictionar
 	return loadout
 
 func opponent(definition: Dictionary, level: int, arena: int) -> Dictionary:
-	var points := int(rules.starting_points * rules.encounter_creation_factor + (level - 1) * rules.points_per_level * (rules.encounter_scaling + (rules.boss_scaling_bonus if definition.get("boss", false) else 0.0)))
+	var scaling: float = rules.encounter_scaling
+	if definition.get("boss", false):
+		scaling += rules.boss_scaling_bonus
+	var budget: float = rules.starting_points * rules.encounter_creation_factor + (level - 1) * rules.points_per_level * scaling
+	var points := roundi(budget * definition.get("point_multiplier", 1.0))
 	var stats := build_stats(definition.style, points)
-	var loadout := eligible_loadout(level, stats, definition.style)
-	if arena == 0 and not definition.get("boss", false):
+	var loadout := eligible_loadout(level, stats, definition.style, int(definition.get("armor_level", -1)))
+	if level < arenas[arena].opponent_gear_level and not definition.get("boss", false):
 		loadout.armor = {}
 		loadout.potion = false
 	return fighter(definition.name, stats, loadout, definition.style)

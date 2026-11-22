@@ -53,14 +53,21 @@ func campaign(style: String, seed_value: int, limit: int) -> Dictionary:
 	for step in limit:
 		_shop(run, style)
 		var snapshot := run.start_bout(run.can_tournament(), seed_value + step)
-		var bout := Duel.new(data, snapshot.fighters[0], snapshot.fighters[1], int(snapshot.seed))
+		var bout: RefCounted = run.open_bout(snapshot)
 		while bout.winner == -2:
-			bout.act(bout.choose(style if bout.active == 0 else str(bout.fighters[1].style)))
+			var action: String = bout.choose(style if bout.active == 0 else str(bout.fighters[1].style))
+			var event: Dictionary = bout.act(action)
+			if not event.valid:
+				return {"error": "Seed %s, turn %d, %s: %s" % [snapshot.seed, bout.turn + 1, action, event.message]}
 		if step == 0:
 			first_trace = bout.history
 		var result := run.settle(bout.winner)
 		while run.state.pending:
-			run.confirm_points(data.build_stats(style, int(data.rules.points_per_level)))
+			var invested := 0
+			for points in run.state.stats.values():
+				invested += int(points)
+			if not run.confirm_points(data.build_stats(style, run.points_to_allocate(), invested)):
+				return {"error": "Could not allocate the earned points."}
 		results.append({"bout": step + 1, "seed": snapshot.seed, "opponent": snapshot.opponent, "winner": bout.winner,
 			"arena": run.state.arena + 1, "tournament": snapshot.tournament, "level": run.state.level, "turns": bout.turn,
 			"gold": run.state.gold, "xp": run.state.xp, "result": result})

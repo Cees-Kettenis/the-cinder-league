@@ -26,13 +26,15 @@
     "rest_per_stamina": 1.6,
     "base_hit": 0.79,
     "hit_per_attack": 0.018,
-    "spell_hit": 0.79,
-    "hit_per_magic": 0.018,
+    "spell_hit": 0.76,
+    "hit_per_magic": 0.013,
+    "spell_close_penalty": 0.22,
     "base_crit": 0.02,
     "crit_per_attack": 0.02,
     "crit_chance_cap": 0.32,
     "crit_power": 1.1,
     "crit_power_per_attack": 0.05,
+    "crit_power_cap": 3.2,
     "base_block": 0.02,
     "block_per_defence": 0.01,
     "guard_block": 0.25,
@@ -40,7 +42,7 @@
     "minimum_hit": 0.16,
     "maximum_hit": 0.97,
     "damage_per_strength": 1.35,
-    "damage_per_magic": 1.5,
+    "damage_per_magic": 1.02,
     "guard_damage_factor": 0.48,
     "taunt_minimum": 9,
     "taunt_base_damage": 4,
@@ -52,16 +54,16 @@
     "gold_per_charisma": 1.75,
     "loss_gold": 8,
     "loss_xp": 5,
-    "encounter_scaling": 0.25,
+    "encounter_scaling": 0.58,
     "starter_weapon": "sword",
     "heal": 21,
     "potion_uses": 1,
     "opening_armour": {},
-    "taunt_provoke_per_charisma": 0.01,
+    "taunt_provoke_per_charisma": 0.005,
     "taunt_provoke_cap": 0.7,
     "block_cap": 0.85,
-    "encounter_creation_factor": 0.7,
-    "boss_scaling_bonus": 0.13
+    "encounter_creation_factor": 0.8,
+    "boss_scaling_bonus": 0.21
   },
   "moves": {
     "advance": 2,
@@ -468,6 +470,7 @@
       "name": "The Amber Ring",
       "descriptor": "The sandstone proving ground",
       "cap": 4,
+      "opponent_gear_level": 3,
       "gold": 23,
       "xp": 24,
       "opponents": [
@@ -495,6 +498,7 @@
           "name": "Idra Vale",
           "style": "guard",
           "boss": true,
+          "point_multiplier": 1.14,
           "level": 4,
           "seed_offset": 1
         }
@@ -504,6 +508,7 @@
       "name": "The Iron Court",
       "descriptor": "The city's senior tournament",
       "cap": 8,
+      "opponent_gear_level": 1,
       "gold": 36,
       "xp": 39,
       "opponents": [
@@ -529,8 +534,10 @@
         },
         {
           "name": "Oren Voss",
-          "style": "brute",
+          "style": "weapon",
           "boss": true,
+          "point_multiplier": 0.85,
+          "armor_level": 5,
           "level": 8,
           "seed_offset": 1
         }

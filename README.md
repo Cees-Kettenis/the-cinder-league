@@ -21,17 +21,17 @@ godot --path .
 
 Choose a save slot, enter a name, and assign the starting points. From town you can enter the **Armory**, **Weaponsmith**, **Magic shop**, or **Arena**. Select an armor slot and a piece to see the try-on and armor-point change before purchasing. The magic shop plays spell previews, including locked spells. Gear, potions, and spell uses are reset for each new bout. Ember Etching is equipped separately from your active spell.
 
-During a duel select an action. Its stamina cost, hit chance, or reason it is unavailable appears on the button. Movement changes the distance along a short arena floor. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt needs the displayed amount of current stamina and can deal damage or force an aggressive move.
+Duels open in a full-screen arena with actions arranged around your gladiator. Use **Windowed** to switch to a window. The action buttons show stamina costs, hit chances, and reasons a move is unavailable. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
 
 The arena menu shows the next opponent and the gold and XP available for a win. Watch your XP toward the next level in town, at the arena, and after each bout. Shops show how a purchase changes your stats and confirm the amount of gold spent. Use **Replay spell preview** in the magic shop to hear the spell. The **Sound on** control at the top of each screen toggles game sounds.
 
-Each slot autosaves independently. Level-ups require assigning all available points. Retrying restores the saved beginning of a bout. Practice replays leave campaign rewards and tournament progress at their saved values.
+Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. A fight ends in victory or defeat. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying restores the saved beginning of a bout. Practice replays leave campaign rewards and tournament progress at their saved values.
 
 ## Simulate
 
 Open **Simulator** from the title screen. Choose fighter presets, level, seed, and number of bouts. Run a matchup batch or a campaign across both arenas. The result includes a turn-by-turn trace of the first bout.
 
-The same rules are available from a terminal.
+The same combat rules are available from a terminal. Standalone simulator matchups can end in a draw.
 
 ```bash
 godot --headless --path . --script scripts/simulate.gd -- --left=hybrid --right=mage --level=4 --bouts=20 --seed=42
@@ -63,8 +63,14 @@ Pass `--scenario=/absolute/path/scenario.json` to supply either side's full stat
 
 The supplied numbers are draft playtest values. Open **Playtest balance** to edit and apply them. A valid edit is saved to `user://balance.override.json` and used for subsequent bouts and simulator runs inside the game. Use **Load bundled draft into editor**, then **Apply and save profile**, to reset it. The terminal simulator uses [balance.json](balance.json) by default and accepts a custom file through `--balance=/absolute/path/balance.json`.
 
-Item IDs, categories, and armor slots are stable so that existing saves can load across balance edits. An already-started bout keeps its stored opponent and loadout.
+Item IDs, categories, and armor slots are stable so that existing saves can load across balance edits. A saved bout keeps its opening conditions, combat rules, and rewards. An older save that predates rule snapshots records the active profile when it first loads. Player stats, equipment, and campaign progress carry forward.
 
-The art in the `art/` folder uses the approved cartoon concepts and matching original arena backdrops generated with the built-in ImageGen tool. Idle and try-on poses layer equipment per slot. The combat poses include leather, chainmail with an iron mace, and a hooded spellcaster. Mixed gear uses movement and recoil over the equipped look. The sound effects in `audio/` are synthesized samples for the playtest.
+The art in the `art/` folder uses the approved cartoon concepts and matching original arena backdrops generated with the built-in ImageGen tool. The [unarmored base](art/gladiator-base.png) uses the original gladiator as its reference, with a bare head, plain clothes, and a free weapon hand on transparent alpha. Individual armor pieces, weapons, and character colors stay attached during animated combat. Complete matching leather and chainmail loadouts can use their dedicated pose sheets. The sound effects in `audio/` are synthesized samples for the playtest.
 
 The two additional pose-sheet edits used [motion.png](art/motion.png) as the layout reference. The [chainmail sheet](art/motion-mail.png) uses the steel cap, mail tunic, blue cloth, bronze trim, and iron mace from [mail.png](art/mail.png). The [mage sheet](art/motion-mage.png) uses a plum hood, teal wool, and a talisman shield. Both retain the eight frame positions, poses, feet baselines, and transparent background of the reference.
+
+Run the save, duel, and UI regressions after importing the project.
+
+```bash
+godot --headless --path . --script tests/playtest.gd
+```
