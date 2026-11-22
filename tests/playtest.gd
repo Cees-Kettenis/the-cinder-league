@@ -5,6 +5,7 @@ const Duel = preload("res://scripts/duel.gd")
 const Campaign = preload("res://scripts/campaign.gd")
 const Simulator = preload("res://scripts/simulator.gd")
 const Game = preload("res://cinder_league.tscn")
+const Stage = preload("res://scripts/stage.gd")
 
 var failures: Array[String] = []
 
@@ -23,6 +24,7 @@ func _run() -> void:
 	_check_exhaustion(data)
 	_check_rush(data)
 	_check_attack_styles(data)
+	_check_arena_view(data)
 	_check_spell_charges(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
@@ -190,6 +192,32 @@ func _check_attack_styles(data: RefCounted) -> void:
 	var legacy := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
 	_check(not legacy.act("power").valid and legacy.act("attack").valid, "Older snapshots should retain Normal without the new styles")
 
+func _check_arena_view(data: RefCounted) -> void:
+	var edge := int(data.rules.arena_size)
+	_check(edge == 30, "New bouts should use a 30-space arena")
+	var stage := Stage.new()
+	stage.full_arena = true
+	stage.arena_width = edge
+	for viewport in [Vector2(1200, 800), Vector2(1920, 800)]:
+		stage.size = viewport
+		stage.positions = [13, 17]
+		var gap := stage.fighter_feet(1).x - stage.fighter_feet(0).x
+		_check(is_equal_approx(gap / stage.fighter_height(), 4.0 * Stage.SPACE_PER_FIGHTER_HEIGHT),
+			"A combat space should stay the same size relative to the fighters when the viewport changes")
+		stage.positions = [0, edge]
+		var view := stage._battle_view(stage.positions)
+		_check((view * Vector2(-1, 0)).x > 0 and (view * Vector2(edge + 1, 0)).x < viewport.x,
+			"The view should fit both fighters and their nearby pits at maximum separation")
+		stage.positions = [0, 1]
+		view = stage._battle_view(stage.positions)
+		_check((view * Vector2(-1, 0)).x > 0 and (view * Vector2(edge + 1, 0)).x > viewport.x,
+			"The camera should show the left pit when the fighters are near it")
+		stage.positions = [edge - 1, edge]
+		view = stage._battle_view(stage.positions)
+		_check((view * Vector2(-1, 0)).x < 0 and (view * Vector2(edge + 1, 0)).x < viewport.x,
+			"The camera should show the right pit when the fighters are near it")
+	stage.free()
+
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
 	var caster: Dictionary = data.fighter("Caster", stats, {"spell": "fireball"})
@@ -237,6 +265,9 @@ func _check_saved_bout(data: RefCounted) -> void:
 	_check(tied.winner == 1, "An equal-health campaign bout should end in defeat at the turn limit")
 	var saved_distance := int(data.rules.starting_distance)
 	var saved_gold := campaign.win_gold(0)
+	var narrow_snapshot := snapshot.duplicate(true)
+	narrow_snapshot.combat.rules.arena_size = 10
+	_check(campaign.open_bout(narrow_snapshot).positions == [3, 7], "An older bout should keep its narrower arena")
 	var opening: RefCounted = campaign.open_bout(snapshot)
 	opening.act("jump")
 	campaign.record_turn("jump", opening.winner)
@@ -245,6 +276,7 @@ func _check_saved_bout(data: RefCounted) -> void:
 	var changed := Data.new()
 	changed.load_profile()
 	changed.rules.starting_distance = 1
+	changed.rules.arena_size = 10
 	changed.arenas[0].gold += 100
 	changed.rules.points_per_level = 12
 	campaign.data = changed

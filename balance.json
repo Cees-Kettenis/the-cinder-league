@@ -58,7 +58,7 @@
     "taunt_base_damage": 4,
     "taunt_per_charisma": 1.45,
     "taunt_provoke": 0.27,
-    "arena_size": 10,
+    "arena_size": 30,
     "starting_distance": 4,
     "turn_limit": 80,
     "gold_per_charisma": 1.75,

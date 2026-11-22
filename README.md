@@ -25,6 +25,8 @@ Duels have action icons around your gladiator. Hover over an icon for its name o
 
 The heart, shield, and lightning bolt mark the health, armor, and stamina bars. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
 
+New bouts use a 30-space arena with a pit at each end. The camera follows the fight and pulls back when the fighters spread out. Steps, jumps, attack ranges, and knockback use the same distances at any window size. Saved bouts keep their original arena width.
+
 Fireball and Lightning Strike have two casts per bout. The heavier spells have one. The spell icon shows how many casts you have left. A miss spends a cast, and sleeping only restores stamina. Bring a weapon to follow up after casting.
 
 Choose **Scout rival** in the arena to reveal a randomly generated opponent near your level. Compare your stats, equipment, and reach before choosing **Fight**. You can go back to town or close the game and return to the same rival. A scouted tournament opponent stays in place while you fight regular bouts or buy gear. Your latest gear is used when you enter the ring.

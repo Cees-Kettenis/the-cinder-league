@@ -35,6 +35,8 @@ const WEAPON_SPRITES := {
 }
 const SPELL_CONTACT := .60
 const SPELL_COLORS := [Color("#ffc378"), Color("#cf9eff"), Color("#ffb66e"), Color("#7cdfff")]
+const SPACE_PER_FIGHTER_HEIGHT := .37
+const ARENA_MARGIN := 2.1
 const KIT_SIZE := Vector2(768, 1024)
 const BASE_SIZE := Vector2(1024, 1536)
 const BASE_SCALE := Vector2(2.0 / 3.0, 2.0 / 3.0)
@@ -209,8 +211,6 @@ func _draw() -> void:
 		"avatar":
 			_avatar(Vector2(size.x * .5, size.y * .96), minf(size.y * .89, size.x * 1.25), left_loadout, false, skin, hair)
 		"battle":
-			var half := ARENAS.get_height() * .5
-			_cover(ARENAS, Rect2(0, mini(arena, 1) * half + 2, ARENAS.get_width(), half - 4))
 			_draw_battle()
 		"spell":
 			_avatar(Vector2(size.x * .24, size.y * .9), size.y * .63, left_loadout, false, skin, hair)
@@ -222,19 +222,22 @@ func town_art_rect() -> Rect2:
 	var extent := TOWN.get_size() * scale
 	return Rect2((size - extent) * .5, extent)
 
-func _cover(texture: Texture2D, region: Rect2) -> void:
+func _draw_arena_backdrop(pan: float) -> void:
 	if size.y <= 0 or size.x <= 0:
 		return
+	var half := ARENAS.get_height() * .5
+	var region := Rect2(0, mini(arena, 1) * half + 2, ARENAS.get_width(), half - 4)
 	var view_shape := size.x / size.y
 	var source_shape := region.size.x / region.size.y
-	var crop := region
+	var extent := region.size
 	if view_shape > source_shape:
-		crop.size.y = region.size.x / view_shape
-		crop.position.y += (region.size.y - crop.size.y) * .5
+		extent.y /= view_shape / source_shape
 	else:
-		crop.size.x = region.size.y * view_shape
-		crop.position.x += (region.size.x - crop.size.x) * .5
-	draw_texture_rect_region(texture, Rect2(Vector2.ZERO, size), crop)
+		extent.x *= view_shape / source_shape
+	if full_arena:
+		extent *= .85
+	var crop := Rect2(region.position + (region.size - extent) * Vector2(pan, .50), extent)
+	draw_texture_rect_region(ARENAS, Rect2(Vector2.ZERO, size), crop)
 
 func _item(id: String) -> Dictionary:
 	var catalog: Dictionary = data.items if bout_items.is_empty() else bout_items
@@ -375,17 +378,30 @@ func _mesh(texture: Texture2D, mask: Array, source_size: Vector2, origin: Vector
 	draw_polygon(vertices, PackedColorArray([tint]), uv, texture)
 
 func fighter_height() -> float:
-	return minf(size.y * .34, size.x * .255) if full_arena else minf(size.y * .76, size.x * .265)
+	return _fighter_height(_battle_view(positions))
+
+func _fighter_height(view: Transform2D) -> float:
+	return view.x.x / SPACE_PER_FIGHTER_HEIGHT if full_arena else minf(size.y * .76, size.x * .265)
 
 func fighter_feet(index: int) -> Vector2:
-	return _feet_at(float(positions[index]))
+	return _battle_view(positions) * Vector2(positions[index], 0)
 
-func _feet_at(position: float) -> Vector2:
-	return Vector2(size.x * (.15 + .70 * position / arena_width), size.y * (.73 if full_arena else .88))
+func _battle_view(fighter_positions: Array) -> Transform2D:
+	if not full_arena:
+		return Transform2D(Vector2(size.x * .70 / arena_width, 0), Vector2.DOWN, size * Vector2(.15, .88))
+	var left := float(fighter_positions[0])
+	var right := float(fighter_positions[1])
+	# Keep movement proportional to the sprites. Pull back only when the fighters need more room.
+	var base_scale := minf(size.y * .34, size.x * .255) * SPACE_PER_FIGHTER_HEIGHT
+	var scale_x := minf(base_scale, size.x / (right - left + 2.0 * ARENA_MARGIN))
+	var half_view := size.x / (2.0 * scale_x) if scale_x > 0 else 0.0
+	var center := arena_width * .5
+	if half_view < center + ARENA_MARGIN:
+		center = clampf((left + right) * .5, half_view - ARENA_MARGIN, arena_width + ARENA_MARGIN - half_view)
+	return Transform2D(Vector2(scale_x, 0), Vector2.DOWN, Vector2(size.x * .5 - center * scale_x, size.y * .73))
 
 func _draw_battle() -> void:
 	var feet: Array[Vector2] = []
-	var height := fighter_height()
 	var side := int(event.get("side", -1))
 	var action := str(event.get("action", ""))
 	var phase := clampf(elapsed / action_time, 0, 1)
@@ -396,17 +412,26 @@ func _draw_battle() -> void:
 	if action == "rush":
 		shift = smoothstep(.22, .97, approach)
 	var stagger := _hit_recoil(recovery) if animating and elapsed >= impact_time else 0.0
+	var visible_positions: Array[float] = [float(positions[0]), float(positions[1])]
+	var pushed := false
+	if animating and previous_positions.size() == 2:
+		pushed = action == "power" and positions[1 - side] != previous_positions[1 - side]
+		for index in 2:
+			var travel := smoothstep(.01, .65, recovery) if pushed and index != side else shift
+			visible_positions[index] = lerpf(float(previous_positions[index]), visible_positions[index], travel)
+	var view := _battle_view(visible_positions)
+	var height := _fighter_height(view)
+	var pan := .5
+	if full_arena and view.x.x > 0.0:
+		var center := (size.x * .5 - view.origin.x) / view.x.x
+		pan = clampf(center / arena_width, 0.0, 1.0)
+	_draw_arena_backdrop(pan)
 	if full_arena and has_pits:
-		_draw_pit(_feet_at(-1), height)
-		_draw_pit(_feet_at(arena_width + 1), height)
+		_draw_pit(view * Vector2(-1, 0), height)
+		_draw_pit(view * Vector2(arena_width + 1, 0), height)
 	for index in 2 if show_rival else 1:
-		var distance := float(positions[index])
-		var pushed := false
-		if animating and previous_positions.size() == 2:
-			pushed = action == "power" and index != side and positions[index] != previous_positions[index]
-			var travel := smoothstep(.01, .65, recovery) if pushed else shift
-			distance = lerpf(float(previous_positions[index]), distance, travel)
-		var foot := _feet_at(distance)
+		var distance := visible_positions[index]
+		var foot := view * Vector2(distance, 0)
 		if side >= 0 and index != side and not pushed:
 			foot.x += height * .29 * stagger * (1.0 if side == 0 else -1.0)
 		feet.append(foot)
@@ -428,7 +453,7 @@ func _draw_battle() -> void:
 		draw_set_transform(Vector2.ZERO)
 	var gap := absf(feet[1].x - feet[0].x) if feet.size() == 2 else 0.0
 	if action == "power" and animating and previous_positions.size() == 2:
-		gap = absf(_feet_at(previous_positions[1]).x - _feet_at(previous_positions[0]).x)
+		gap = (previous_positions[1] - previous_positions[0]) * view.x.x
 	var draw_order := [1 - side, side] if feet.size() == 2 and animating else range(feet.size())
 	for index in draw_order:
 		var loadout := left_loadout if index == 0 else right_loadout
@@ -436,11 +461,12 @@ func _draw_battle() -> void:
 	if action == "cast" and animating:
 		var kit := left_loadout if side == 0 else right_loadout
 		var attack_art := int(_item(kit.get("spell", "")).get("art", 0))
-		var target := fighter_feet(1 - side)
+		var target := view * Vector2(visible_positions[1 - side], 0)
 		var direction := 1.0 if side == 0 else -1.0
-		_draw_spell(fighter_feet(side) + Vector2(.20 * direction, -.56) * height, target, height, attack_art, phase, direction, event.miss)
+		var start := view * Vector2(visible_positions[side], 0)
+		_draw_spell(start + Vector2(.20 * direction, -.56) * height, target, height, attack_art, phase, direction, event.miss)
 	if animating and elapsed >= impact_time:
-		_draw_impact(feet, height, side, recovery)
+		_draw_impact(feet, height, side, recovery, view)
 
 func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int, gap: float, approach: float, recovery: float, phase: float) -> void:
 	var actor := int(event.get("side", -1))
@@ -583,7 +609,7 @@ func _draw_weapon_trail(tip: Vector2, tint: Color, pulse: float, mace: bool) -> 
 			colors.append(Color(tint.lightened(.18) if edge == 0 else tint, pulse * (1.0 - progress) * (.91 if edge == 0 else .31)))
 	draw_polygon(vertices, colors)
 
-func _draw_impact(feet: Array[Vector2], height: float, side: int, recovery: float) -> void:
+func _draw_impact(feet: Array[Vector2], height: float, side: int, recovery: float, view: Transform2D) -> void:
 	var symbol := ""
 	var at := feet[1 - side]
 	if _lethal_hit():
@@ -592,7 +618,7 @@ func _draw_impact(feet: Array[Vector2], height: float, side: int, recovery: floa
 		var spark_color := Color("#c8edff") if event.blocked or event.armor_hit > 0 else Color("#ffc16e")
 		var spark_center := at + Vector2(height * (.10 if side == 1 else -.10), -height * .54)
 		if event.action == "power":
-			spark_center.x = _feet_at(previous_positions[1 - side]).x + height * (.10 if side == 1 else -.10)
+			spark_center.x = (view * Vector2(previous_positions[1 - side], 0)).x + height * (.10 if side == 1 else -.10)
 			_draw_impact_burst(spark_center, height * .26, spark_color, recovery)
 		if event.action == "cast":
 			var kit := left_loadout if side == 0 else right_loadout

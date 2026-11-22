@@ -152,7 +152,7 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		button.tooltip_text = title if reason.is_empty() else "%s · %s" % [title, reason]
 
 func place_actions(feet: Vector2, fighter_height: float) -> void:
-	var top := maxf(175, feet.y - fighter_height - 24)
+	var top := maxf(175, feet.y - maxf(236, fighter_height + 24))
 	if split_attacks:
 		var attack_center := clampf(feet.x, 153, size.x - 153)
 		_place("quick", Vector2(attack_center - 108, top))
@@ -162,10 +162,13 @@ func place_actions(feet: Vector2, fighter_height: float) -> void:
 	else:
 		_place("attack", Vector2(feet.x - 40, top))
 		_place("cast", Vector2(feet.x + 40, top))
-	var left := feet.x - clampf(fighter_height * .42, 92, 155)
-	_place("advance", Vector2(left + 10, top + 72))
-	_place("jump", Vector2(left - 6, top + 140))
-	_place("retreat", Vector2(left + 10, top + 208))
+	var movement_offset := clampf(fighter_height * .42, 92, 155)
+	var movement_x := feet.x - movement_offset
+	if movement_x < 45:
+		movement_x = feet.x + movement_offset
+	_place("advance", Vector2(movement_x + 10, top + 72))
+	_place("jump", Vector2(movement_x - 6, top + 140))
+	_place("retreat", Vector2(movement_x + 10, top + 208))
 	var spacing := BUTTON_SIZE.x + 12
 	var center := clampf(feet.x, 2 * spacing + 15, size.x - 2 * spacing - 15)
 	_place("guard", Vector2(center - 1.5 * spacing, feet.y + 37))
