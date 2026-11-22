@@ -59,14 +59,17 @@ func begin_turn(event: Dictionary, spell_art: int) -> void:
 		cast(spell_art)
 	else:
 		play({
-			"advance": "step", "retreat": "step", "jump": "leap", "attack": "swing",
+			"advance": "step", "retreat": "step", "jump": "leap", "rush": "leap",
 			"guard": "guard", "sleep": "rest", "taunt": "taunt", "potion": "potion",
 		}.get(event.action, ""))
 
 func impact(event: Dictionary, weapon_art: int) -> void:
+	var weapon_attack: bool = event.action in ["attack", "rush"]
+	if weapon_attack:
+		_play_on(_effects, "swing", .88 if weapon_art == 1 else 1.1)
 	if event.miss or event.damage + event.armor_hit == 0:
 		return
-	if event.blocked or (event.armor_hit > 0 and event.action == "attack"):
+	if event.blocked or (event.armor_hit > 0 and weapon_attack):
 		_play_on(_contact, "block", .87 if event.critical else 1.0)
-	elif event.action == "attack":
+	elif weapon_attack:
 		_play_on(_contact, "mace_hit" if weapon_art == 1 else "blade_hit", .86 if event.critical else 1.0)

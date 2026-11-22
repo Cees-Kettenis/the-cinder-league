@@ -23,6 +23,8 @@ const STAT_ICONS := {"Attack": "attack", "Strength": "strength", "Defence": "arm
 const USER_BALANCE := "user://balance.override.json"
 const USER_SETTINGS := "user://settings.cfg"
 
+enum DisplayMode { WINDOWED, FIGHTS, FULLSCREEN }
+
 var data := Data.new()
 var game: RefCounted
 var simulations: RefCounted
@@ -48,15 +50,15 @@ var armor_slot := "chest"
 var selected_item := ""
 var shop_stage: Control
 var shop_title: Label
-var shop_stats: HBoxContainer
+var shop_stats: HFlowContainer
 var shop_buy: Button
 var shop_entries: Dictionary = {}
 var bout: RefCounted
 var battle_layer: Control
 var battle_stage: Control
 var battle_hud: Control
-var fullscreen_bouts := true
-var window_mode_before_bout := Window.MODE_WINDOWED
+var display_mode: int = DisplayMode.FIGHTS
+var window_mode_before_fullscreen := Window.MODE_WINDOWED
 var settings_popup: PopupPanel
 var character_name: Label
 var fight_locked := false
@@ -75,9 +77,12 @@ func _ready() -> void:
 	var settings := ConfigFile.new()
 	if settings.load(USER_SETTINGS) == OK:
 		sound.enabled = bool(settings.get_value("audio", "enabled", true))
-		fullscreen_bouts = bool(settings.get_value("display", "fullscreen_bouts", true))
+		var previous_mode := DisplayMode.FIGHTS if settings.get_value("display", "fullscreen_bouts", true) else DisplayMode.WINDOWED
+		display_mode = clampi(int(settings.get_value("display", "mode", previous_mode)), DisplayMode.WINDOWED, DisplayMode.FULLSCREEN)
 	elif settings.load("user://audio.cfg") == OK:
 		sound.enabled = bool(settings.get_value("audio", "enabled", true))
+	if get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]:
+		display_mode = DisplayMode.FULLSCREEN
 	var color := ColorRect.new()
 	color.color = BG
 	color.mouse_filter = MOUSE_FILTER_IGNORE
@@ -186,17 +191,35 @@ func _icon_button(parent: Node, symbol: String, caption: String, call: Callable,
 	Symbol.on_button(button, symbol, 26, caption)
 	return button
 
-func _destination(parent: Node, symbol: String, caption: String, call: Callable, accent: bool = false) -> void:
-	var button := _button(parent, "", call, accent)
+func _town_destination(stage: Control, building: Rect2, symbol: String, caption: String, call: Callable) -> void:
+	var button := _button(stage, "", call)
 	button.accessibility_name = caption
-	button.custom_minimum_size.y = 58
-	_fill(button)
-	var contents := _row(button, 8)
-	contents.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	contents.alignment = BoxContainer.ALIGNMENT_CENTER
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	var highlight := _style(Color(1.0, .77, .4, .14), SAND, 0)
+	button.add_theme_stylebox_override("hover", highlight)
+	button.add_theme_stylebox_override("pressed", highlight)
+	var sign_position := CenterContainer.new()
+	button.add_child(sign_position)
+	sign_position.set_anchors_and_offsets_preset(PRESET_TOP_WIDE)
+	sign_position.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sign_panel := PanelContainer.new()
+	sign_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sign_panel.add_theme_stylebox_override("panel", _style(Color("#342620"), Color("#c18c57"), 8))
+	sign_position.add_child(sign_panel)
+	var contents := _row(sign_panel)
 	contents.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	contents.add_child(Symbol.make(symbol, 28))
-	_label(contents, caption, 17).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	contents.add_child(Symbol.make(symbol, 25))
+	var label := _label(contents, caption, 17)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var place := func() -> void:
+		var art: Rect2 = stage.town_art_rect()
+		var scale := art.size / Stage.TOWN.get_size()
+		button.position = art.position + building.position * scale
+		button.size = building.size * scale
+	stage.resized.connect(place)
+	place.call()
 
 func _token(parent: Node, symbol: String, value: String, caption: String) -> void:
 	var pair := _row(parent, 5)
@@ -221,16 +244,16 @@ func _page(key: String, heading: String) -> void:
 		remove_child(battle_layer)
 		battle_layer.queue_free()
 		battle_layer = null
-		if DisplayServer.get_name() != "headless":
-			get_window().mode = window_mode_before_bout
 		shell.show()
 	current_screen = key
+	_apply_display_mode()
 	_clear(shell)
 	var nav := _row(shell, 8)
 	_title(nav, heading, 32)
 	_space(nav)
 	if not game.state.is_empty() and key in ["town", "arena", "scout", "shop", "result"]:
-		_token(nav, "coin", str(int(game.state.gold)), "Gold")
+		var gold := str(int(game.state.gold))
+		_token(nav, "coin", gold + " gold" if key == "shop" else gold, "Gold")
 	_icon_button(nav, "settings", "Settings", _show_settings)
 	if key not in ["menu", "allocate"]:
 		_icon_button(nav, "home", "Title screen", show_menu)
@@ -257,10 +280,16 @@ func _show_settings() -> void:
 	audio.text = "Game sounds"
 	audio.button_pressed = sound.enabled
 	menu.add_child(audio)
-	var display := CheckButton.new()
-	display.text = "Full-screen fights"
-	display.button_pressed = fullscreen_bouts
-	menu.add_child(display)
+	var display_row := _row(menu, 12)
+	_label(display_row, "Display").size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var display := OptionButton.new()
+	display.accessibility_name = "Display"
+	display.add_item("Windowed", DisplayMode.WINDOWED)
+	display.add_item("Full-screen fights", DisplayMode.FIGHTS)
+	display.add_item("Full screen", DisplayMode.FULLSCREEN)
+	display.select(display_mode)
+	display_row.add_child(display)
+	_fill(display)
 	var save_notice := _wrapped(menu, "Settings could not be saved.", 15, RED)
 	save_notice.hide()
 	audio.toggled.connect(func(enabled: bool) -> void:
@@ -268,11 +297,10 @@ func _show_settings() -> void:
 		if not enabled:
 			sound.stop()
 		save_notice.visible = not _save_settings())
-	display.toggled.connect(func(enabled: bool) -> void:
-		fullscreen_bouts = enabled
-		if current_screen == "battle" and DisplayServer.get_name() != "headless":
-			get_window().mode = Window.MODE_FULLSCREEN if enabled else Window.MODE_WINDOWED
-		save_notice.visible = not _save_settings())
+	display.item_selected.connect(func(index: int) -> void:
+		display_mode = display.get_item_id(index)
+		save_notice.visible = not _save_settings()
+		_apply_display_mode.call_deferred())
 	if current_screen == "menu":
 		_button(menu, "Simulator", func() -> void:
 			settings_popup.hide()
@@ -287,11 +315,23 @@ func _show_settings() -> void:
 	settings_popup.popup_centered(Vector2i(360, 0))
 	done.grab_focus()
 
+func _apply_display_mode() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var window := get_window()
+	var is_fullscreen := window.mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
+	var wants_fullscreen := display_mode == DisplayMode.FULLSCREEN or (display_mode == DisplayMode.FIGHTS and current_screen == "battle")
+	if wants_fullscreen and not is_fullscreen:
+		window_mode_before_fullscreen = window.mode
+		window.mode = Window.MODE_FULLSCREEN
+	elif is_fullscreen and not wants_fullscreen:
+		window.mode = window_mode_before_fullscreen
+
 func _save_settings() -> bool:
 	var settings := ConfigFile.new()
 	settings.load(USER_SETTINGS)
 	settings.set_value("audio", "enabled", sound.enabled)
-	settings.set_value("display", "fullscreen_bouts", fullscreen_bouts)
+	settings.set_value("display", "mode", display_mode)
 	return settings.save(USER_SETTINGS) == OK
 
 func _show_progress(parent: Node) -> void:
@@ -391,7 +431,7 @@ func _character_form() -> void:
 	_fill(preview.get_parent(), true)
 	creation_stage = _stage(preview, "avatar", 340)
 	if not level_mode:
-		creation_stage.left_loadout = {}
+		creation_stage.left_loadout = {"weapon": data.rules.starter_weapon}
 	character_name = _title(preview, game.state.name if level_mode else "New gladiator", 23)
 	var details := _card(row, 7)
 	_fill(details.get_parent(), true)
@@ -530,12 +570,11 @@ func show_town() -> void:
 		return
 	_page("town", "Town square")
 	_show_progress(content)
-	_stage(content, "town", 350)
-	var destinations := _row(content)
-	_destination(destinations, "attack", "Weaponsmith", _enter_shop.bind("weapon"))
-	_destination(destinations, "helmet", "Armory", _enter_shop.bind("armor"))
-	_destination(destinations, "cast", "Magic shop", _enter_shop.bind("spell"))
-	_destination(destinations, "trophy", "Arena", show_arena, true)
+	var map := _stage(content, "town", 350)
+	_town_destination(map, Rect2(44, 375, 345, 414), "attack", "Weaponsmith", _enter_shop.bind("weapon"))
+	_town_destination(map, Rect2(397, 383, 309, 301), "helmet", "Armory", _enter_shop.bind("armor"))
+	_town_destination(map, Rect2(779, 410, 390, 266), "cast", "Magic shop", _enter_shop.bind("spell"))
+	_town_destination(map, Rect2(1231, 291, 282, 356), "trophy", "Arena", show_arena)
 
 func _enter_shop(kind: String) -> void:
 	shop_type = kind
@@ -601,14 +640,19 @@ func show_shop() -> void:
 	var display := _card(right, 5)
 	_fill(display.get_parent(), true)
 	shop_stage = _stage(display, "avatar", 305)
-	var detail := _card(right, 6)
-	shop_title = _title(detail, "", 23)
-	var checkout := _row(detail, 13)
-	shop_stats = _row(checkout, 13)
+	var detail := _card(right, 10)
+	var checkout := _row(detail)
+	shop_title = _title(checkout, "", 23)
+	shop_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_space(checkout)
 	spell_preview_button = _icon_button(checkout, "play", "Replay spell preview", _replay_spell)
 	spell_preview_button.hide()
 	shop_buy = _button(checkout, "Buy & equip", _buy_item, true)
+	shop_buy.add_theme_color_override("font_disabled_color", MUTED)
+	shop_stats = HFlowContainer.new()
+	shop_stats.add_theme_constant_override("h_separation", 24)
+	shop_stats.add_theme_constant_override("v_separation", 8)
+	detail.add_child(shop_stats)
 	if shop_entries.is_empty():
 		shop_buy.disabled = true
 		shop_title.text = "No stock available"
@@ -660,13 +704,12 @@ func _preview_item(id: String) -> void:
 		shop_stage.spell_art = int(item.art)
 		shop_stage.elapsed = 0
 		shop_stage.demo = true
-	elif item.kind == "armor" and lock.is_empty():
+	elif item.kind == "armor":
 		preview.armor[item.slot] = id
 	elif item.kind == "enchant":
 		preview.enchant = id
 		shop_stage.demo = true
-	elif item.kind == "weapon" and lock.is_empty():
-		shop_stage.kind = "weapon"
+	elif item.kind == "weapon":
 		preview.weapon = id
 	shop_stage.left_loadout = preview
 	shop_stage.queue_redraw()
@@ -677,40 +720,47 @@ func _preview_item(id: String) -> void:
 	shop_title.text = item.name
 	var requirement: String = data.stat_requirement(item)
 	var owned: bool = id in game.state.owned
-	shop_buy.text = lock.trim_prefix("Requires ").capitalize() if not lock.is_empty() else ("Equipped" if _equipped(item) else ("Equip" if owned else "Buy"))
+	shop_buy.text = "Equipped" if _equipped(item) else ("Equip" if owned else "Buy")
 	shop_buy.disabled = not lock.is_empty() or _equipped(item) or (not owned and game.state.gold < item.price)
-	if not owned and game.state.gold < item.price and lock.is_empty():
+	if not lock.is_empty():
+		shop_buy.text = lock
+		if game.state.level < item.level and not requirement.is_empty() and game.state.stats[requirement] < item.minimum:
+			shop_buy.text += " and %d %s" % [item.minimum, requirement]
+	elif not owned and game.state.gold < item.price:
 		shop_buy.text = "Not enough gold"
-	shop_buy.tooltip_text = lock
-	if not lock.is_empty() and not requirement.is_empty() and item.minimum > 0:
-		shop_buy.tooltip_text = "Level %d · %d %s" % [item.level, item.minimum, requirement]
 	_clear(shop_stats)
 	if not owned:
-		_token(shop_stats, "coin", str(int(item.price)), "Price")
+		_shop_stat("coin", "Price", "%d gold" % item.price)
 	match item.kind:
 		"armor":
 			var current: Dictionary = data.items.get(game.state.loadout.armor.get(item.slot, ""), {})
 			var points := int(current.get("armor", 0))
 			var new_points := int(item.armor)
-			_token(shop_stats, "armor", "%d → %d" % [points, new_points], "Armor points")
-		"weapon":
-			var current: Dictionary = data.items[game.state.loadout.weapon]
-			_token(shop_stats, "attack", "%d → %d" % [current.damage, item.damage], "Base damage")
-			_token(shop_stats, "advance", str(int(item.reach)), "Reach")
-			_token(shop_stats, "stamina", str(int(item.energy)), "Stamina cost")
-		"spell":
-			var current: Dictionary = data.items.get(game.state.loadout.spell, {})
-			var current_damage := int(current.get("damage", 0))
-			_token(shop_stats, "attack", "%d → %d" % [current_damage, item.damage], "Base damage")
-			_token(shop_stats, "advance", str(int(item.reach)), "Reach")
-			_token(shop_stats, "stamina", str(int(item.energy)), "Stamina cost")
-			_token(shop_stats, "cast", "×%d" % item.uses, "Uses per fight")
+			_shop_stat("armor", "Armor points", "%d → %d" % [points, new_points])
+		"weapon", "spell":
+			var current: Dictionary = data.items.get(game.state.loadout.get(item.kind, ""), {})
+			var damage := str(int(item.damage))
+			if not current.is_empty() and current.damage != item.damage:
+				damage = "%d → %d" % [current.damage, item.damage]
+			_shop_stat("attack", "Base damage", damage)
+			_shop_stat("advance", "Reach", "1 space" if item.reach == 1 else "%d spaces" % item.reach)
+			var action := "attack" if item.kind == "weapon" else "cast"
+			_shop_stat("stamina", "Stamina cost", "%d per %s" % [item.energy, action])
+			if item.kind == "spell":
+				_shop_stat("cast", "Uses per fight", str(int(item.uses)))
 		"enchant":
 			var old := int(data.items.get(game.state.loadout.get("enchant", ""), {}).get("damage", 0))
-			_token(shop_stats, "attack", "+%d → +%d" % [old, item.damage], "Extra weapon damage")
+			_shop_stat("attack", "Extra weapon damage", "+%d → +%d" % [old, item.damage])
 		"potion":
-			_token(shop_stats, "health", "+%d" % data.rules.heal, "Health restored")
-			_token(shop_stats, "potion", "×%d" % data.rules.potion_uses, "Uses per fight")
+			_shop_stat("health", "Health restored", "+%d" % data.rules.heal)
+			_shop_stat("potion", "Uses per fight", str(int(data.rules.potion_uses)))
+
+func _shop_stat(symbol: String, caption: String, value: String) -> void:
+	var stat := _column(shop_stats, 3)
+	_label(stat, caption, 15, MUTED)
+	var reading := _row(stat, 5)
+	reading.add_child(Symbol.make(symbol, 23))
+	_label(reading, value, 18, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
 func _replay_spell() -> void:
 	shop_stage.elapsed = 0.0
@@ -820,6 +870,7 @@ func _show_faceoff(offer: Dictionary) -> void:
 	_compare_row(kit, "Weapon reach", player.weapon.reach, rival.weapon.reach, "advance")
 	_compare_row(kit, "Spell", player.spell.get("name", "None"), rival.spell.get("name", "None"), "cast")
 	_compare_row(kit, "Spell reach", player.spell.get("reach", "–"), rival.spell.get("reach", "–"), "advance")
+	_compare_row(kit, "Spell casts", player.casts, rival.casts, "cast")
 	_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
 	var actions := _row(content, 10)
 	_button(actions, "Back", show_arena)
@@ -899,10 +950,7 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	battle_hud.action_selected.connect(_player_action)
 	battle_hud.settings_requested.connect(_show_settings)
 	battle_hud.resized.connect(_place_battle_actions)
-	window_mode_before_bout = get_window().mode
-	if (DisplayServer.get_name() != "headless" and fullscreen_bouts
-			and window_mode_before_bout not in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]):
-		get_window().mode = Window.MODE_FULLSCREEN
+	_apply_display_mode()
 	_refresh_battle()
 	if bout.active == 1:
 		_play_opponent_turn(fight_generation)
@@ -947,12 +995,12 @@ func _animate_turn(event: Dictionary, generation: int) -> void:
 	var fighter: Dictionary = bout.fighters[event.side]
 	battle_stage.animate(event)
 	sound.begin_turn(event, int(fighter.spell.get("art", 0)))
-	await get_tree().create_timer(Stage.IMPACT_TIME).timeout
+	await battle_stage.impact_reached
 	if current_screen != "battle" or generation != fight_generation:
 		return
 	sound.impact(event, int(fighter.weapon.get("art", 0)))
 	_refresh_battle()
-	await get_tree().create_timer(Stage.ACTION_TIME - Stage.IMPACT_TIME).timeout
+	await battle_stage.turn_animation_finished
 
 func _finish_bout() -> void:
 	var outcome := bout_result

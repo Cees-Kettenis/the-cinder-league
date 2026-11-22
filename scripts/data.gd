@@ -9,7 +9,7 @@ const STAT_PATTERNS := {
 	"weapon": ["Strength", "Vitality", "Stamina", "Attack", "Defence"],
 	"brute": ["Strength", "Strength", "Vitality", "Defence", "Stamina", "Attack"],
 	"guard": ["Defence", "Vitality", "Strength", "Defence", "Stamina", "Attack"],
-	"mage": ["Magic", "Magic", "Stamina", "Vitality", "Defence", "Magic"],
+	"mage": ["Magic", "Strength", "Attack", "Vitality", "Stamina", "Defence", "Magic", "Strength", "Attack", "Magic"],
 	"skirmish": ["Stamina", "Strength", "Attack", "Vitality", "Defence", "Magic"],
 	"charisma": ["Charisma", "Charisma", "Stamina", "Vitality", "Defence"],
 	"hybrid": ["Magic", "Strength", "Stamina", "Defence", "Vitality", "Attack"],
@@ -90,6 +90,10 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			return "A spell needs at least one use: " + item.id
 		items[item.id] = item
 	for reference_item in reference.items:
+		if reference_item.id == "dagger" and not items.has("dagger"):
+			var dagger: Dictionary = reference_item.duplicate()
+			items.dagger = dagger
+			profile.items.push_front(dagger)
 		if (not items.has(reference_item.id) or items[reference_item.id].kind != reference_item.kind
 				or items[reference_item.id].get("slot", "") != reference_item.get("slot", "")):
 			return "Keep the original item IDs, categories, and slots to preserve existing saves."
@@ -238,6 +242,8 @@ func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumb
 		for index in varied:
 			stats[pattern[random.randi_range(0, pattern.size() - 1)]] += 1
 	var loadout := eligible_loadout(level, stats, definition.style, int(definition.get("armor_level", -1)))
+	if level == 1 and not definition.get("boss", false):
+		loadout.weapon = rules.starter_weapon
 	if level < arenas[arena].opponent_gear_level and not definition.get("boss", false):
 		loadout.armor = {}
 		loadout.potion = false

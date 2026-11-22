@@ -19,7 +19,10 @@ func _run() -> void:
 		quit(1)
 		return
 	_check_replay(data)
+	_check_starter_weapon(data)
 	_check_exhaustion(data)
+	_check_rush(data)
+	_check_spell_charges(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
 	_check_defeats(data)
@@ -42,6 +45,22 @@ func _check_replay(data: RefCounted) -> void:
 		var replay := simulator.batch("guard", "guard", 4, 42, 1, {"actions": actions.slice(0, count)})
 		_check(replay.get("trace", []) == original.trace, "Replaying %d recorded moves should preserve the trace" % count)
 
+func _check_starter_weapon(data: RefCounted) -> void:
+	var run := Campaign.new(data)
+	var stats: Dictionary = data.build_stats("weapon", int(data.rules.starting_points))
+	run.create(0, "Gladiator", 0, 0, stats)
+	_check(run.state.loadout.weapon == "dagger" and run.state.owned == ["dagger"], "A new gladiator should own and equip the dagger")
+	var snapshot := run.start_bout(false, 42)
+	_check(snapshot.fighters[0].weapon.id == "dagger" and snapshot.fighters[0].weapon.damage < data.items.sword.damage,
+		"The starter dagger should deal less damage than the short sword in a bout")
+	_check(snapshot.fighters[1].weapon.id == "dagger", "Level-one rivals should use the starter weapon")
+	run.settle(0)
+	var gold := int(run.state.gold)
+	_check(run.purchase(data.items.sword).is_empty() and run.state.loadout.weapon == "sword"
+		and int(run.state.gold) == gold - int(data.items.sword.price), "The short sword should be available as a paid upgrade")
+	var veteran: Dictionary = data.fighter("Veteran", stats, {"weapon": "sword"})
+	_check(veteran.weapon.id == "sword", "A weapon explicitly saved as a short sword should stay a short sword")
+
 func _check_exhaustion(data: RefCounted) -> void:
 	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {})
 	var duel := Duel.new(data, fighter, fighter, 42)
@@ -60,6 +79,64 @@ func _check_exhaustion(data: RefCounted) -> void:
 	file.close()
 	_check(not Data.new().load_profile(path).is_empty(), "A profile that charges stamina to sleep must be rejected")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+func _check_rush(data: RefCounted) -> void:
+	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "court_mace"})
+	var reach := int(fighter.weapon.reach)
+	var leap := int(data.distances.jump)
+	var duel := Duel.new(data, fighter, fighter, 42, reach + leap)
+	var cost := int(fighter.weapon.energy) + int(data.moves.jump)
+	duel.fighters[0].energy = cost - 1
+	_check(duel.reason("rush").begins_with("Needs"), "A rush needs enough stamina for the leap and weapon attack")
+	duel.fighters[0].energy = cost
+	var strike := Duel.new(data, fighter, fighter, 42, reach).act("attack")
+	var rush := duel.act("rush")
+	_check(rush.get("valid", false) and duel.distance() == reach and duel.fighters[0].energy == 0,
+		"A rush at the limit should move into weapon reach, then spend its full stamina cost")
+	_check(rush.get("damage") == strike.damage and rush.get("miss") == strike.miss and rush.get("critical") == strike.critical,
+		"A rush should resolve like the same weapon attack in range")
+	_check(not duel.reason("rush").is_empty() and duel.reason("attack").is_empty(), "Use the regular attack once in reach")
+	var too_far := Duel.new(data, fighter, fighter, 42, reach + leap + 1)
+	_check(not too_far.act("rush").valid and too_far.turn == 0, "An enemy a step beyond rush range can't be attacked")
+	var other_side := Duel.new(data, fighter, fighter, 42, reach + leap)
+	other_side.act("guard")
+	_check(other_side.choose("weapon") == "rush" and other_side.act("rush").valid and other_side.distance() == reach,
+		"The opponent can also rush, moving toward the player")
+
+func _check_spell_charges(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	var caster: Dictionary = data.fighter("Caster", stats, {"spell": "fireball"})
+	var enemy: Dictionary = data.fighter("Gladiator", stats, {})
+	var rules: Dictionary = data.rules.duplicate()
+	rules.minimum_hit = 0.0
+	rules.spell_hit = 0.0
+	var duel := Duel.new(data, caster, enemy, 42, 4, {"rules": rules})
+	_check(caster.casts == 2 and data.items.lightning.uses == 2 and data.items.arc.uses == 1,
+		"Starter spells should have two casts, and heavy spells should have one")
+	for remaining in [1, 0]:
+		var event := duel.act("cast")
+		_check(event.get("miss", false) and duel.fighters[0].casts == remaining, "A cast should spend a charge even if it misses")
+		duel.act("guard")
+	duel.act("sleep")
+	duel.act("guard")
+	_check(duel.reason("cast") == "Spell uses spent" and not duel.act("cast").valid, "Sleeping must not restore used casts")
+	var fresh := Duel.new(data, caster, enemy, 42, 4)
+	_check(fresh.fighters[0].casts == 2, "Spell charges should reset for a new fight")
+
+	var campaign := Campaign.new(data)
+	campaign.create(0, "Gladiator", 0, 0, stats)
+	campaign.scout_bout(false, 42)
+	var rival: Dictionary = campaign.state.scouted_bout.rival
+	rival.loadout.spell = "fireball"
+	rival.spell = data.items.fireball.duplicate()
+	rival.spell.uses = 5
+	rival.casts = 5
+	var snapshot := campaign.start_bout(false, 42)
+	_check(snapshot.fighters[1].name == rival.name and snapshot.fighters[1].casts == 2,
+		"A previously scouted rival should keep their identity and start with the current spell charges")
+	snapshot.fighters[1].spell = rival.spell
+	snapshot.fighters[1].casts = 5
+	_check(campaign.open_bout(snapshot).fighters[1].casts == 5, "A saved fight should preserve its original spell charges")
 
 func _check_saved_bout(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)
@@ -193,6 +270,11 @@ func _check_game_buttons() -> void:
 	if _check(button != null, "Town should have a Magic shop button"):
 		button.pressed.emit()
 		_check(ui.current_screen == "shop" and ui.shop_entries.has("fireball"), "Town's Magic shop button should open spell stock")
+	_find_button(ui, "Weaponsmith").pressed.emit()
+	_find_button(ui, "Iron mace").pressed.emit()
+	_check(ui.shop_stage.left_loadout.weapon == "mace" and ui.game.state.loadout.weapon == ui.data.rules.starter_weapon,
+		"The locked mace should appear in the preview without changing the equipped weapon")
+	_check(ui.shop_buy.disabled and ui.shop_buy.text.begins_with("Requires level"), "The mace's unlock requirement should be visible")
 	ui.game.state.xp = int(ui.data.rules.xp_levels[1]) - 1
 	ui.show_arena()
 	_find_button(ui, "Scout rival").pressed.emit()
@@ -205,6 +287,8 @@ func _check_game_buttons() -> void:
 	_find_button(ui, "Fight").pressed.emit()
 	_check(ui.current_screen == "battle" and not ui.shell.visible and _find_button(ui, "Leave bout") == null,
 		"Combat must occupy the game view and offer no way back during the bout")
+	_check(not ui.battle_hud.action_buttons.rush.disabled and ui.battle_hud.action_buttons.attack.disabled,
+		"The HUD should offer a rush when the fighter can close the gap, with a normal attack still out of reach")
 	for action_button: Button in ui.battle_hud.action_buttons.values():
 		_check(action_button.text.is_empty() and not action_button.accessibility_name.is_empty(),
 			"Combat actions should use icons and accessible names")

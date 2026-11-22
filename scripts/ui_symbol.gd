@@ -35,7 +35,10 @@ func _draw() -> void:
 static func paint(canvas: CanvasItem, key: String, origin: Vector2, extent: float) -> void:
 	canvas.draw_set_transform(origin, 0, Vector2.ONE * extent / 32.0)
 	match key:
-		"attack", "strength":
+		"attack", "strength", "rush":
+			if key == "rush":
+				_line(canvas, [Vector2(2,10), Vector2(13,10)], GOLD, 2.5)
+				_line(canvas, [Vector2(7,4), Vector2(19,4)], GOLD, 2.5)
 			_shape(canvas, [Vector2(10,17), Vector2(23,4), Vector2(29,3), Vector2(28,10), Vector2(15,23)], STEEL)
 			_line(canvas, [Vector2(15,18), Vector2(25,8)], CREAM, 1.5)
 			_shape(canvas, [Vector2(5,14), Vector2(18,26), Vector2(15,29), Vector2(2,17)], GOLD)
@@ -89,8 +92,12 @@ static func paint(canvas: CanvasItem, key: String, origin: Vector2, extent: floa
 				teeth.append(Vector2(16,16) + Vector2.from_angle(angle) * radius)
 			_shape(canvas, teeth, GOLD)
 			_dot(canvas, Vector2(16,16), 4.8, INK)
-		"coin", "xp":
-			_dot(canvas, Vector2(16,16), 12, GOLD if key == "coin" else LILAC)
+		"coin":
+			_dot(canvas, Vector2(18,18), 12, Color("#c68338"))
+			_dot(canvas, Vector2(14,14), 12, GOLD)
+			canvas.draw_arc(Vector2(14,14), 7.5, 0, TAU, 24, Color("#ae6d31"), 1.8, true)
+		"xp":
+			_dot(canvas, Vector2(16,16), 12, LILAC)
 			_star(canvas, Vector2(16,16), 6, CREAM)
 		"trophy":
 			_line(canvas, [Vector2(8,7), Vector2(3,7), Vector2(4,14), Vector2(9,17)], GOLD, 3)

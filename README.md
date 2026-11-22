@@ -19,9 +19,11 @@ godot --path .
 
 ## Play
 
-Choose a save slot, enter a name, and assign the starting points. From town you can enter the **Armory**, **Weaponsmith**, **Magic shop**, or **Arena**. Select an armor slot and a piece to see the try-on and armor-point change before purchasing. The magic shop plays spell previews, including locked spells. Gear, potions, and spell uses are reset for each new bout. Ember Etching is equipped separately from your active spell.
+Choose a save slot, enter a name, and assign the starting points. New gladiators start with a dagger that deals 7 base damage. The weaponsmith sells the short sword for 15 gold. It deals 10 base damage. Click the buildings on the town map to open the **Armory**, **Weaponsmith**, **Magic shop**, or **Arena**. Select an armor slot and a piece to see the try-on and armor-point change before purchasing. The magic shop plays spell previews, including locked spells. Gear, potions, and spell uses are reset for each new bout. Ember Etching is equipped separately from your active spell.
 
-Duels open in a full-screen arena with action icons around your gladiator. Hover over an icon for its name or to see why it is unavailable. The heart, shield, and lightning bolt mark the health, armor, and stamina bars. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
+Duels have action icons around your gladiator. Hover over an icon for its name or to see why it is unavailable. The sword with speed lines is **Rush attack**. It moves you into weapon reach and strikes in one turn if a leap can cover the gap. It costs the stamina of a leap and a regular attack. The heart, shield, and lightning bolt mark the health, armor, and stamina bars. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
+
+Fireball and Lightning Strike have two casts per bout. The heavier spells have one. The spell icon shows how many casts you have left. A miss spends a cast, and sleeping only restores stamina. Bring a weapon to follow up after casting.
 
 Choose **Scout rival** in the arena to reveal a randomly generated opponent near your level. Compare your stats, equipment, and reach before choosing **Fight**. You can go back to town or close the game and return to the same rival. A scouted tournament opponent stays in place while you fight regular bouts or buy gear. Your latest gear is used when you enter the ring.
 
@@ -29,7 +31,7 @@ Losing a regular bout costs up to 8 gold. At an arena's level cap, regular wins 
 
 Amber Ring has one preliminary round before Idra Vale. Iron Court has two before Oren Voss. Preliminary builds are seeded for each tournament. The two champions have fixed builds. Tournament rounds started from **Fight to the death** are fatal on defeat. Tournament bouts already in progress before this update can finish without the new death rule. The fallen gladiator remains in the save slot until you create a new one there. The game archives the previous save under `user://fallen/`.
 
-Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. Open **Settings** with the gear icon to change game sounds or full-screen fights.
+Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. Open **Settings** with the gear icon to change game sounds or choose **Windowed**, **Full-screen fights**, or **Full screen** under **Display**.
 
 Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. A fight ends in victory or defeat. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying a regular bout restores its saved starting conditions. Practice replays carry no fees or risk to the gladiator and leave campaign progress intact.
 

@@ -119,7 +119,17 @@ func can_tournament() -> bool:
 	return not is_fallen() and state.level >= arena().cap and not state.pending and not state.complete
 
 func scouted_bout(tournament: bool = false) -> Dictionary:
-	return state.get("scouted_tournament" if tournament else "scouted_bout", {})
+	var offer: Dictionary = state.get("scouted_tournament" if tournament else "scouted_bout", {})
+	if offer.is_empty() or offer.rival.spell.is_empty():
+		return offer
+	var spell: Dictionary = data.items.get(offer.rival.spell.id, {})
+	if spell.is_empty() or spell == offer.rival.spell:
+		return offer
+	# A scout locks the opponent and gear. Only an entered bout locks their spell stats.
+	var updated := offer.duplicate(true)
+	updated.rival.spell = spell.duplicate()
+	updated.rival.casts = int(spell.uses)
+	return updated
 
 func can_scout(tournament: bool) -> bool:
 	return not is_fallen() and not has_active_bout() and not state.pending and (not tournament or can_tournament())

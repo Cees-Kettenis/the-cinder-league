@@ -1,8 +1,9 @@
 extends RefCounted
 
-const ACTIONS: Array[String] = ["advance", "retreat", "jump", "attack", "guard", "sleep", "taunt", "cast", "potion"]
+const ACTIONS: Array[String] = ["advance", "retreat", "jump", "attack", "rush", "guard", "sleep", "taunt", "cast", "potion"]
 const LABELS := {
 	"advance": "Advance", "retreat": "Retreat", "jump": "Leap forward", "attack": "Attack",
+	"rush": "Rush attack",
 	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Cast", "potion": "Drink potion",
 }
 
@@ -76,6 +77,7 @@ func cost(action: String, side: int = -1) -> int:
 	var fighter: Dictionary = fighters[active if side < 0 else side]
 	match action:
 		"attack": return int(fighter.weapon.energy)
+		"rush": return int(fighter.weapon.energy) + int(moves.jump)
 		"cast": return int(fighter.spell.get("energy", 0))
 	return int(moves.get(action, 0))
 
@@ -103,6 +105,11 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 		"attack":
 			if distance() > fighter.weapon.reach:
 				return "Out of weapon reach"
+		"rush":
+			if distance() <= fighter.weapon.reach:
+				return "Use Attack at this distance"
+			if fighter.weapon.reach < 1 or distance() > fighter.weapon.reach + distances.jump:
+				return "Too far to rush"
 		"cast":
 			if fighter.spell.is_empty():
 				return "Equip a spell"
@@ -164,9 +171,11 @@ func act(action: String) -> Dictionary:
 			fighter.hp = mini(fighter.max_hp, before + int(rules.heal))
 			fighter.potions -= 1
 			event.message = "%s restores %d health." % [fighter.name, fighter.hp - before]
-		"attack", "cast":
+		"attack", "rush", "cast":
 			if action == "cast":
 				fighter.casts -= 1
+			elif action == "rush":
+				positions[side] += (1 if side == 0 else -1) * (distance() - int(fighter.weapon.reach))
 			_strike(action, fighter, enemy, event)
 		"taunt":
 			var provoke := taunt_chance(rules, fighter.stats.Charisma)
@@ -251,6 +260,8 @@ func choose(profile: String) -> String:
 		return "attack"
 	if "cast" in legal and not _should_close(fighter, enemy):
 		return "cast"
+	if "rush" in legal:
+		return "rush"
 	if "jump" in legal and distance() > fighter.weapon.reach + int(distances.advance):
 		return "jump"
 	if "advance" in legal:

@@ -20,6 +20,7 @@ var action_layer := Control.new()
 var fighter_cards: Array[Dictionary] = []
 var save_notice: Label
 var settings_button: Button
+var cast_charges: Label
 
 func build(arena_name: String, title_font: Font) -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
@@ -41,7 +42,7 @@ func build(arena_name: String, title_font: Font) -> void:
 		Symbol.on_button(button, action, 36, Duel.LABELS[action])
 		var fill := Color("#45312b")
 		match action:
-			"attack": fill = Color("#924a3d")
+			"attack", "rush": fill = Color("#924a3d")
 			"cast": fill = Color("#634f90")
 			"guard": fill = Color("#36566b")
 			"sleep", "potion": fill = Color("#365447")
@@ -49,6 +50,12 @@ func build(arena_name: String, title_font: Font) -> void:
 		button.add_theme_stylebox_override("hover", _plate(fill.lightened(.18), SAND, 0, 22))
 		button.add_theme_stylebox_override("disabled", _plate(Color("#332a2d"), Color("#675560"), 0, 22))
 		action_buttons[action] = button
+	cast_charges = _label(action_buttons.cast, "", 14, IVORY)
+	cast_charges.mouse_filter = MOUSE_FILTER_IGNORE
+	cast_charges.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cast_charges.add_theme_color_override("font_outline_color", Color("#261c24"))
+	cast_charges.add_theme_constant_override("outline_size", 4)
+	_dock(cast_charges, Vector2.ONE, Rect2(-36, -21, 30, 20))
 
 	settings_button = _button(self, "")
 	_dock(settings_button, Vector2(1, 1), Rect2(-76, -76, 54, 54))
@@ -105,6 +112,9 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 	action_layer.visible = not locked and bout.active == 0 and bout.winner == -2
 	if not action_layer.visible:
 		return
+	var player: Dictionary = bout.fighters[0]
+	cast_charges.visible = not player.spell.is_empty()
+	cast_charges.text = str(int(player.casts))
 	for action in Duel.ACTIONS:
 		var button: Button = action_buttons[action]
 		var reason: String = bout.reason(action)
@@ -113,15 +123,16 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		if reason.begins_with("Needs"):
 			reason = "Not enough stamina"
 		var title: String = Duel.LABELS[action]
-		if action == "cast" and not bout.fighters[0].spell.is_empty():
-			title = bout.fighters[0].spell.name
+		if action == "cast" and not player.spell.is_empty():
+			title = "%s · %d %s left" % [player.spell.name, player.casts, "cast" if player.casts == 1 else "casts"]
 		button.accessibility_name = title
 		button.tooltip_text = title if reason.is_empty() else "%s · %s" % [title, reason]
 
 func place_actions(feet: Vector2, fighter_height: float) -> void:
 	var top := maxf(175, feet.y - fighter_height - 24)
-	_place("attack", Vector2(feet.x - 40, top))
-	_place("cast", Vector2(feet.x + 40, top))
+	_place("attack", Vector2(feet.x - 76, top))
+	_place("rush", Vector2(feet.x, top))
+	_place("cast", Vector2(feet.x + 76, top))
 	var left := feet.x - clampf(fighter_height * .42, 92, 155)
 	_place("advance", Vector2(left + 10, top + 72))
 	_place("jump", Vector2(left - 6, top + 140))

@@ -42,7 +42,7 @@
     "minimum_hit": 0.16,
     "maximum_hit": 0.97,
     "damage_per_strength": 1.35,
-    "damage_per_magic": 1.02,
+    "damage_per_magic": 0.72,
     "guard_damage_factor": 0.48,
     "taunt_minimum": 9,
     "taunt_base_damage": 4,
@@ -56,7 +56,7 @@
     "capped_gold_multiplier": 0.5,
     "encounter_scaling": 0.58,
     "opponent_point_variance": 0.08,
-    "starter_weapon": "sword",
+    "starter_weapon": "dagger",
     "heal": 21,
     "potion_uses": 1,
     "opening_armour": {},
@@ -84,11 +84,24 @@
   },
   "items": [
     {
+      "id": "dagger",
+      "name": "Dagger",
+      "kind": "weapon",
+      "level": 1,
+      "price": 0,
+      "minimum": 0,
+      "damage": 7,
+      "reach": 1,
+      "energy": 4,
+      "art": 0,
+      "tier": 0
+    },
+    {
       "id": "sword",
       "name": "Short sword",
       "kind": "weapon",
       "level": 1,
-      "price": 0,
+      "price": 15,
       "minimum": 0,
       "damage": 10,
       "reach": 1,
@@ -375,10 +388,10 @@
       "level": 1,
       "price": 25,
       "minimum": 1,
-      "damage": 10,
+      "damage": 14,
       "reach": 6,
       "energy": 6,
-      "uses": 5,
+      "uses": 2,
       "art": 0
     },
     {
@@ -388,10 +401,10 @@
       "level": 1,
       "price": 29,
       "minimum": 2,
-      "damage": 11,
+      "damage": 15,
       "reach": 7,
       "energy": 7,
-      "uses": 5,
+      "uses": 2,
       "art": 1
     },
     {
@@ -401,10 +414,10 @@
       "level": 2,
       "price": 43,
       "minimum": 4,
-      "damage": 16,
+      "damage": 23,
       "reach": 7,
       "energy": 9,
-      "uses": 5,
+      "uses": 1,
       "art": 2
     },
     {
@@ -414,10 +427,10 @@
       "level": 2,
       "price": 47,
       "minimum": 5,
-      "damage": 17,
+      "damage": 25,
       "reach": 5,
       "energy": 9,
-      "uses": 5,
+      "uses": 1,
       "art": 3
     },
     {
@@ -427,10 +440,10 @@
       "level": 4,
       "price": 65,
       "minimum": 7,
-      "damage": 20,
+      "damage": 29,
       "reach": 8,
       "energy": 9,
-      "uses": 5,
+      "uses": 1,
       "art": 1
     },
     {
@@ -440,10 +453,10 @@
       "level": 6,
       "price": 90,
       "minimum": 9,
-      "damage": 25,
+      "damage": 36,
       "reach": 8,
       "energy": 10,
-      "uses": 5,
+      "uses": 1,
       "art": 2
     },
     {
