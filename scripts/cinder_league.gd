@@ -898,7 +898,7 @@ func _compare_row(parent: Control, caption: String, left: Variant, right: Varian
 	var rival := _label(line, str(int(right)) if right is float else str(right), 15)
 	_fill(rival)
 	rival.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	if (left is int or left is float) and left != right:
+	if (left is int or left is float) and (right is int or right is float) and left != right:
 		if left > right:
 			player.add_theme_color_override("font_color", GREEN)
 		else:

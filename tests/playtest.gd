@@ -26,6 +26,7 @@ func _run() -> void:
 	_check_saved_bout(data)
 	_check_scouting(data)
 	_check_defeats(data)
+	_check_saved_spell_faceoff(data)
 	_check_game_buttons()
 	await process_frame
 	await process_frame
@@ -259,6 +260,28 @@ func _check_defeats(data: RefCounted) -> void:
 	campaign.settle(1)
 	_check(not campaign.is_fallen() and campaign.can_scout(false) and not campaign.retry_bout(false),
 		"A tournament fight started before lethal rules should finish without a surprise death")
+
+func _check_saved_spell_faceoff(data: RefCounted) -> void:
+	var number := int(Time.get_unix_time_from_system() * 1000000)
+	var save := Campaign.new(data)
+	if not _check(save.create(number, "Caster", 0, 0, data.build_stats("mage", 10)), "The caster fixture should save"):
+		return
+	_check(save.purchase(data.items.fireball).is_empty(), "The caster should equip a spell")
+	var offer := save.scout_bout(false, 42)
+	_check(offer.rival.spell.is_empty(), "The face-off fixture should have a rival without a spell")
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.sound.enabled = false
+	ui._resume(number)
+	_find_button(ui, "Arena").pressed.emit()
+	_find_button(ui, offer.rival.name).pressed.emit()
+	var fight := _find_button(ui, "Fight")
+	if _check(fight != null, "A reloaded caster should be able to open a face-off against a rival without a spell"):
+		fight.pressed.emit()
+		_check(ui.current_screen == "battle" and ui.bout.fighters[0].spell.id == "fireball",
+			"Starting the reloaded bout should keep the player's equipped spell")
+	ui.queue_free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(save.path(number)))
 
 func _check_game_buttons() -> void:
 	var ui = Game.instantiate()
