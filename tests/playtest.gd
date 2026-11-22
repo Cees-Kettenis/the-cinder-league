@@ -82,27 +82,37 @@ func _check_exhaustion(data: RefCounted) -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 func _check_rush(data: RefCounted) -> void:
-	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "court_mace"})
+	var stats: Dictionary = data.stats_empty()
+	stats.Stamina = 4
+	var fighter: Dictionary = data.fighter("Gladiator", stats, {"weapon": "court_mace"})
 	var reach := int(fighter.weapon.reach)
-	var leap := int(data.distances.jump)
-	var duel := Duel.new(data, fighter, fighter, 42, reach + leap)
-	var cost := int(fighter.weapon.energy) + int(data.moves.jump)
+	var steps := 3
+	var duel := Duel.new(data, fighter, fighter, 42, reach + steps)
+	var cost := int(fighter.weapon.energy) + ceili(data.rules.lunge_base_cost + steps * data.rules.lunge_cost_per_space)
 	duel.fighters[0].energy = cost - 1
-	_check(duel.reason("rush").begins_with("Needs"), "A rush needs enough stamina for the leap and weapon attack")
+	_check(duel.reason("rush").begins_with("Needs"), "A lunge needs enough stamina for the distance and weapon attack")
 	duel.fighters[0].energy = cost
-	var strike := Duel.new(data, fighter, fighter, 42, reach).act("attack")
+	_check(duel.weapon_action() == "rush" and duel.chance("rush") < duel.chance("attack"),
+		"Attack switches to a less accurate lunge outside weapon reach")
 	var rush := duel.act("rush")
 	_check(rush.get("valid", false) and duel.distance() == reach and duel.fighters[0].energy == 0,
-		"A rush at the limit should move into weapon reach, then spend its full stamina cost")
-	_check(rush.get("damage") == strike.damage and rush.get("miss") == strike.miss and rush.get("critical") == strike.critical,
-		"A rush should resolve like the same weapon attack in range")
-	_check(not duel.reason("rush").is_empty() and duel.reason("attack").is_empty(), "Use the regular attack once in reach")
-	var too_far := Duel.new(data, fighter, fighter, 42, reach + leap + 1)
-	_check(not too_far.act("rush").valid and too_far.turn == 0, "An enemy a step beyond rush range can't be attacked")
-	var other_side := Duel.new(data, fighter, fighter, 42, reach + leap)
+		"A lunge should move into weapon reach and spend its full stamina cost")
+	_check(duel.weapon_action() == "attack" and duel.reason("attack").is_empty(), "Use the regular attack once in reach")
+	var farther := Duel.new(data, fighter, fighter, 42, reach + steps + 1)
+	farther.fighters[0].energy = cost
+	_check(not farther.act("rush").valid and farther.turn == 0, "The same stamina can't cover an extra space")
+	farther.fighters[0].energy += ceili(data.rules.lunge_cost_per_space)
+	_check(farther.act("rush").valid, "More stamina lets the same weapon lunge farther")
+	var other_side := Duel.new(data, fighter, fighter, 42, reach + steps)
 	other_side.act("guard")
 	_check(other_side.choose("weapon") == "rush" and other_side.act("rush").valid and other_side.distance() == reach,
 		"The opponent can also rush, moving toward the player")
+	var legacy_rules: Dictionary = data.rules.duplicate()
+	legacy_rules.erase("lunge_base_cost")
+	legacy_rules.erase("lunge_hit_penalty")
+	var legacy := Duel.new(data, fighter, fighter, 42, reach + steps, {"rules": legacy_rules})
+	_check(legacy.cost("rush") == int(fighter.weapon.energy) + int(data.moves.jump)
+		and legacy.chance("rush") == legacy.chance("attack"), "Saved fights should retain their original rush rules")
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -321,8 +331,8 @@ func _check_game_buttons() -> void:
 		"Combat must occupy the game view and offer no way back during the bout")
 	_press_escape()
 	_check(ui.current_screen == "battle" and not is_instance_valid(ui.settings_popup), "Escape should keep the player in the bout")
-	_check(not ui.battle_hud.action_buttons.rush.disabled and ui.battle_hud.action_buttons.attack.disabled,
-		"The HUD should offer a rush when the fighter can close the gap, with a normal attack still out of reach")
+	_check(not ui.battle_hud.action_buttons.has("rush") and not ui.battle_hud.action_buttons.attack.disabled
+		and ui.battle_hud.action_buttons.attack.accessibility_name == "Lunge", "One Attack button should offer a lunge from a distance")
 	for action_button: Button in ui.battle_hud.action_buttons.values():
 		_check(action_button.text.is_empty() and not action_button.accessibility_name.is_empty(),
 			"Combat actions should use icons and accessible names")

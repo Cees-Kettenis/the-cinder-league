@@ -3,7 +3,7 @@ extends RefCounted
 const ACTIONS: Array[String] = ["advance", "retreat", "jump", "attack", "rush", "guard", "sleep", "taunt", "cast", "potion"]
 const LABELS := {
 	"advance": "Advance", "retreat": "Retreat", "jump": "Leap forward", "attack": "Attack",
-	"rush": "Rush attack",
+	"rush": "Lunge",
 	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Cast", "potion": "Drink potion",
 }
 
@@ -77,14 +77,22 @@ func cost(action: String, side: int = -1) -> int:
 	var fighter: Dictionary = fighters[active if side < 0 else side]
 	match action:
 		"attack": return int(fighter.weapon.energy)
-		"rush": return int(fighter.weapon.energy) + int(moves.jump)
+		"rush":
+			if not rules.has("lunge_base_cost"):
+				return int(fighter.weapon.energy) + int(moves.jump)
+			var spaces := maxi(0, distance() - int(fighter.weapon.reach))
+			return int(fighter.weapon.energy) + ceili(rules.lunge_base_cost + spaces * rules.lunge_cost_per_space)
 		"cast": return int(fighter.spell.get("energy", 0))
 	return int(moves.get(action, 0))
+
+func weapon_action() -> String:
+	return "attack" if distance() <= fighters[active].weapon.reach else "rush"
 
 func chance(action: String) -> float:
 	var fighter: Dictionary = fighters[active]
 	var target: Dictionary = fighters[1 - active]
-	return hit_chance(rules, fighter.stats, action == "cast", target.exposed, threatens_cast(target))
+	var accuracy := hit_chance(rules, fighter.stats, action == "cast", target.exposed, threatens_cast(target))
+	return maxf(0.0, accuracy - float(rules.get("lunge_hit_penalty", 0.0))) if action == "rush" else accuracy
 
 func threatens_cast(fighter: Dictionary) -> bool:
 	return distance() <= fighter.weapon.reach and fighter.energy >= fighter.weapon.energy
@@ -108,8 +116,8 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 		"rush":
 			if distance() <= fighter.weapon.reach:
 				return "Use Attack at this distance"
-			if fighter.weapon.reach < 1 or distance() > fighter.weapon.reach + distances.jump:
-				return "Too far to rush"
+			if fighter.weapon.reach < 1 or (not rules.has("lunge_base_cost") and distance() > fighter.weapon.reach + distances.jump):
+				return "Too far to lunge"
 		"cast":
 			if fighter.spell.is_empty():
 				return "Equip a spell"

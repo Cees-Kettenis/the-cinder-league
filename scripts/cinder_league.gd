@@ -780,8 +780,10 @@ func _select_armor(part: String) -> void:
 	show_shop()
 
 func _item_icon(item: Dictionary) -> AtlasTexture:
+	if item.kind == "weapon":
+		return Stage.weapon_icon(item)
 	var atlas := AtlasTexture.new()
-	if item.kind == "weapon" or item.kind == "potion":
+	if item.kind == "potion":
 		atlas.atlas = Stage.STOCK
 		atlas.region = Stage._cell(Stage.STOCK, 3, 2, int(item.art))
 	elif item.kind in ["spell", "enchant"]:
@@ -1053,6 +1055,7 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	battle_stage = _stage(battle_layer, "battle", 0)
 	battle_stage.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	battle_stage.full_arena = true
+	battle_stage.lethal_bout = snapshot.rewards.get("lethal_defeat", false) and not practice
 	battle_stage.arena = int(snapshot.arena)
 	battle_stage.arena_width = int(bout.rules.arena_size)
 	battle_stage.bout_items = snapshot.equipment

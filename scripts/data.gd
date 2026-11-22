@@ -36,7 +36,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	for section in ["rules", "moves", "distances", "items", "arenas"]:
 		if not profile.has(section) or typeof(profile[section]) != typeof(reference[section]):
 			return "Missing or invalid balance section: " + section
-	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier"]:
+	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier",
+			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = reference.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -61,6 +62,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Sleep must be free and restore at least 1 stamina."
 	if rules.crit_power_cap < 1 or rules.maximum_hit > 1 or rules.spell_close_penalty > 1:
 		return "Check the critical multiplier cap and hit probabilities."
+	if rules.lunge_hit_penalty > 1 or rules.lunge_cost_per_space < 1:
+		return "Lunge accuracy penalty must be at most 1 and movement must cost at least 1 stamina per space."
 	if rules.opponent_point_variance > 0.25:
 		return "Opponent point variance must be 0.25 or less."
 	if rules.capped_gold_multiplier > 1:
