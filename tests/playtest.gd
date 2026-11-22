@@ -26,6 +26,7 @@ func _run() -> void:
 	_check_saved_bout(data)
 	_check_scouting(data)
 	_check_defeats(data)
+	_check_save_replacement(data)
 	_check_saved_spell_faceoff(data)
 	_check_game_buttons()
 	await process_frame
@@ -198,13 +199,16 @@ func _check_saved_bout(data: RefCounted) -> void:
 func _check_scouting(data: RefCounted) -> void:
 	var styles := {}
 	var names := {}
+	var outfits := {}
 	for seed_value in range(40, 64):
 		var rival: Dictionary = data.generate_opponent(6, 1, seed_value)
 		_check(rival == data.generate_opponent(6, 1, seed_value), "A seed should reproduce the same rival")
 		_check(rival.level in [5, 6, 7], "Regular rivals should stay within one level of the player and inside the arena")
 		styles[rival.style] = true
 		names[rival.name] = true
+		outfits[Vector3i(rival.look.chest, rival.look.helmet, rival.look.palette)] = true
 	_check(styles.size() > 1 and names.size() > 1, "Different seeds should generate varied regular rivals")
+	_check(outfits.size() >= 12, "Regular rivals should mix many visible cosmetic outfits")
 	var campaign := Campaign.new(data)
 	campaign.create(0, "Gladiator", 0, 0, data.build_stats("weapon", 10))
 	campaign.state.level = 4
@@ -270,6 +274,32 @@ func _check_defeats(data: RefCounted) -> void:
 	campaign.settle(1)
 	_check(not campaign.is_fallen() and campaign.can_scout(false) and not campaign.retry_bout(false),
 		"A tournament fight started before lethal rules should finish without a surprise death")
+
+func _check_save_replacement(data: RefCounted) -> void:
+	var campaign := Campaign.new(data)
+	var number := int(Time.get_unix_time_from_system() * 1000000)
+	var gladiator := "Retired %d" % number
+	var stats: Dictionary = data.build_stats("weapon", 10)
+	if not _check(campaign.create(number, gladiator, 0, 0, stats), "The replacement fixture should save"):
+		return
+	campaign.state.level = 5
+	campaign.state.arena = 1
+	campaign.save()
+	var previous := campaign.slot_revision(number)
+	_check(not campaign.create(number, "Newcomer", 0, 0, stats), "An occupied slot needs confirmation before replacement")
+	campaign.state.xp += 1
+	campaign.save()
+	_check(not campaign.create(number, "Newcomer", 0, 0, stats, previous), "A changed save must be confirmed again")
+	var current := campaign.slot_revision(number)
+	var archive := Campaign.RETIRED_DIR.path_join("gladiator_%d_%s.json" % [number, current])
+	_check(campaign.create(number, "Newcomer", 0, 0, stats, current), "A confirmed replacement should start a new career")
+	_check(campaign.read_slot(number).name == "Newcomer" and FileAccess.get_sha256(archive) == current,
+		"Replacing a save should keep an exact copy of the previous career")
+	var records := campaign.hall_of_fame().filter(func(entry: Dictionary) -> bool: return entry.name == gladiator)
+	_check(records.size() == 1 and records[0].crowns == 1 and records[0].status == "Retired",
+		"The retired career should retain its tournament win in the Hall of Fame")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(archive))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(campaign.path(number)))
 
 func _check_saved_spell_faceoff(data: RefCounted) -> void:
 	var number := int(Time.get_unix_time_from_system() * 1000000)

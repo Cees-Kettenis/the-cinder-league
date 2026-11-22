@@ -17,6 +17,7 @@ const CLIPS := {
 	"hellfire": preload("res://audio/hellfire.wav"),
 	"buy": preload("res://audio/buy.wav"),
 	"equip": preload("res://audio/equip.wav"),
+	"shop_bell": preload("res://audio/shop-bell.wav"),
 	"victory": preload("res://audio/victory.wav"),
 	"defeat": preload("res://audio/defeat.wav"),
 	"level_up": preload("res://audio/level_up.wav"),

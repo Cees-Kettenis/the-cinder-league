@@ -13,6 +13,18 @@ const SPELLS = preload("res://art/spells.png")
 const TOWN = preload("res://art/town.png")
 const STOCK = preload("res://art/stock.png")
 const WEAPONS = preload("res://art/weapons.png")
+const RIVAL_ARMOR = preload("res://art/rival-armor.png")
+const RIVAL_HELMETS := [
+	[Rect2(83, 70, 410, 302), Rect2(-91, -1023, 203, 166)],
+	[Rect2(588, 49, 333, 388), Rect2(-92, -1008, 170, 183)],
+	[Rect2(1080, 13, 361, 368), Rect2(-92, -1040, 174, 192)],
+]
+const RIVAL_CHESTS := [
+	[Rect2(42, 455, 432, 562), Rect2(-204, -831, 365, 451)],
+	[Rect2(555, 455, 408, 562), Rect2(-188, -835, 339, 455)],
+	[Rect2(1036, 449, 465, 567), Rect2(-214, -834, 387, 456)],
+]
+const RIVAL_PALETTES := [Color.WHITE, Color("#aabdf0"), Color("#d9a4a1"), Color("#b6e0cb"), Color("#e6c38a")]
 const WEAPON_SPRITES := {
 	"dagger": [0, Vector2(171, 350), .37],
 	"sword": [1, Vector2(137, 372), .51],
@@ -87,6 +99,7 @@ var skin := 0
 var hair := 0
 var rival_skin := 0
 var rival_hair := 0
+var rival_look: Dictionary = {}
 var show_rival := true
 var arena := 0
 var positions: Array = [3, 7]
@@ -206,11 +219,12 @@ func _item(id: String) -> Dictionary:
 	return catalog.get(id, {})
 
 func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0,
-		lean: float = 0.0, arm: Vector2 = Vector2.ZERO, wrist: float = 0.0) -> void:
+		lean: float = 0.0, arm: Vector2 = Vector2.ZERO, wrist: float = 0.0, look: Dictionary = {}) -> void:
 	if height <= 0:
 		return
 	var scale_value := height / 1024.0
-	var body := Transform2D(-lean if facing_left else lean, feet).scaled_local(Vector2(-scale_value if facing_left else scale_value, scale_value))
+	var width := scale_value * clampf(float(look.get("build", 100)) / 100.0, .85, 1.2)
+	var body := Transform2D(-lean if facing_left else lean, feet).scaled_local(Vector2(-width if facing_left else width, scale_value))
 	draw_set_transform_matrix(body)
 	var shoulder := BASE_ORIGIN + SHOULDER * BASE_SCALE
 	var elbow := shoulder + ((ELBOW - SHOULDER) * BASE_SCALE).rotated(arm.x)
@@ -227,11 +241,19 @@ func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, 
 			_mesh(GLADIATOR, mask, BASE_SIZE, BASE_ORIGIN, BASE_SCALE, skin_tint)
 	if hair_index > 0:
 		_mesh(GLADIATOR, HAIR_MASK, BASE_SIZE, BASE_ORIGIN, BASE_SCALE, HAIR_TINTS[hair_index])
-	_draw_armor(gear.get("armor", {}))
+	_draw_armor(gear.get("armor", {}), look)
 	draw_set_transform(Vector2.ZERO)
 
-func _draw_armor(armor: Dictionary) -> void:
+func _draw_armor(armor: Dictionary, look: Dictionary) -> void:
 	for slot in ["pants", "shoes", "chest", "helmet", "shield"]:
+		if not look.is_empty() and slot in ["chest", "helmet"]:
+			var sheet: Array = RIVAL_CHESTS if slot == "chest" else RIVAL_HELMETS
+			var index := int(look.get(slot, -1))
+			if index >= 0 and index < sheet.size():
+				var piece: Array = sheet[index]
+				var tint: Color = RIVAL_PALETTES[clampi(int(look.get("palette", 0)), 0, RIVAL_PALETTES.size() - 1)]
+				draw_texture_rect_region(RIVAL_ARMOR, piece[1], piece[0], tint)
+			continue
 		var item := _item(armor.get(slot, ""))
 		if item.is_empty():
 			continue
@@ -399,7 +421,7 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			feet.y += height * .06 * fall
 			lean -= (1.53 if _lethal_hit() else .80) * fall
 			arm += Vector2(.24, .68) * fall
-	_avatar(feet, height, loadout, facing_left, skin_index, hair_index, lean, arm, wrist)
+	_avatar(feet, height, loadout, facing_left, skin_index, hair_index, lean, arm, wrist, rival_look if facing_left else {})
 
 func _draw_dust(at: Vector2, height: float, progress: float) -> void:
 	for index in 6:

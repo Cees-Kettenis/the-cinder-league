@@ -212,7 +212,12 @@ func generate_opponent(player_level: int, arena: int, seed_value: int, round_ind
 	if round_index >= 0:
 		var definition: Dictionary = venue.tournament[round_index]
 		var boss: bool = definition.get("boss", false)
-		return opponent(definition, level, arena, null if boss else random)
+		var entrant := opponent(definition, level, arena, null if boss else random)
+		entrant.look = rival_look(str(definition.name).hash() if boss else seed_value)
+		if boss:
+			entrant.look.chest = 0 if arena == 0 else 2
+			entrant.look.helmet = entrant.look.chest
+		return entrant
 	var level_floor := 1 if arena == 0 else int(arenas[arena - 1].cap) + 1
 	var candidates: Array = venue.opponents
 	var style: Dictionary = candidates[random.randi_range(0, candidates.size() - 1)].duplicate()
@@ -223,7 +228,16 @@ func generate_opponent(player_level: int, arena: int, seed_value: int, round_ind
 	if player_level > level_floor and random.randf() < .45:
 		player_level += -1 if random.randf() < .5 else 1
 	level = clampi(player_level, level_floor, level)
-	return opponent(style, level, arena, random)
+	var rival := opponent(style, level, arena, random)
+	rival.look = rival_look(seed_value)
+	return rival
+
+static func rival_look(seed_value: int) -> Dictionary:
+	# Keep the cosmetic draws independent of the stat and gear draws.
+	var outfit := RandomNumberGenerator.new()
+	outfit.seed = seed_value ^ 0x74c163bd
+	return {"chest": outfit.randi_range(0, 2), "helmet": outfit.randi_range(-1, 2),
+		"palette": outfit.randi_range(0, 4), "build": outfit.randi_range(90, 117)}
 
 func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumberGenerator = null) -> Dictionary:
 	var scaling: float = rules.encounter_scaling

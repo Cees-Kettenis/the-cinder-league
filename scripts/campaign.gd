@@ -4,6 +4,7 @@ const Duel = preload("res://scripts/duel.gd")
 const SAVE_VERSION := 1
 const SLOT_COUNT := 3
 const FALLEN_DIR := "user://fallen"
+const RETIRED_DIR := "user://retired"
 var data: RefCounted
 var state: Dictionary = {}
 var slot := 0
@@ -16,9 +17,12 @@ func path(number: int) -> String:
 	return "user://gladiator_%s.json" % number
 
 func read_slot(number: int) -> Dictionary:
-	if not FileAccess.file_exists(path(number)):
+	return _read_save(path(number))
+
+func _read_save(file: String) -> Dictionary:
+	if not FileAccess.file_exists(file):
 		return {}
-	var parsed = JSON.parse_string(FileAccess.get_file_as_string(path(number)))
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(file))
 	if not parsed is Dictionary or parsed.get("version") != SAVE_VERSION or not parsed.get("stats") is Dictionary:
 		return {"invalid": true}
 	return parsed
@@ -47,14 +51,23 @@ func resume(number: int) -> bool:
 		save()
 	return true
 
-func create(number: int, name: String, skin: int, hair: int, stats: Dictionary) -> bool:
-	if number >= 1 and FileAccess.file_exists(path(number)) and not _archive_fallen(number):
-		return false
+func slot_revision(number: int) -> String:
+	return FileAccess.get_sha256(path(number)) if FileAccess.file_exists(path(number)) else ""
+
+func create(number: int, name: String, skin: int, hair: int, stats: Dictionary, replace_revision: String = "") -> bool:
+	if number >= 1 and FileAccess.file_exists(path(number)):
+		var revision := slot_revision(number)
+		if revision.is_empty() or revision != replace_revision:
+			save_error = "This slot changed. Choose Replace save again."
+			return false
+		if not _archive_save(number, revision):
+			return false
 	var previous_slot := slot
 	var previous_state := state
 	slot = number
 	state = {
 		"version": SAVE_VERSION, "name": name, "skin": skin, "hair": hair, "stats": stats.duplicate(),
+		"career_id": Crypto.new().generate_random_bytes(16).hex_encode() if number >= 1 else "",
 		"level": 1, "xp": 0, "gold": int(data.rules.starting_gold), "arena": 0, "complete": false,
 		"pending": false, "pending_points": 0, "tournament": 0, "bouts": 0, "snapshot": {}, "outcome": {}, "active_bout": {},
 		"scouted_bout": {}, "scouted_tournament": {}, "tournament_seed": "", "fallen": false,
@@ -70,21 +83,55 @@ func create(number: int, name: String, skin: int, hair: int, stats: Dictionary) 
 		return false
 	return true
 
-func _archive_fallen(number: int) -> bool:
-	if not read_slot(number).get("fallen", false):
-		save_error = "This slot already has a gladiator."
-		return false
+func _archive_save(number: int, fingerprint: String) -> bool:
 	var source := ProjectSettings.globalize_path(path(number))
-	var directory := ProjectSettings.globalize_path(FALLEN_DIR)
-	var fingerprint := FileAccess.get_sha256(source)
+	var directory := ProjectSettings.globalize_path(FALLEN_DIR if read_slot(number).get("fallen", false) else RETIRED_DIR)
 	var destination := directory.path_join("gladiator_%d_%s.json" % [number, fingerprint])
 	if not fingerprint.is_empty() and FileAccess.file_exists(destination) and FileAccess.get_sha256(destination) == fingerprint:
 		return true
 	if (fingerprint.is_empty() or DirAccess.make_dir_recursive_absolute(directory) != OK
 			or DirAccess.copy_absolute(source, destination) != OK or FileAccess.get_sha256(destination) != fingerprint):
-		save_error = "Couldn't archive the fallen gladiator."
+		save_error = "Couldn't archive the previous save."
 		return false
 	return true
+
+func hall_of_fame() -> Array[Dictionary]:
+	var scores: Array[Dictionary] = []
+	var seen := {}
+	for number in range(1, SLOT_COUNT + 1):
+		_add_record(path(number), false, seen, scores)
+	for directory in [FALLEN_DIR, RETIRED_DIR]:
+		var archive := DirAccess.open(directory)
+		if archive == null:
+			continue
+		for file in archive.get_files():
+			if file.ends_with(".json"):
+				_add_record(directory.path_join(file), true, seen, scores)
+	scores.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		for field in ["crowns", "level", "xp"]:
+			if left[field] != right[field]:
+				return left[field] > right[field]
+		return left.name.naturalnocasecmp_to(right.name) < 0)
+	return scores
+
+func _add_record(file: String, archived: bool, seen: Dictionary, scores: Array[Dictionary]) -> void:
+	var saved := _read_save(file)
+	if saved.is_empty() or saved.get("invalid", false):
+		return
+	var career: String = saved.get("career_id", "")
+	if career.is_empty():
+		career = FileAccess.get_sha256(file)
+	if seen.has(career):
+		return
+	seen[career] = true
+	var complete := bool(saved.get("complete", false))
+	var status := "Retired" if archived else "Active"
+	if saved.get("fallen", false):
+		status = "Fallen"
+	elif complete:
+		status = "Champion"
+	scores.append({"name": str(saved.get("name", "Gladiator")), "level": int(saved.get("level", 1)),
+		"xp": int(saved.get("xp", 0)), "crowns": int(saved.get("arena", 0)) + int(complete), "status": status})
 
 func save() -> void:
 	if slot < 1:

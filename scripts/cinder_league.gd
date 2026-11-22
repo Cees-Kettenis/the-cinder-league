@@ -10,6 +10,7 @@ const BattleHud = preload("res://scripts/battle_hud.gd")
 const Symbol = preload("res://scripts/ui_symbol.gd")
 const TITLE_ART = preload("res://art/title-splash.png")
 const TITLE_THEME = preload("res://audio/title-theme.ogg")
+const TOWN_THEME = preload("res://audio/town-theme.ogg")
 
 const SAND := Color("#e1b880")
 const TEXT := Color("#f3e8d6")
@@ -33,12 +34,14 @@ var simulations: RefCounted
 var shell: VBoxContainer
 var content: VBoxContainer
 var title_art: TextureRect
-var title_music := AudioStreamPlayer.new()
+var music_player := AudioStreamPlayer.new()
 var music_enabled := true
+var town_music_enabled := true
 var serif: SystemFont
 var current_screen := ""
 var notification := ""
 var selected_slot := 0
+var replace_revision := ""
 var draft: Dictionary
 var draft_skin := 0
 var draft_hair := 0
@@ -87,9 +90,9 @@ func _ready() -> void:
 	elif settings.load("user://audio.cfg") == OK:
 		sound.enabled = bool(settings.get_value("audio", "enabled", true))
 	music_enabled = bool(settings.get_value("audio", "title_music", sound.enabled))
-	title_music.stream = TITLE_THEME
-	title_music.volume_db = -5.0
-	add_child(title_music)
+	town_music_enabled = bool(settings.get_value("audio", "town_music", sound.enabled))
+	music_player.volume_db = -5.0
+	add_child(music_player)
 	if get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]:
 		display_mode = DisplayMode.FULLSCREEN
 	var color := ColorRect.new()
@@ -131,7 +134,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	else:
 		match current_screen:
 			"menu", "town": _show_pause()
-			"slots": show_menu()
+			"slots", "hall": show_menu()
+			"create": _show_title(true)
 			"shop", "arena", "scout", "result": show_town()
 			_: return
 	get_viewport().set_input_as_handled()
@@ -277,7 +281,7 @@ func _page(key: String, heading: String) -> void:
 		shell.show()
 	current_screen = key
 	title_art.visible = key in ["menu", "slots"]
-	_sync_title_music.call_deferred()
+	_sync_music.call_deferred()
 	_apply_display_mode()
 	_clear(shell)
 	var nav := _row(shell, 8)
@@ -383,6 +387,10 @@ func _audio_settings(menu: VBoxContainer) -> void:
 	music.text = "Title music"
 	music.button_pressed = music_enabled
 	menu.add_child(music)
+	var town := CheckButton.new()
+	town.text = "Town music"
+	town.button_pressed = town_music_enabled
+	menu.add_child(town)
 	var save_notice := _settings_notice(menu)
 	effects.toggled.connect(func(enabled: bool) -> void:
 		sound.enabled = enabled
@@ -391,18 +399,28 @@ func _audio_settings(menu: VBoxContainer) -> void:
 		save_notice.visible = not _save_settings())
 	music.toggled.connect(func(enabled: bool) -> void:
 		music_enabled = enabled
-		_sync_title_music()
+		_sync_music()
+		save_notice.visible = not _save_settings())
+	town.toggled.connect(func(enabled: bool) -> void:
+		town_music_enabled = enabled
+		_sync_music()
 		save_notice.visible = not _save_settings())
 
-func _sync_title_music() -> void:
-	if music_enabled and current_screen in ["menu", "slots"]:
-		if not title_music.playing:
-			title_music.play()
-	elif title_music.playing:
-		title_music.stop()
+func _sync_music() -> void:
+	var wanted: AudioStream
+	if town_music_enabled and current_screen == "town":
+		wanted = TOWN_THEME
+	elif music_enabled and current_screen in ["menu", "slots", "hall"]:
+		wanted = TITLE_THEME
+	if music_player.stream != wanted:
+		music_player.stop()
+		music_player.stream = wanted
+	if wanted != null and not music_player.playing:
+		music_player.play()
 
 func _quit_game() -> void:
-	title_music.stop()
+	music_player.stop()
+	sound.stop()
 	# The mixer releases the looping stream after playback stops.
 	await get_tree().create_timer(.30).timeout
 	get_tree().quit()
@@ -424,6 +442,7 @@ func _save_settings() -> bool:
 	settings.load(USER_SETTINGS)
 	settings.set_value("audio", "enabled", sound.enabled)
 	settings.set_value("audio", "title_music", music_enabled)
+	settings.set_value("audio", "town_music", town_music_enabled)
 	settings.set_value("display", "mode", display_mode)
 	return settings.save(USER_SETTINGS) == OK
 
@@ -488,6 +507,9 @@ func _show_title(selecting_slot: bool) -> void:
 		play.size_flags_horizontal = SIZE_SHRINK_BEGIN
 		play.add_theme_font_size_override("font_size", 23)
 		play.grab_focus()
+		var hall := _button(lockup, "Hall of Fame", show_hall_of_fame)
+		hall.custom_minimum_size = Vector2(186, 43)
+		hall.size_flags_horizontal = SIZE_SHRINK_BEGIN
 		return
 	var slots := _row(content)
 	for number in range(1, Campaign.SLOT_COUNT + 1):
@@ -495,7 +517,9 @@ func _show_title(selecting_slot: bool) -> void:
 		_fill(card.get_parent())
 		var saved: Dictionary = game.read_slot(number)
 		if saved.get("invalid", false):
+			_title(card, "Slot %d" % number, 21)
 			_label(card, "Save could not be opened", 17, RED)
+			_button(card, "Replace save", _confirm_replace.bind(number))
 		elif saved.is_empty():
 			_title(card, "Slot %d" % number, 21)
 			_button(card, "Create gladiator", _create_character.bind(number), true)
@@ -503,9 +527,59 @@ func _show_title(selecting_slot: bool) -> void:
 			_title(card, "%s · Lv. %d" % [saved.name, saved.level], 19)
 			if saved.get("fallen", false):
 				_label(card, "Fallen", 16, RED)
-				_button(card, "New gladiator", _create_character.bind(number), true)
 			else:
 				_button(card, "Continue", _resume.bind(number), true)
+			_button(card, "Replace save", _confirm_replace.bind(number))
+
+func show_hall_of_fame() -> void:
+	_page("hall", "Hall of Fame")
+	var records: Array = game.hall_of_fame()
+	if records.is_empty():
+		_label(_card(content), "No gladiators yet.", 18)
+		return
+	_hall_row(_card(content, 0), "Gladiator", "Level", "Tournaments won", "Status", SAND)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content.add_child(scroll)
+	_fill(scroll, true)
+	var list := _column(scroll, 5)
+	_fill(list)
+	for index in records.size():
+		var record: Dictionary = records[index]
+		_hall_row(_card(list, 0), "%d. %s" % [index + 1, record.name], str(record.level), str(record.crowns),
+			record.status, SAND if record.status == "Champion" else TEXT)
+
+func _hall_row(parent: Control, gladiator: String, level: String, tournaments: String, status: String, color: Color) -> void:
+	var row := _row(parent, 10)
+	var label := _label(row, gladiator, 17, color)
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_fill(label)
+	_label(row, level, 17, color).custom_minimum_size.x = 84
+	_label(row, tournaments, 17, color).custom_minimum_size.x = 162
+	_label(row, status, 17, color).custom_minimum_size.x = 100
+
+func _confirm_replace(number: int) -> void:
+	var revision: String = game.slot_revision(number)
+	if revision.is_empty():
+		_show_title(true)
+		return
+	var saved: Dictionary = game.read_slot(number)
+	var dialog := ConfirmationDialog.new()
+	dialog.theme = theme
+	dialog.title = "Replace save?"
+	if saved.get("invalid", false):
+		dialog.dialog_text = "Start a new gladiator in Slot %d? A copy of the previous save will be archived." % number
+	else:
+		dialog.dialog_text = "Start a new gladiator in Slot %d? %s's record will stay in the Hall of Fame." % [number, saved.name]
+	dialog.get_ok_button().text = "Replace save"
+	dialog.transient = true
+	dialog.exclusive = true
+	add_child(dialog)
+	dialog.confirmed.connect(_create_character.bind(number, revision))
+	dialog.visibility_changed.connect(func() -> void:
+		if not dialog.visible:
+			dialog.queue_free())
+	dialog.popup_centered()
 
 func _resume(number: int) -> void:
 	if not game.resume(number):
@@ -521,8 +595,9 @@ func _resume(number: int) -> void:
 	else:
 		show_town()
 
-func _create_character(number: int) -> void:
+func _create_character(number: int, revision: String = "") -> void:
 	selected_slot = number
+	replace_revision = revision
 	draft = data.stats_empty()
 	level_mode = false
 	draft_skin = 0
@@ -668,7 +743,7 @@ func _confirm_character() -> void:
 		var chosen := name_input.text.strip_edges()
 		if chosen.is_empty():
 			return
-		if not game.create(selected_slot, chosen, draft_skin, draft_hair, draft):
+		if not game.create(selected_slot, chosen, draft_skin, draft_hair, draft, replace_revision):
 			creation_error.text = game.save_error
 			creation_error.show()
 			return
@@ -690,9 +765,12 @@ func show_town() -> void:
 	_town_destination(map, Rect2(1231, 291, 282, 356), "trophy", "Arena", show_arena)
 
 func _enter_shop(kind: String) -> void:
+	var entering := current_screen != "shop" or shop_type != kind
 	shop_type = kind
 	selected_item = ""
 	show_shop()
+	if entering and current_screen == "shop":
+		sound.play("shop_bell")
 
 func show_shop() -> void:
 	if game.is_fallen():
@@ -945,6 +1023,7 @@ func _show_rival(stage: Control, fighter: Dictionary) -> void:
 	stage.right_loadout = fighter.loadout
 	stage.rival_skin = int(fighter.get("skin", 0))
 	stage.rival_hair = int(fighter.get("hair", 0))
+	stage.rival_look = fighter.get("look", Data.rival_look(str(fighter.name).hash()))
 
 func _scout_bout(tournament: bool) -> void:
 	var offer: Dictionary = game.scout_bout(tournament, randi())
@@ -1047,7 +1126,7 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	fight_generation += 1
 	current_screen = "battle"
 	title_art.hide()
-	_sync_title_music()
+	_sync_music()
 	shell.hide()
 	battle_layer = Control.new()
 	add_child(battle_layer)
