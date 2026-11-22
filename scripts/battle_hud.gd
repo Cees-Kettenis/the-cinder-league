@@ -21,7 +21,6 @@ var fighter_cards: Array[Dictionary] = []
 var save_notice: Label
 var settings_button: Button
 var cast_charges: Label
-var weapon_action := "attack"
 var split_attacks := false
 
 func build(arena_name: String, title_font: Font) -> void:
@@ -38,10 +37,8 @@ func build(arena_name: String, title_font: Font) -> void:
 	action_layer.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	action_layer.mouse_filter = MOUSE_FILTER_IGNORE
 	for action in Duel.ACTIONS:
-		if action == "rush":
-			continue
 		var button := _button(action_layer, "")
-		button.pressed.connect(func() -> void: action_selected.emit(weapon_action if action == "attack" else action))
+		button.pressed.connect(func() -> void: action_selected.emit(action))
 		button.custom_minimum_size = BUTTON_SIZE
 		Symbol.on_button(button, action, 36, Duel.LABELS[action])
 		var fill := Color("#45312b")
@@ -122,19 +119,15 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 	var player: Dictionary = bout.fighters[0]
 	cast_charges.visible = not player.spell.is_empty()
 	cast_charges.text = str(int(player.casts))
-	weapon_action = bout.weapon_action()
-	split_attacks = weapon_action == "attack" and bout.has_attack_styles()
+	split_attacks = bout.in_weapon_reach() and bout.has_attack_styles()
 	action_buttons.quick.visible = split_attacks
 	action_buttons.power.visible = split_attacks
-	for key in action_buttons:
-		var action: String = weapon_action if key == "attack" else key
-		var button: Button = action_buttons[key]
+	for action in action_buttons:
+		var button: Button = action_buttons[action]
 		var reason: String = bout.reason(action)
 		button.disabled = not reason.is_empty()
 		var icon: Control = button.get_child(0)
 		icon.modulate = Color("#afa4a7") if button.disabled else Color.WHITE
-		icon.symbol = action
-		icon.queue_redraw()
 		if reason.begins_with("Needs"):
 			reason = "Not enough stamina"
 		var title: String = Duel.LABELS[action]
@@ -144,7 +137,10 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 			title = "%s · %d %s left" % [player.spell.name, player.casts, "cast" if player.casts == 1 else "casts"]
 		button.accessibility_name = title
 		match action:
-			"rush": title += " · %d stamina · Lower accuracy" % bout.cost(action)
+			"advance", "retreat", "jump":
+				var spaces: int = bout.travel(action)
+				if spaces > 0:
+					title += " · %d %s · %d stamina" % [spaces, "space" if spaces == 1 else "spaces", bout.cost(action)]
 			"power":
 				if split_attacks:
 					title += " · %d stamina · More damage · Lower accuracy · Push %d" % [bout.cost(action), bout.power_push()]

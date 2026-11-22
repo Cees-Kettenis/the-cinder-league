@@ -1,7 +1,7 @@
 extends RefCounted
 
-const ACTIONS: Array[String] = ["advance", "retreat", "jump", "quick", "attack", "power", "rush", "guard", "sleep", "taunt", "cast", "potion"]
-const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power", "rush"]
+const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power"]
+const ACTIONS: Array[String] = ["advance", "retreat", "jump"] + WEAPON_ACTIONS + ["guard", "sleep", "taunt", "cast", "potion"]
 const LABELS := {
 	"advance": "Advance", "retreat": "Retreat", "jump": "Leap forward", "attack": "Attack",
 	"quick": "Quick attack", "power": "Power attack", "rush": "Lunge",
@@ -37,6 +37,13 @@ func _init(rules_data: RefCounted, left: Dictionary, right: Dictionary, fight_se
 
 func distance() -> int:
 	return positions[1] - positions[0]
+
+func travel(action: String) -> int:
+	var steps := int(distances[action])
+	if action == "retreat":
+		var room := positions[0] if active == 0 else int(rules.arena_size) - positions[1]
+		return mini(steps, room)
+	return mini(steps, distance() - 1)
 
 static func hit_chance(rule: Dictionary, stats: Dictionary, spell: bool, exposed: bool = false, threatened: bool = false) -> float:
 	var hit := float(rule.base_hit + stats.Attack * rule.hit_per_attack)
@@ -82,9 +89,9 @@ func cost(action: String, side: int = -1) -> int:
 		"quick": return _quick_cost(fighter)
 		"power": return int(fighter.weapon.energy) + ceili(rules.get("power_stamina_extra", 0.0))
 		"rush":
+			# Reconstruct lunges already recorded by earlier builds.
 			if not rules.has("lunge_base_cost"):
-				var saved_cost := int(fighter.weapon.energy) + int(moves.jump)
-				return saved_cost if _restoring_history else maxi(1, saved_cost)
+				return int(fighter.weapon.energy) + int(moves.jump)
 			var spaces := maxi(0, distance() - int(fighter.weapon.reach))
 			return int(fighter.weapon.energy) + ceili(rules.lunge_base_cost + spaces * rules.lunge_cost_per_space)
 		"cast": return int(fighter.spell.get("energy", 0))
@@ -93,8 +100,8 @@ func cost(action: String, side: int = -1) -> int:
 func _quick_cost(fighter: Dictionary) -> int:
 	return maxi(1, ceili(fighter.weapon.energy * rules.get("quick_stamina_multiplier", 1.0)))
 
-func weapon_action() -> String:
-	return "attack" if distance() <= fighters[active].weapon.reach else "rush"
+func in_weapon_reach() -> bool:
+	return distance() <= fighters[active].weapon.reach
 
 func has_attack_styles() -> bool:
 	return rules.has("power_damage_multiplier")
@@ -131,7 +138,7 @@ func threatens_cast(fighter: Dictionary) -> bool:
 func reason(action: String, ignore_provoke: bool = false) -> String:
 	if winner != -2:
 		return "Bout finished"
-	if action not in ACTIONS:
+	if action not in ACTIONS and not (_restoring_history and action == "rush"):
 		return "Unknown action"
 	if action in ["quick", "power"] and not has_attack_styles():
 		return "Unavailable in this saved bout"
@@ -144,10 +151,10 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 			return "Provoked. Choose %s." % LABELS[demanded]
 	match action:
 		"quick", "attack", "power":
-			if distance() > fighter.weapon.reach:
+			if not in_weapon_reach():
 				return "Out of weapon reach"
 		"rush":
-			if distance() <= fighter.weapon.reach:
+			if in_weapon_reach():
 				return "Use Attack at this distance"
 			if fighter.weapon.reach < 1 or (not rules.has("lunge_base_cost") and distance() > fighter.weapon.reach + distances.jump):
 				return "Too far to lunge"
@@ -195,11 +202,7 @@ func act(action: String) -> Dictionary:
 	match action:
 		"advance", "jump", "retreat":
 			var toward := 1 if side == 0 else -1
-			var steps := int(distances[action])
-			if action == "retreat":
-				positions[side] = clampi(positions[side] - toward * steps, 0, int(rules.arena_size))
-			else:
-				positions[side] += toward * mini(steps, distance() - 1)
+			positions[side] += toward * travel(action) * (-1 if action == "retreat" else 1)
 		"guard":
 			fighter.guarding = true
 			event.message = "%s raises their guard." % fighter.name
@@ -334,10 +337,13 @@ func choose(profile: String) -> String:
 		return "cast"
 	if "quick" in legal:
 		return "quick"
-	if "rush" in legal:
-		return "rush"
-	if "jump" in legal and distance() > fighter.weapon.reach + int(distances.advance):
-		return "jump"
+	if "jump" in legal:
+		var step_gap := distance() - travel("advance")
+		var jump_gap := distance() - travel("jump")
+		var close_on_caster: bool = enemy.casts > 0 and distance() <= enemy.spell.reach and jump_gap <= fighter.weapon.reach
+		if "advance" not in legal or (jump_gap < step_gap and step_gap > fighter.weapon.reach
+				and (jump_gap > enemy.weapon.reach or close_on_caster)):
+			return "jump"
 	if "advance" in legal:
 		return "advance"
 	if "cast" in legal:

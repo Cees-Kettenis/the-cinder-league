@@ -87,7 +87,7 @@ func begin_turn(event: Dictionary, spell_art: int) -> void:
 		cast(spell_art)
 	else:
 		play({
-			"advance": "step", "retreat": "step", "jump": "leap", "rush": "step",
+			"advance": "step", "retreat": "step", "jump": "leap",
 			"guard": "guard", "sleep": "rest", "taunt": "taunt", "potion": "potion",
 		}.get(event.action, ""))
 
