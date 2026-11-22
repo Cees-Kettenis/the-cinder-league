@@ -22,6 +22,7 @@ var save_notice: Label
 var settings_button: Button
 var cast_charges: Label
 var weapon_action := "attack"
+var split_attacks := false
 
 func build(arena_name: String, title_font: Font) -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
@@ -46,12 +47,15 @@ func build(arena_name: String, title_font: Font) -> void:
 		var fill := Color("#45312b")
 		match action:
 			"attack": fill = Color("#924a3d")
+			"power": fill = Color("#a3592c")
+			"quick": fill = Color("#526878")
 			"cast": fill = Color("#634f90")
 			"guard": fill = Color("#36566b")
 			"sleep", "potion": fill = Color("#365447")
 		button.add_theme_stylebox_override("normal", _plate(fill, EDGE, 0, 22))
 		button.add_theme_stylebox_override("hover", _plate(fill.lightened(.18), SAND, 0, 22))
 		button.add_theme_stylebox_override("disabled", _plate(Color("#332a2d"), Color("#675560"), 0, 22))
+		button.visible = action not in ["quick", "power"]
 		action_buttons[action] = button
 	cast_charges = _label(action_buttons.cast, "", 14, IVORY)
 	cast_charges.mouse_filter = MOUSE_FILTER_IGNORE
@@ -119,6 +123,9 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 	cast_charges.visible = not player.spell.is_empty()
 	cast_charges.text = str(int(player.casts))
 	weapon_action = bout.weapon_action()
+	split_attacks = weapon_action == "attack" and bout.has_attack_styles()
+	action_buttons.quick.visible = split_attacks
+	action_buttons.power.visible = split_attacks
 	for key in action_buttons:
 		var action: String = weapon_action if key == "attack" else key
 		var button: Button = action_buttons[key]
@@ -131,17 +138,30 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		if reason.begins_with("Needs"):
 			reason = "Not enough stamina"
 		var title: String = Duel.LABELS[action]
+		if action == "attack" and split_attacks:
+			title = "Normal attack"
 		if action == "cast" and not player.spell.is_empty():
 			title = "%s · %d %s left" % [player.spell.name, player.casts, "cast" if player.casts == 1 else "casts"]
 		button.accessibility_name = title
-		if action == "rush":
-			title += " · %d stamina · Lower accuracy" % bout.cost(action)
+		match action:
+			"rush": title += " · %d stamina · Lower accuracy" % bout.cost(action)
+			"power":
+				if split_attacks:
+					title += " · %d stamina · More damage · Lower accuracy · Push %d" % [bout.cost(action), bout.power_push()]
+			"quick": title += " · %d stamina · Less damage · Higher accuracy" % bout.cost(action)
 		button.tooltip_text = title if reason.is_empty() else "%s · %s" % [title, reason]
 
 func place_actions(feet: Vector2, fighter_height: float) -> void:
 	var top := maxf(175, feet.y - fighter_height - 24)
-	_place("attack", Vector2(feet.x - 40, top))
-	_place("cast", Vector2(feet.x + 40, top))
+	if split_attacks:
+		var attack_center := clampf(feet.x, 153, size.x - 153)
+		_place("quick", Vector2(attack_center - 108, top))
+		_place("attack", Vector2(attack_center - 36, top))
+		_place("power", Vector2(attack_center + 36, top))
+		_place("cast", Vector2(attack_center + 108, top))
+	else:
+		_place("attack", Vector2(feet.x - 40, top))
+		_place("cast", Vector2(feet.x + 40, top))
 	var left := feet.x - clampf(fighter_height * .42, 92, 155)
 	_place("advance", Vector2(left + 10, top + 72))
 	_place("jump", Vector2(left - 6, top + 140))

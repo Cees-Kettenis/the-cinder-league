@@ -22,6 +22,7 @@ func _run() -> void:
 	_check_starter_weapon(data)
 	_check_exhaustion(data)
 	_check_rush(data)
+	_check_attack_styles(data)
 	_check_spell_charges(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
@@ -127,6 +128,67 @@ func _check_rush(data: RefCounted) -> void:
 	_check(not old_free_lunge.act("rush").valid, "Legacy custom gear and movement costs cannot make an exhausted lunge free")
 	_check(old_free_lunge.restore_history(["rush"]) and old_free_lunge.fighters[0].energy == 0,
 		"An already-recorded legacy lunge should still replay with its saved cost")
+
+func _check_attack_styles(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	var attacker: Dictionary = data.fighter("Gladiator", stats, {"weapon": "sword"})
+	var target: Dictionary = attacker.duplicate(true)
+	target.max_hp = 500
+	target.hp = 500
+	var comparison := Duel.new(data, attacker, target, 42, 1)
+	_check(comparison.chance("power") < comparison.chance("attack") and comparison.chance("attack") < comparison.chance("quick")
+		and comparison.cost("quick") < comparison.cost("attack") and comparison.cost("attack") < comparison.cost("power"),
+		"Quick and Power should trade accuracy and stamina around Normal")
+	comparison.fighters[0].energy = comparison.cost("quick")
+	_check(comparison.threatens_cast(comparison.fighters[0]) and not comparison.reason("attack").is_empty(),
+		"A close opponent who can still use Quick should pressure a caster")
+
+	var rules: Dictionary = data.rules.duplicate()
+	rules.base_hit = 1.0
+	rules.maximum_hit = 1.0
+	rules.power_hit_penalty = 0.0
+	rules.base_crit = 0.0
+	rules.base_block = 0.0
+	var damage: Array[int] = []
+	for action in ["quick", "attack", "power"]:
+		var duel := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
+		var before := duel.positions.duplicate()
+		var event := duel.act(action)
+		damage.append(event.get("damage", 0))
+		_check(duel.positions[1] == before[1] + (1 if action == "power" else 0),
+			"Only a Power hit should move a surviving defender")
+	_check(damage[0] > 0 and damage[0] < damage[1] and damage[1] < damage[2],
+		"Quick, Normal, and Power should deal increasing damage")
+
+	attacker.stats.Strength = 24
+	var strong := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
+	var start := strong.positions[1]
+	strong.act("power")
+	_check(strong.positions[1] == start + 3, "Strength should increase Power knockback")
+
+	var edge := int(rules.arena_size)
+	for side in [0, 1]:
+		var duel := Duel.new(data, attacker, attacker, 42, 1, {"rules": rules})
+		duel.fighters[1 - side].hp = 500
+		duel.active = side
+		duel.positions[0] = edge - 2 if side == 0 else 1
+		duel.positions[1] = edge - 1 if side == 0 else 2
+		var event := duel.act("power")
+		_check(event.get("ring_out", false) and duel.winner == side and duel.fighters[1 - side].hp == 0
+			and duel.positions[1 - side] == (edge + 1 if side == 0 else -1),
+			"A Power hit past either edge must immediately end the bout")
+
+	rules.base_block = 1.0
+	rules.block_cap = 1.0
+	var blocked := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
+	var before := blocked.positions.duplicate()
+	_check(blocked.act("power").get("blocked", false) and blocked.positions == before, "A block should prevent knockback")
+	rules.power_hit_penalty = 1.0
+	var missed := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
+	_check(missed.act("power").get("miss", false) and missed.positions == before, "A miss should prevent knockback")
+	rules.erase("power_damage_multiplier")
+	var legacy := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
+	_check(not legacy.act("power").valid and legacy.act("attack").valid, "Older snapshots should retain Normal without the new styles")
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -376,6 +438,14 @@ func _check_game_buttons() -> void:
 	_check(ui.current_screen == "battle" and not is_instance_valid(ui.settings_popup), "Escape should keep the player in the bout")
 	_check(not ui.battle_hud.action_buttons.has("rush") and not ui.battle_hud.action_buttons.attack.disabled
 		and ui.battle_hud.action_buttons.attack.accessibility_name == "Lunge", "One Attack button should offer a lunge from a distance")
+	_check(not ui.battle_hud.action_buttons.quick.visible and not ui.battle_hud.action_buttons.power.visible,
+		"Quick and Power should be hidden outside weapon reach")
+	var rival_start: int = ui.bout.positions[1]
+	ui.bout.positions[1] = ui.bout.positions[0] + 1
+	ui._refresh_battle()
+	_check(ui.battle_hud.action_buttons.quick.visible and ui.battle_hud.action_buttons.power.visible
+		and ui.battle_hud.action_buttons.attack.accessibility_name == "Normal attack", "Close range should expose all three attack styles")
+	ui.bout.positions[1] = rival_start
 	var starting_stamina: int = ui.bout.fighters[0].energy
 	ui.bout.fighters[0].energy = 0
 	ui._refresh_battle()

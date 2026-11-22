@@ -11,8 +11,14 @@ const Symbol = preload("res://scripts/ui_symbol.gd")
 const TITLE_ART = preload("res://art/title-splash.png")
 const TITLE_THEME = preload("res://audio/title-theme.ogg")
 const TOWN_THEME = preload("res://audio/town-theme.ogg")
-const SHOP_THEME = preload("res://audio/shop-theme.ogg")
-const ARENA_THEME = preload("res://audio/arena-theme.ogg")
+const SHOP_THEMES := {
+	"spell": preload("res://audio/magic-shop.ogg"),
+	"weapon": preload("res://audio/weaponsmith.ogg"),
+	"armor": preload("res://audio/armory.ogg"),
+}
+const ARENA_LOBBY_THEME = preload("res://audio/arena-theme.ogg")
+const PRE_FIGHT_THEME = preload("res://audio/before-the-fight.ogg")
+const FIGHT_THEMES := [preload("res://audio/amber-ring.ogg"), preload("res://audio/iron-court.ogg")]
 
 const SAND := Color("#e1b880")
 const TEXT := Color("#f3e8d6")
@@ -287,7 +293,7 @@ func _page(key: String, heading: String) -> void:
 		shell.show()
 	current_screen = key
 	title_art.visible = key in ["menu", "slots"]
-	_sync_music.call_deferred()
+	_sync_audio.call_deferred()
 	_apply_display_mode()
 	_clear(shell)
 	var nav := _row(shell, 8)
@@ -406,32 +412,36 @@ func _audio_settings(menu: VBoxContainer) -> void:
 		sound.enabled = enabled
 		if not enabled:
 			sound.stop()
+		_sync_audio()
 		save_notice.visible = not _save_settings())
 	music.toggled.connect(func(enabled: bool) -> void:
 		music_enabled = enabled
-		_sync_music()
+		_sync_audio()
 		save_notice.visible = not _save_settings())
 	town.toggled.connect(func(enabled: bool) -> void:
 		town_music_enabled = enabled
-		_sync_music()
+		_sync_audio()
 		save_notice.visible = not _save_settings())
 	venues.toggled.connect(func(enabled: bool) -> void:
 		venue_music_enabled = enabled
-		_sync_music()
+		_sync_audio()
 		save_notice.visible = not _save_settings())
 
-func _sync_music() -> void:
+func _sync_audio() -> void:
 	if is_queued_for_deletion():
 		return
+	sound.set_crowd(current_screen == "battle")
 	var wanted: AudioStream
 	if town_music_enabled and current_screen in ["town", "allocate"]:
 		wanted = TOWN_THEME
 	elif music_enabled and current_screen in ["menu", "slots", "hall", "create"]:
 		wanted = TITLE_THEME
-	elif venue_music_enabled and current_screen == "shop":
-		wanted = SHOP_THEME
-	elif venue_music_enabled and current_screen in ["arena", "scout", "battle", "result"]:
-		wanted = ARENA_THEME
+	elif venue_music_enabled:
+		match current_screen:
+			"shop": wanted = SHOP_THEMES.get(shop_type)
+			"arena", "result": wanted = ARENA_LOBBY_THEME
+			"scout": wanted = PRE_FIGHT_THEME
+			"battle": wanted = FIGHT_THEMES[clampi(int(battle_stage.arena), 0, FIGHT_THEMES.size() - 1)]
 	if music_player.stream == wanted:
 		return
 	if music_transition != null:
@@ -1168,7 +1178,6 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	fight_generation += 1
 	current_screen = "battle"
 	title_art.hide()
-	_sync_music.call_deferred()
 	shell.hide()
 	battle_layer = Control.new()
 	add_child(battle_layer)
@@ -1176,8 +1185,10 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	battle_stage = _stage(battle_layer, "battle", 0)
 	battle_stage.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	battle_stage.full_arena = true
+	battle_stage.has_pits = bout.has_attack_styles()
 	battle_stage.lethal_bout = snapshot.rewards.get("lethal_defeat", false) and not practice
 	battle_stage.arena = int(snapshot.arena)
+	_sync_audio.call_deferred()
 	battle_stage.arena_width = int(bout.rules.arena_size)
 	battle_stage.bout_items = snapshot.equipment
 	battle_stage.left_loadout = bout.fighters[0].loadout
@@ -1249,6 +1260,8 @@ func _finish_bout() -> void:
 		title = "League champion"
 	elif outcome.get("fallen", false):
 		title = "%s has fallen" % game.state.name
+	elif not bout.history.is_empty() and bout.history.back().get("ring_out", false):
+		title = "Ring-out victory" if bout.winner == 0 else "Ring-out defeat"
 	_page("result", "Practice " + title.to_lower() if practicing else title)
 	_stage(content, "avatar", 290)
 	if outcome.get("fallen", false):

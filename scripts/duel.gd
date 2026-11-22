@@ -1,9 +1,10 @@
 extends RefCounted
 
-const ACTIONS: Array[String] = ["advance", "retreat", "jump", "attack", "rush", "guard", "sleep", "taunt", "cast", "potion"]
+const ACTIONS: Array[String] = ["advance", "retreat", "jump", "quick", "attack", "power", "rush", "guard", "sleep", "taunt", "cast", "potion"]
+const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power", "rush"]
 const LABELS := {
 	"advance": "Advance", "retreat": "Retreat", "jump": "Leap forward", "attack": "Attack",
-	"rush": "Lunge",
+	"quick": "Quick attack", "power": "Power attack", "rush": "Lunge",
 	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Cast", "potion": "Drink potion",
 }
 
@@ -78,6 +79,8 @@ func cost(action: String, side: int = -1) -> int:
 	var fighter: Dictionary = fighters[active if side < 0 else side]
 	match action:
 		"attack": return int(fighter.weapon.energy)
+		"quick": return _quick_cost(fighter)
+		"power": return int(fighter.weapon.energy) + ceili(rules.get("power_stamina_extra", 0.0))
 		"rush":
 			if not rules.has("lunge_base_cost"):
 				var saved_cost := int(fighter.weapon.energy) + int(moves.jump)
@@ -87,8 +90,17 @@ func cost(action: String, side: int = -1) -> int:
 		"cast": return int(fighter.spell.get("energy", 0))
 	return int(moves.get(action, 0))
 
+func _quick_cost(fighter: Dictionary) -> int:
+	return maxi(1, ceili(fighter.weapon.energy * rules.get("quick_stamina_multiplier", 1.0)))
+
 func weapon_action() -> String:
 	return "attack" if distance() <= fighters[active].weapon.reach else "rush"
+
+func has_attack_styles() -> bool:
+	return rules.has("power_damage_multiplier")
+
+func power_push() -> int:
+	return 1 + floori(fighters[active].stats.Strength / float(rules.power_strength_per_space))
 
 func restore_history(actions: Array) -> bool:
 	_restoring_history = true
@@ -104,16 +116,25 @@ func chance(action: String) -> float:
 	var fighter: Dictionary = fighters[active]
 	var target: Dictionary = fighters[1 - active]
 	var accuracy := hit_chance(rules, fighter.stats, action == "cast", target.exposed, threatens_cast(target))
-	return maxf(0.0, accuracy - float(rules.get("lunge_hit_penalty", 0.0))) if action == "rush" else accuracy
+	match action:
+		"rush": return maxf(0.0, accuracy - float(rules.get("lunge_hit_penalty", 0.0)))
+		"power": return maxf(0.0, accuracy - float(rules.get("power_hit_penalty", 0.0)))
+		"quick": return minf(1.0, accuracy + float(rules.get("quick_hit_bonus", 0.0)))
+	return accuracy
 
 func threatens_cast(fighter: Dictionary) -> bool:
-	return distance() <= fighter.weapon.reach and fighter.energy >= fighter.weapon.energy
+	var stamina := int(fighter.weapon.energy)
+	if has_attack_styles():
+		stamina = mini(stamina, _quick_cost(fighter))
+	return distance() <= fighter.weapon.reach and fighter.energy >= stamina
 
 func reason(action: String, ignore_provoke: bool = false) -> String:
 	if winner != -2:
 		return "Bout finished"
 	if action not in ACTIONS:
 		return "Unknown action"
+	if action in ["quick", "power"] and not has_attack_styles():
+		return "Unavailable in this saved bout"
 	var fighter: Dictionary = fighters[active]
 	if not ignore_provoke and fighter.provoked:
 		var demanded := "attack" if reason("attack", true).is_empty() else "advance"
@@ -122,7 +143,7 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 		if action != demanded:
 			return "Provoked. Choose %s." % LABELS[demanded]
 	match action:
-		"attack":
+		"quick", "attack", "power":
 			if distance() > fighter.weapon.reach:
 				return "Out of weapon reach"
 		"rush":
@@ -192,12 +213,14 @@ func act(action: String) -> Dictionary:
 			fighter.hp = mini(fighter.max_hp, before + int(rules.heal))
 			fighter.potions -= 1
 			event.message = "%s restores %d health." % [fighter.name, fighter.hp - before]
-		"attack", "rush", "cast":
+		"quick", "attack", "power", "rush", "cast":
 			if action == "cast":
 				fighter.casts -= 1
 			elif action == "rush":
 				positions[side] += (1 if side == 0 else -1) * (distance() - int(fighter.weapon.reach))
 			_strike(action, fighter, enemy, event)
+			if action == "power" and not event.miss and not event.blocked and enemy.hp > 0:
+				_knock_back(enemy, event)
 		"taunt":
 			var provoke := taunt_chance(rules, fighter.stats.Charisma)
 			if random.randf() < provoke:
@@ -235,7 +258,7 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 		event.message = "%s misses with %s." % [fighter.name, event.title.to_lower()]
 		return
 	var spell := action == "cast"
-	var damage := strike_damage(rules, fighter, spell)
+	var damage := _action_damage(action, fighter)
 	if not spell and random.randf() < crit_chance(rules, fighter.stats.Attack):
 		event.critical = true
 		damage *= crit_multiplier(rules, fighter.stats.Attack)
@@ -247,6 +270,26 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 	if event.blocked:
 		marker += " Blocked in part."
 	event.message = "%s uses %s.%s %s" % [fighter.name, event.title.to_lower(), marker, _impact(event)]
+
+func _action_damage(action: String, fighter: Dictionary) -> float:
+	var damage := strike_damage(rules, fighter, action == "cast")
+	match action:
+		"power": return damage * rules.power_damage_multiplier
+		"quick": return damage * rules.quick_damage_multiplier
+	return damage
+
+func _knock_back(enemy: Dictionary, event: Dictionary) -> void:
+	var target := 1 - active
+	var steps := power_push()
+	var edge := int(rules.arena_size)
+	var destination := positions[target] + steps * (1 if active == 0 else -1)
+	positions[target] = clampi(destination, -1, edge + 1)
+	if destination < 0 or destination > edge:
+		enemy.hp = 0
+		event.ring_out = true
+		event.message += " %s falls into the pit." % enemy.name
+	else:
+		event.message += " %s is pushed back %d." % [enemy.name, steps]
 
 func _injure(damage: int, target: Dictionary, event: Dictionary) -> void:
 	event.armor_hit = mini(damage, int(target.armor))
@@ -268,6 +311,12 @@ func choose(profile: String) -> String:
 		return "potion"
 	if profile == "charisma" and "taunt" in legal:
 		return "taunt"
+	if "power" in legal and not enemy.guarding:
+		var edge_distance := int(rules.arena_size) - positions[1] if active == 0 else positions[0]
+		var protection: float = enemy.hp + enemy.armor
+		var finish := _action_damage("attack", fighter) < protection and _action_damage("power", fighter) >= protection
+		if power_push() > edge_distance or (finish and chance("power") >= .50):
+			return "power"
 	if "attack" in legal:
 		if "cast" in legal:
 			var melee := _expected_strike(fighter, enemy, false)
@@ -278,9 +327,13 @@ func choose(profile: String) -> String:
 		strategy_random.seed = seed_value ^ ((turn + 1) * 0x9e3779b9)
 		if profile == "guard" and "guard" in legal and not enemy.exposed and strategy_random.randf() < .10:
 			return "guard"
+		if "quick" in legal and _action_damage("quick", fighter) >= enemy.hp + enemy.armor:
+			return "quick"
 		return "attack"
 	if "cast" in legal and not _should_close(fighter, enemy):
 		return "cast"
+	if "quick" in legal:
+		return "quick"
 	if "rush" in legal:
 		return "rush"
 	if "jump" in legal and distance() > fighter.weapon.reach + int(distances.advance):

@@ -44,6 +44,18 @@ static func paint(canvas: CanvasItem, key: String, origin: Vector2, extent: floa
 			_shape(canvas, [Vector2(5,14), Vector2(18,26), Vector2(15,29), Vector2(2,17)], GOLD)
 			_line(canvas, [Vector2(10,23), Vector2(4,29)], INK, 6)
 			_line(canvas, [Vector2(10,23), Vector2(4,29)], Color("#c88465"), 3)
+		"quick":
+			_line(canvas, [Vector2(3,9), Vector2(13,9)], CREAM, 2)
+			_line(canvas, [Vector2(6,4), Vector2(17,4)], CREAM, 2)
+			_shape(canvas, [Vector2(10,19), Vector2(21,11), Vector2(28,9), Vector2(25,16), Vector2(16,24)], STEEL)
+			_line(canvas, [Vector2(9,17), Vector2(17,25)], GOLD, 3)
+			_line(canvas, [Vector2(12,22), Vector2(5,29)], CREAM, 3)
+		"power":
+			_star(canvas, Vector2(7,7), 4, RED)
+			_line(canvas, [Vector2(4,28), Vector2(24,8)], INK, 7)
+			_line(canvas, [Vector2(4,28), Vector2(24,8)], Color("#ba735a"), 4)
+			_shape(canvas, [Vector2(13,6), Vector2(20,2), Vector2(29,9), Vector2(31,17), Vector2(24,21), Vector2(15,14)], GOLD)
+			_line(canvas, [Vector2(19,6), Vector2(26,12)], CREAM, 2)
 		"guard", "armor", "shield":
 			_shape(canvas, [Vector2(16,3), Vector2(27,7), Vector2(26,18), Vector2(22,25), Vector2(16,30), Vector2(10,25), Vector2(6,18), Vector2(5,7)], STEEL)
 			_shape(canvas, [Vector2(16,7), Vector2(23,10), Vector2(22,18), Vector2(16,25)], Color("#6383af"), false)

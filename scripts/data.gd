@@ -37,7 +37,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		if not profile.has(section) or typeof(profile[section]) != typeof(reference[section]):
 			return "Missing or invalid balance section: " + section
 	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier",
-			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space"]:
+			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "power_hit_penalty", "power_damage_multiplier",
+			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = reference.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -64,6 +65,12 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Check the critical multiplier cap and hit probabilities."
 	if rules.lunge_hit_penalty > 1 or rules.lunge_cost_per_space < 1:
 		return "Lunge accuracy penalty must be at most 1 and movement must cost at least 1 stamina per space."
+	if (rules.power_hit_penalty <= 0 or rules.power_hit_penalty > 1 or rules.power_damage_multiplier <= 1
+			or rules.power_stamina_extra < 1 or rules.power_strength_per_space < 1):
+		return "Power attacks need an accuracy penalty, extra damage and stamina cost, and a positive Strength threshold."
+	if (rules.quick_hit_bonus <= 0 or rules.quick_hit_bonus > 1 or rules.quick_damage_multiplier <= 0
+			or rules.quick_damage_multiplier >= 1 or rules.quick_stamina_multiplier <= 0 or rules.quick_stamina_multiplier > 1):
+		return "Quick attacks need an accuracy bonus, reduced damage, and a stamina multiplier between 0 and 1."
 	if rules.opponent_point_variance > 0.25:
 		return "Opponent point variance must be 0.25 or less."
 	if rules.capped_gold_multiplier > 1:
