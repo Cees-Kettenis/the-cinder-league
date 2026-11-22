@@ -1,0 +1,540 @@
+{
+  "rules": {
+    "starting_points": 10,
+    "points_per_level": 10,
+    "starting_gold": 70,
+    "xp_levels": [
+      0,
+      30,
+      65,
+      110,
+      165,
+      225,
+      295,
+      375
+    ],
+    "arena_caps": [
+      4,
+      8
+    ],
+    "base_health": 44,
+    "health_per_vitality": 4,
+    "regen_per_vitality": 0.22,
+    "base_energy": 28,
+    "energy_per_stamina": 3,
+    "base_rest": 15,
+    "rest_per_stamina": 1.6,
+    "base_hit": 0.79,
+    "hit_per_attack": 0.018,
+    "spell_hit": 0.79,
+    "hit_per_magic": 0.018,
+    "base_crit": 0.02,
+    "crit_per_attack": 0.02,
+    "crit_chance_cap": 0.32,
+    "crit_power": 1.1,
+    "crit_power_per_attack": 0.05,
+    "base_block": 0.02,
+    "block_per_defence": 0.01,
+    "guard_block": 0.25,
+    "sleep_vulnerability": 0.18,
+    "minimum_hit": 0.16,
+    "maximum_hit": 0.97,
+    "damage_per_strength": 1.35,
+    "damage_per_magic": 1.5,
+    "guard_damage_factor": 0.48,
+    "taunt_minimum": 9,
+    "taunt_base_damage": 4,
+    "taunt_per_charisma": 1.45,
+    "taunt_provoke": 0.27,
+    "arena_size": 10,
+    "starting_distance": 4,
+    "turn_limit": 80,
+    "gold_per_charisma": 1.75,
+    "loss_gold": 8,
+    "loss_xp": 5,
+    "encounter_scaling": 0.25,
+    "starter_weapon": "sword",
+    "heal": 21,
+    "potion_uses": 1,
+    "opening_armour": {},
+    "taunt_provoke_per_charisma": 0.01,
+    "taunt_provoke_cap": 0.7,
+    "block_cap": 0.85,
+    "encounter_creation_factor": 0.7,
+    "boss_scaling_bonus": 0.13
+  },
+  "moves": {
+    "advance": 2,
+    "retreat": 2,
+    "jump": 6,
+    "attack": 4,
+    "guard": 1,
+    "sleep": 0,
+    "taunt": 5,
+    "cast": 0,
+    "potion": 0
+  },
+  "distances": {
+    "advance": 1,
+    "retreat": 1,
+    "jump": 3
+  },
+  "items": [
+    {
+      "id": "sword",
+      "name": "Short sword",
+      "kind": "weapon",
+      "level": 1,
+      "price": 0,
+      "minimum": 0,
+      "damage": 10,
+      "reach": 1,
+      "energy": 4,
+      "art": 0,
+      "tier": 0
+    },
+    {
+      "id": "mace",
+      "name": "Iron mace",
+      "kind": "weapon",
+      "level": 3,
+      "price": 41,
+      "minimum": 3,
+      "damage": 15,
+      "reach": 1,
+      "energy": 6,
+      "art": 1,
+      "tier": 1
+    },
+    {
+      "id": "smith_sword",
+      "name": "Forged short sword",
+      "kind": "weapon",
+      "level": 5,
+      "price": 72,
+      "minimum": 6,
+      "damage": 19,
+      "reach": 1,
+      "energy": 6,
+      "art": 0,
+      "tier": 2
+    },
+    {
+      "id": "court_mace",
+      "name": "Court mace",
+      "kind": "weapon",
+      "level": 7,
+      "price": 109,
+      "minimum": 9,
+      "damage": 24,
+      "reach": 2,
+      "energy": 7,
+      "art": 1,
+      "tier": 2
+    },
+    {
+      "id": "warden_sword",
+      "name": "Warden blade",
+      "kind": "weapon",
+      "level": 8,
+      "price": 146,
+      "minimum": 11,
+      "damage": 28,
+      "reach": 2,
+      "energy": 8,
+      "art": 0,
+      "tier": 2
+    },
+    {
+      "id": "leather_helmet",
+      "name": "Leather helmet",
+      "kind": "armor",
+      "level": 1,
+      "price": 12,
+      "minimum": 1,
+      "slot": "helmet",
+      "armor": 3,
+      "tier": 0
+    },
+    {
+      "id": "studded_helmet",
+      "name": "Reinforced helmet",
+      "kind": "armor",
+      "level": 3,
+      "price": 24,
+      "minimum": 3,
+      "slot": "helmet",
+      "armor": 5,
+      "tier": 1
+    },
+    {
+      "id": "mail_helmet",
+      "name": "Chainmail helmet",
+      "kind": "armor",
+      "level": 5,
+      "price": 39,
+      "minimum": 5,
+      "slot": "helmet",
+      "armor": 8,
+      "tier": 2
+    },
+    {
+      "id": "court_helmet",
+      "name": "Court helmet",
+      "kind": "armor",
+      "level": 7,
+      "price": 56,
+      "minimum": 8,
+      "slot": "helmet",
+      "armor": 11,
+      "tier": 2
+    },
+    {
+      "id": "leather_chest",
+      "name": "Leather chest plate",
+      "kind": "armor",
+      "level": 1,
+      "price": 20,
+      "minimum": 1,
+      "slot": "chest",
+      "armor": 6,
+      "tier": 0
+    },
+    {
+      "id": "studded_chest",
+      "name": "Reinforced chest plate",
+      "kind": "armor",
+      "level": 3,
+      "price": 32,
+      "minimum": 3,
+      "slot": "chest",
+      "armor": 8,
+      "tier": 1
+    },
+    {
+      "id": "mail_chest",
+      "name": "Chainmail chest plate",
+      "kind": "armor",
+      "level": 5,
+      "price": 47,
+      "minimum": 5,
+      "slot": "chest",
+      "armor": 11,
+      "tier": 2
+    },
+    {
+      "id": "court_chest",
+      "name": "Court chest plate",
+      "kind": "armor",
+      "level": 7,
+      "price": 64,
+      "minimum": 8,
+      "slot": "chest",
+      "armor": 14,
+      "tier": 2
+    },
+    {
+      "id": "leather_pants",
+      "name": "Leather pants",
+      "kind": "armor",
+      "level": 1,
+      "price": 12,
+      "minimum": 1,
+      "slot": "pants",
+      "armor": 3,
+      "tier": 0
+    },
+    {
+      "id": "studded_pants",
+      "name": "Reinforced pants",
+      "kind": "armor",
+      "level": 3,
+      "price": 24,
+      "minimum": 3,
+      "slot": "pants",
+      "armor": 5,
+      "tier": 1
+    },
+    {
+      "id": "mail_pants",
+      "name": "Chainmail pants",
+      "kind": "armor",
+      "level": 5,
+      "price": 39,
+      "minimum": 5,
+      "slot": "pants",
+      "armor": 8,
+      "tier": 2
+    },
+    {
+      "id": "court_pants",
+      "name": "Court pants",
+      "kind": "armor",
+      "level": 7,
+      "price": 56,
+      "minimum": 8,
+      "slot": "pants",
+      "armor": 11,
+      "tier": 2
+    },
+    {
+      "id": "leather_shoes",
+      "name": "Leather shoes",
+      "kind": "armor",
+      "level": 1,
+      "price": 9,
+      "minimum": 1,
+      "slot": "shoes",
+      "armor": 2,
+      "tier": 0
+    },
+    {
+      "id": "studded_shoes",
+      "name": "Reinforced shoes",
+      "kind": "armor",
+      "level": 3,
+      "price": 21,
+      "minimum": 3,
+      "slot": "shoes",
+      "armor": 4,
+      "tier": 1
+    },
+    {
+      "id": "mail_shoes",
+      "name": "Chainmail shoes",
+      "kind": "armor",
+      "level": 5,
+      "price": 36,
+      "minimum": 5,
+      "slot": "shoes",
+      "armor": 7,
+      "tier": 2
+    },
+    {
+      "id": "court_shoes",
+      "name": "Court shoes",
+      "kind": "armor",
+      "level": 7,
+      "price": 53,
+      "minimum": 8,
+      "slot": "shoes",
+      "armor": 10,
+      "tier": 2
+    },
+    {
+      "id": "leather_shield",
+      "name": "Wood shield",
+      "kind": "armor",
+      "level": 1,
+      "price": 16,
+      "minimum": 1,
+      "slot": "shield",
+      "armor": 4,
+      "tier": 0
+    },
+    {
+      "id": "studded_shield",
+      "name": "Bronze-rimmed shield",
+      "kind": "armor",
+      "level": 3,
+      "price": 28,
+      "minimum": 3,
+      "slot": "shield",
+      "armor": 6,
+      "tier": 1
+    },
+    {
+      "id": "mail_shield",
+      "name": "Iron-rimmed shield",
+      "kind": "armor",
+      "level": 5,
+      "price": 43,
+      "minimum": 5,
+      "slot": "shield",
+      "armor": 9,
+      "tier": 2
+    },
+    {
+      "id": "court_shield",
+      "name": "Court shield",
+      "kind": "armor",
+      "level": 7,
+      "price": 60,
+      "minimum": 8,
+      "slot": "shield",
+      "armor": 12,
+      "tier": 2
+    },
+    {
+      "id": "fireball",
+      "name": "Fireball",
+      "kind": "spell",
+      "level": 1,
+      "price": 25,
+      "minimum": 1,
+      "damage": 10,
+      "reach": 6,
+      "energy": 6,
+      "uses": 5,
+      "art": 0
+    },
+    {
+      "id": "lightning",
+      "name": "Lightning Strike",
+      "kind": "spell",
+      "level": 1,
+      "price": 29,
+      "minimum": 2,
+      "damage": 11,
+      "reach": 7,
+      "energy": 7,
+      "uses": 5,
+      "art": 1
+    },
+    {
+      "id": "meteor",
+      "name": "Meteor Strike",
+      "kind": "spell",
+      "level": 2,
+      "price": 43,
+      "minimum": 4,
+      "damage": 16,
+      "reach": 7,
+      "energy": 9,
+      "uses": 5,
+      "art": 2
+    },
+    {
+      "id": "hellfire",
+      "name": "Blue Hellfire",
+      "kind": "spell",
+      "level": 2,
+      "price": 47,
+      "minimum": 5,
+      "damage": 17,
+      "reach": 5,
+      "energy": 9,
+      "uses": 5,
+      "art": 3
+    },
+    {
+      "id": "storm",
+      "name": "Forked Lightning",
+      "kind": "spell",
+      "level": 4,
+      "price": 65,
+      "minimum": 7,
+      "damage": 20,
+      "reach": 8,
+      "energy": 9,
+      "uses": 5,
+      "art": 1
+    },
+    {
+      "id": "arc",
+      "name": "Falling Ember",
+      "kind": "spell",
+      "level": 6,
+      "price": 90,
+      "minimum": 9,
+      "damage": 25,
+      "reach": 8,
+      "energy": 10,
+      "uses": 5,
+      "art": 2
+    },
+    {
+      "id": "potion",
+      "name": "Restorative draught",
+      "kind": "potion",
+      "level": 1,
+      "price": 22,
+      "minimum": 0,
+      "art": 5
+    },
+    {
+      "id": "ember_etching",
+      "name": "Ember etching",
+      "kind": "enchant",
+      "level": 3,
+      "price": 38,
+      "minimum": 3,
+      "damage": 3,
+      "art": 0
+    }
+  ],
+  "arenas": [
+    {
+      "name": "The Amber Ring",
+      "descriptor": "The sandstone proving ground",
+      "cap": 4,
+      "gold": 23,
+      "xp": 24,
+      "opponents": [
+        {
+          "name": "Rook Fen",
+          "style": "brute"
+        },
+        {
+          "name": "Mara Ash",
+          "style": "guard"
+        },
+        {
+          "name": "Colt Reed",
+          "style": "skirmish"
+        }
+      ],
+      "tournament": [
+        {
+          "name": "Bram Alder",
+          "style": "brute",
+          "level": 4,
+          "seed_offset": 0
+        },
+        {
+          "name": "Idra Vale",
+          "style": "guard",
+          "boss": true,
+          "level": 4,
+          "seed_offset": 1
+        }
+      ]
+    },
+    {
+      "name": "The Iron Court",
+      "descriptor": "The city's senior tournament",
+      "cap": 8,
+      "gold": 36,
+      "xp": 39,
+      "opponents": [
+        {
+          "name": "Sera Flint",
+          "style": "mage"
+        },
+        {
+          "name": "Niall Copper",
+          "style": "skirmish"
+        },
+        {
+          "name": "Kerr of the Gate",
+          "style": "guard"
+        }
+      ],
+      "tournament": [
+        {
+          "name": "Tavin Cress",
+          "style": "mage",
+          "level": 8,
+          "seed_offset": 0
+        },
+        {
+          "name": "Oren Voss",
+          "style": "brute",
+          "boss": true,
+          "level": 8,
+          "seed_offset": 1
+        }
+      ]
+    }
+  ]
+}
