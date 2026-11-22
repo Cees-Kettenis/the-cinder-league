@@ -20,6 +20,7 @@ var active := 0
 var winner := -2
 var defender_wins_ties := false
 var history: Array[Dictionary] = []
+var _restoring_history := false
 
 func _init(rules_data: RefCounted, left: Dictionary, right: Dictionary, fight_seed: int, opening: int = -1, saved_rules: Dictionary = {}) -> void:
 	rules = saved_rules.get("rules", rules_data.rules)
@@ -79,7 +80,8 @@ func cost(action: String, side: int = -1) -> int:
 		"attack": return int(fighter.weapon.energy)
 		"rush":
 			if not rules.has("lunge_base_cost"):
-				return int(fighter.weapon.energy) + int(moves.jump)
+				var saved_cost := int(fighter.weapon.energy) + int(moves.jump)
+				return saved_cost if _restoring_history else maxi(1, saved_cost)
 			var spaces := maxi(0, distance() - int(fighter.weapon.reach))
 			return int(fighter.weapon.energy) + ceili(rules.lunge_base_cost + spaces * rules.lunge_cost_per_space)
 		"cast": return int(fighter.spell.get("energy", 0))
@@ -87,6 +89,16 @@ func cost(action: String, side: int = -1) -> int:
 
 func weapon_action() -> String:
 	return "attack" if distance() <= fighters[active].weapon.reach else "rush"
+
+func restore_history(actions: Array) -> bool:
+	_restoring_history = true
+	var valid := true
+	for action in actions:
+		if not act(action).valid:
+			valid = false
+			break
+	_restoring_history = false
+	return valid
 
 func chance(action: String) -> float:
 	var fighter: Dictionary = fighters[active]
@@ -139,8 +151,9 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 				return "No draught available"
 			if fighter.hp == fighter.max_hp:
 				return "Health is full"
-	if fighter.energy < cost(action):
-		return "Needs %d stamina" % cost(action)
+	var stamina_cost := cost(action)
+	if fighter.energy < stamina_cost:
+		return "Needs %d stamina" % stamina_cost
 	return ""
 
 func act(action: String) -> Dictionary:

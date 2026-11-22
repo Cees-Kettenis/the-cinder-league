@@ -90,6 +90,10 @@ func _check_rush(data: RefCounted) -> void:
 	var steps := 3
 	var duel := Duel.new(data, fighter, fighter, 42, reach + steps)
 	var cost := int(fighter.weapon.energy) + ceili(data.rules.lunge_base_cost + steps * data.rules.lunge_cost_per_space)
+	duel.fighters[0].energy = 0
+	var starting_positions := duel.positions.duplicate()
+	_check(not duel.act("rush").valid and duel.turn == 0 and duel.positions == starting_positions,
+		"A lunge at zero stamina should spend no turn and move neither fighter")
 	duel.fighters[0].energy = cost - 1
 	_check(duel.reason("rush").begins_with("Needs"), "A lunge needs enough stamina for the distance and weapon attack")
 	duel.fighters[0].energy = cost
@@ -114,6 +118,15 @@ func _check_rush(data: RefCounted) -> void:
 	var legacy := Duel.new(data, fighter, fighter, 42, reach + steps, {"rules": legacy_rules})
 	_check(legacy.cost("rush") == int(fighter.weapon.energy) + int(data.moves.jump)
 		and legacy.chance("rush") == legacy.chance("attack"), "Saved fights should retain their original rush rules")
+	var free_jump: Dictionary = data.moves.duplicate()
+	free_jump.jump = 0
+	var free_weapon := fighter.duplicate(true)
+	free_weapon.weapon.energy = 0
+	free_weapon.energy = 0
+	var old_free_lunge := Duel.new(data, free_weapon, fighter, 42, reach + 1, {"rules": legacy_rules, "moves": free_jump})
+	_check(not old_free_lunge.act("rush").valid, "Legacy custom gear and movement costs cannot make an exhausted lunge free")
+	_check(old_free_lunge.restore_history(["rush"]) and old_free_lunge.fighters[0].energy == 0,
+		"An already-recorded legacy lunge should still replay with its saved cost")
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -363,6 +376,15 @@ func _check_game_buttons() -> void:
 	_check(ui.current_screen == "battle" and not is_instance_valid(ui.settings_popup), "Escape should keep the player in the bout")
 	_check(not ui.battle_hud.action_buttons.has("rush") and not ui.battle_hud.action_buttons.attack.disabled
 		and ui.battle_hud.action_buttons.attack.accessibility_name == "Lunge", "One Attack button should offer a lunge from a distance")
+	var starting_stamina: int = ui.bout.fighters[0].energy
+	ui.bout.fighters[0].energy = 0
+	ui._refresh_battle()
+	var lunge: Button = ui.battle_hud.action_buttons.attack
+	_check(lunge.disabled and lunge.tooltip_text.contains("Not enough stamina"), "The HUD should explain why an exhausted lunge is disabled")
+	lunge.pressed.emit()
+	_check(ui.bout.turn == 0, "The fight must reject an exhausted lunge even if the button signal fires")
+	ui.bout.fighters[0].energy = starting_stamina
+	ui._refresh_battle()
 	for action_button: Button in ui.battle_hud.action_buttons.values():
 		_check(action_button.text.is_empty() and not action_button.accessibility_name.is_empty(),
 			"Combat actions should use icons and accessible names")

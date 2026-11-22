@@ -11,6 +11,8 @@ const Symbol = preload("res://scripts/ui_symbol.gd")
 const TITLE_ART = preload("res://art/title-splash.png")
 const TITLE_THEME = preload("res://audio/title-theme.ogg")
 const TOWN_THEME = preload("res://audio/town-theme.ogg")
+const SHOP_THEME = preload("res://audio/shop-theme.ogg")
+const ARENA_THEME = preload("res://audio/arena-theme.ogg")
 
 const SAND := Color("#e1b880")
 const TEXT := Color("#f3e8d6")
@@ -35,8 +37,11 @@ var shell: VBoxContainer
 var content: VBoxContainer
 var title_art: TextureRect
 var music_player := AudioStreamPlayer.new()
+var fading_music := AudioStreamPlayer.new()
+var music_transition: Tween
 var music_enabled := true
 var town_music_enabled := true
+var venue_music_enabled := true
 var serif: SystemFont
 var current_screen := ""
 var notification := ""
@@ -91,8 +96,9 @@ func _ready() -> void:
 		sound.enabled = bool(settings.get_value("audio", "enabled", true))
 	music_enabled = bool(settings.get_value("audio", "title_music", sound.enabled))
 	town_music_enabled = bool(settings.get_value("audio", "town_music", sound.enabled))
-	music_player.volume_db = -5.0
+	venue_music_enabled = bool(settings.get_value("audio", "venue_music", town_music_enabled))
 	add_child(music_player)
+	add_child(fading_music)
 	if get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]:
 		display_mode = DisplayMode.FULLSCREEN
 	var color := ColorRect.new()
@@ -391,6 +397,10 @@ func _audio_settings(menu: VBoxContainer) -> void:
 	town.text = "Town music"
 	town.button_pressed = town_music_enabled
 	menu.add_child(town)
+	var venues := CheckButton.new()
+	venues.text = "Shop and arena music"
+	venues.button_pressed = venue_music_enabled
+	menu.add_child(venues)
 	var save_notice := _settings_notice(menu)
 	effects.toggled.connect(func(enabled: bool) -> void:
 		sound.enabled = enabled
@@ -405,21 +415,52 @@ func _audio_settings(menu: VBoxContainer) -> void:
 		town_music_enabled = enabled
 		_sync_music()
 		save_notice.visible = not _save_settings())
+	venues.toggled.connect(func(enabled: bool) -> void:
+		venue_music_enabled = enabled
+		_sync_music()
+		save_notice.visible = not _save_settings())
 
 func _sync_music() -> void:
+	if is_queued_for_deletion():
+		return
 	var wanted: AudioStream
-	if town_music_enabled and current_screen == "town":
+	if town_music_enabled and current_screen in ["town", "allocate"]:
 		wanted = TOWN_THEME
-	elif music_enabled and current_screen in ["menu", "slots", "hall"]:
+	elif music_enabled and current_screen in ["menu", "slots", "hall", "create"]:
 		wanted = TITLE_THEME
-	if music_player.stream != wanted:
-		music_player.stop()
-		music_player.stream = wanted
-	if wanted != null and not music_player.playing:
-		music_player.play()
+	elif venue_music_enabled and current_screen == "shop":
+		wanted = SHOP_THEME
+	elif venue_music_enabled and current_screen in ["arena", "scout", "battle", "result"]:
+		wanted = ARENA_THEME
+	if music_player.stream == wanted:
+		return
+	if music_transition != null:
+		music_transition.kill()
+	var incoming := fading_music
+	var outgoing := music_player
+	if incoming.stream != wanted and incoming.playing and incoming.volume_linear > outgoing.volume_linear:
+		incoming = music_player
+		outgoing = fading_music
+	if incoming.stream != wanted:
+		incoming.stop()
+		incoming.stream = wanted
+		incoming.volume_linear = 0.0
+	if wanted != null and not incoming.playing:
+		incoming.play()
+	music_player = incoming
+	fading_music = outgoing
+	music_transition = create_tween().set_parallel()
+	music_transition.tween_property(incoming, "volume_linear", db_to_linear(-5.0) if wanted != null else 0.0, .55)
+	music_transition.tween_property(outgoing, "volume_linear", 0.0, .55)
+	music_transition.finished.connect(func() -> void:
+		outgoing.stop()
+		outgoing.stream = null)
 
 func _quit_game() -> void:
+	if music_transition != null:
+		music_transition.kill()
 	music_player.stop()
+	fading_music.stop()
 	sound.stop()
 	# The mixer releases the looping stream after playback stops.
 	await get_tree().create_timer(.30).timeout
@@ -443,6 +484,7 @@ func _save_settings() -> bool:
 	settings.set_value("audio", "enabled", sound.enabled)
 	settings.set_value("audio", "title_music", music_enabled)
 	settings.set_value("audio", "town_music", town_music_enabled)
+	settings.set_value("audio", "venue_music", venue_music_enabled)
 	settings.set_value("display", "mode", display_mode)
 	return settings.save(USER_SETTINGS) == OK
 
@@ -1126,7 +1168,7 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	fight_generation += 1
 	current_screen = "battle"
 	title_art.hide()
-	_sync_music()
+	_sync_music.call_deferred()
 	shell.hide()
 	battle_layer = Control.new()
 	add_child(battle_layer)

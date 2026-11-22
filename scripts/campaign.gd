@@ -309,10 +309,7 @@ func retry_bout(practice: bool) -> bool:
 func open_bout(snapshot: Dictionary) -> RefCounted:
 	var bout := Duel.new(data, snapshot.fighters[0], snapshot.fighters[1], int(snapshot.seed), -1, snapshot.combat)
 	bout.defender_wins_ties = true
-	for action in state.active_bout.get("actions", []):
-		if not bout.act(action).valid:
-			return null
-	return bout
+	return bout if bout.restore_history(state.active_bout.get("actions", [])) else null
 
 func record_turn(action: String, winner: int) -> Dictionary:
 	if winner != -2:

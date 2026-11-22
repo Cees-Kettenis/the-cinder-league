@@ -134,7 +134,7 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		if action == "cast" and not player.spell.is_empty():
 			title = "%s · %d %s left" % [player.spell.name, player.casts, "cast" if player.casts == 1 else "casts"]
 		button.accessibility_name = title
-		if action == "rush" and reason.is_empty():
+		if action == "rush":
 			title += " · %d stamina · Lower accuracy" % bout.cost(action)
 		button.tooltip_text = title if reason.is_empty() else "%s · %s" % [title, reason]
 
