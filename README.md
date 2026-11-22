@@ -21,15 +21,21 @@ godot --path .
 
 Choose a save slot, enter a name, and assign the starting points. From town you can enter the **Armory**, **Weaponsmith**, **Magic shop**, or **Arena**. Select an armor slot and a piece to see the try-on and armor-point change before purchasing. The magic shop plays spell previews, including locked spells. Gear, potions, and spell uses are reset for each new bout. Ember Etching is equipped separately from your active spell.
 
-Duels open in a full-screen arena with actions arranged around your gladiator. Use **Windowed** to switch to a window. The action buttons show stamina costs, hit chances, and reasons a move is unavailable. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
+Duels open in a full-screen arena with action icons around your gladiator. Hover over an icon for its name or to see why it is unavailable. The heart, shield, and lightning bolt mark the health, armor, and stamina bars. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
 
-The arena menu shows the next opponent and the gold and XP available for a win. Watch your XP toward the next level in town, at the arena, and after each bout. Shops show how a purchase changes your stats and confirm the amount of gold spent. Use **Replay spell preview** in the magic shop to hear the spell. The **Sound on** control at the top of each screen toggles game sounds.
+Choose **Scout rival** in the arena to reveal a randomly generated opponent near your level. Compare your stats, equipment, and reach before choosing **Fight**. You can go back to town or close the game and return to the same rival. A scouted tournament opponent stays in place while you fight regular bouts or buy gear. Your latest gear is used when you enter the ring.
 
-Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. A fight ends in victory or defeat. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying restores the saved beginning of a bout. Practice replays leave campaign rewards and tournament progress at their saved values.
+Losing a regular bout costs up to 8 gold. At an arena's level cap, regular wins pay half gold and give no XP. You can keep earning gold for gear before entering the tournament. Beating the champion opens the next arena and grants enough XP for its opening level.
+
+Amber Ring has one preliminary round before Idra Vale. Iron Court has two before Oren Voss. Preliminary builds are seeded for each tournament. The two champions have fixed builds. Tournament rounds started from **Fight to the death** are fatal on defeat. Tournament bouts already in progress before this update can finish without the new death rule. The fallen gladiator remains in the save slot until you create a new one there. The game archives the previous save under `user://fallen/`.
+
+Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. Open **Settings** with the gear icon to change game sounds or full-screen fights.
+
+Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. A fight ends in victory or defeat. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying a regular bout restores its saved starting conditions. Practice replays carry no fees or risk to the gladiator and leave campaign progress intact.
 
 ## Simulate
 
-Open **Simulator** from the title screen. Choose fighter presets, level, seed, and number of bouts. Run a matchup batch or a campaign across both arenas. The result includes a turn-by-turn trace of the first bout.
+Open **Settings** from the title screen and choose **Simulator**. Choose fighter presets, level, seed, and number of bouts. Run a matchup batch or a campaign across both arenas. A campaign seed reproduces the rival draws and fight rolls. The result includes a turn-by-turn trace of the first bout.
 
 The same combat rules are available from a terminal. Standalone simulator matchups can end in a draw.
 
@@ -61,7 +67,7 @@ Pass `--scenario=/absolute/path/scenario.json` to supply either side's full stat
 
 ## Review the balance
 
-The supplied numbers are draft playtest values. Open **Playtest balance** to edit and apply them. A valid edit is saved to `user://balance.override.json` and used for subsequent bouts and simulator runs inside the game. Use **Load bundled draft into editor**, then **Apply and save profile**, to reset it. The terminal simulator uses [balance.json](balance.json) by default and accepts a custom file through `--balance=/absolute/path/balance.json`.
+The supplied numbers are draft playtest values. Open **Playtest balance** from **Settings** on the title screen or from the simulator. A valid edit is saved to `user://balance.override.json` and used for subsequent bouts and simulator runs inside the game. Use **Load bundled draft into editor**, then **Apply and save profile**, to reset it. The terminal simulator uses [balance.json](balance.json) by default and accepts a custom file through `--balance=/absolute/path/balance.json`.
 
 Item IDs, categories, and armor slots are stable so that existing saves can load across balance edits. A saved bout keeps its opening conditions, combat rules, and rewards. An older save that predates rule snapshots records the active profile when it first loads. Player stats, equipment, and campaign progress carry forward.
 

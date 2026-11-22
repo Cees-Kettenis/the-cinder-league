@@ -22,15 +22,11 @@ const CLIPS := {
 	"level_up": preload("res://audio/level_up.wav"),
 }
 const SPELLS: Array[String] = ["fireball", "lightning", "meteor", "hellfire"]
-const SETTINGS := "user://audio.cfg"
 var enabled := true
 var _effects: AudioStreamPlayer
 var _contact: AudioStreamPlayer
 
 func _ready() -> void:
-	var config := ConfigFile.new()
-	if config.load(SETTINGS) == OK:
-		enabled = bool(config.get_value("audio", "enabled", true))
 	_effects = _player(-9.0)
 	_contact = _player(-12.0)
 
@@ -39,14 +35,6 @@ func _player(volume: float) -> AudioStreamPlayer:
 	player.volume_db = volume
 	add_child(player)
 	return player
-
-func toggle() -> void:
-	enabled = not enabled
-	if not enabled:
-		stop()
-	var config := ConfigFile.new()
-	config.set_value("audio", "enabled", enabled)
-	config.save(SETTINGS)
 
 func stop() -> void:
 	_effects.stop()

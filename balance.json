@@ -53,8 +53,9 @@
     "turn_limit": 80,
     "gold_per_charisma": 1.75,
     "loss_gold": 8,
-    "loss_xp": 5,
+    "capped_gold_multiplier": 0.5,
     "encounter_scaling": 0.58,
+    "opponent_point_variance": 0.08,
     "starter_weapon": "sword",
     "heal": 21,
     "potion_uses": 1,
@@ -491,16 +492,13 @@
         {
           "name": "Bram Alder",
           "style": "brute",
-          "level": 4,
-          "seed_offset": 0
+          "point_multiplier": 0.87
         },
         {
           "name": "Idra Vale",
           "style": "guard",
           "boss": true,
-          "point_multiplier": 1.14,
-          "level": 4,
-          "seed_offset": 1
+          "point_multiplier": 1.14
         }
       ]
     },
@@ -528,18 +526,19 @@
       "tournament": [
         {
           "name": "Tavin Cress",
-          "style": "mage",
-          "level": 8,
-          "seed_offset": 0
+          "style": "mage"
+        },
+        {
+          "name": "Bren Holt",
+          "style": "skirmish",
+          "point_multiplier": 1.08
         },
         {
           "name": "Oren Voss",
           "style": "weapon",
           "boss": true,
           "point_multiplier": 0.85,
-          "armor_level": 5,
-          "level": 8,
-          "seed_offset": 1
+          "armor_level": 5
         }
       ]
     }

@@ -68,12 +68,14 @@ func campaign(style: String, seed_value: int, limit: int) -> Dictionary:
 				invested += int(points)
 			if not run.confirm_points(data.build_stats(style, run.points_to_allocate(), invested)):
 				return {"error": "Could not allocate the earned points."}
-		results.append({"bout": step + 1, "seed": snapshot.seed, "opponent": snapshot.opponent, "winner": bout.winner,
+		results.append({"bout": step + 1, "seed": snapshot.seed, "opponent_seed": snapshot.opponent_seed,
+			"opponent": snapshot.opponent, "opponent_level": snapshot.fighters[1].level, "winner": bout.winner,
 			"arena": run.state.arena + 1, "tournament": snapshot.tournament, "level": run.state.level, "turns": bout.turn,
 			"gold": run.state.gold, "xp": run.state.xp, "result": result})
-		if run.state.complete:
+		if run.state.complete or run.is_fallen():
 			break
 	return {"mode": "campaign", "style": style, "seed": str(seed_value), "complete": run.state.complete,
+		"fallen": run.is_fallen(),
 		"level": run.state.level, "arena": run.state.arena + 1, "gold": run.state.gold, "xp": run.state.xp,
 		"bouts": results, "trace": first_trace}
 

@@ -3,6 +3,18 @@ extends RefCounted
 const STATS: Array[String] = ["Attack", "Strength", "Defence", "Magic", "Vitality", "Stamina", "Charisma"]
 const SLOTS: Array[String] = ["helmet", "chest", "pants", "shoes", "shield"]
 const DEFAULT_FILE = "res://balance.json"
+const GIVEN_NAMES := ["Ari", "Bram", "Cleo", "Dara", "Ember", "Finn", "Iona", "Jory", "Lark", "Mara", "Niall", "Quinn", "Rook", "Sera", "Tess", "Wren"]
+const FAMILY_NAMES := ["Ash", "Briar", "Copper", "Dale", "Fen", "Flint", "Holt", "Reed", "Rowan", "Slate", "Thorn", "Vale"]
+const STAT_PATTERNS := {
+	"weapon": ["Strength", "Vitality", "Stamina", "Attack", "Defence"],
+	"brute": ["Strength", "Strength", "Vitality", "Defence", "Stamina", "Attack"],
+	"guard": ["Defence", "Vitality", "Strength", "Defence", "Stamina", "Attack"],
+	"mage": ["Magic", "Magic", "Stamina", "Vitality", "Defence", "Magic"],
+	"skirmish": ["Stamina", "Strength", "Attack", "Vitality", "Defence", "Magic"],
+	"charisma": ["Charisma", "Charisma", "Stamina", "Vitality", "Defence"],
+	"hybrid": ["Magic", "Strength", "Stamina", "Defence", "Vitality", "Attack"],
+	"all_attack": ["Attack"],
+}
 
 var profile: Dictionary
 var rules: Dictionary
@@ -24,7 +36,7 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	for section in ["rules", "moves", "distances", "items", "arenas"]:
 		if not profile.has(section) or typeof(profile[section]) != typeof(reference[section]):
 			return "Missing or invalid balance section: " + section
-	for key in ["spell_close_penalty", "crit_power_cap"]:
+	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = reference.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -49,6 +61,10 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Sleep must be free and restore at least 1 stamina."
 	if rules.crit_power_cap < 1 or rules.maximum_hit > 1 or rules.spell_close_penalty > 1:
 		return "Check the critical multiplier cap and hit probabilities."
+	if rules.opponent_point_variance > 0.25:
+		return "Opponent point variance must be 0.25 or less."
+	if rules.capped_gold_multiplier > 1:
+		return "Capped bout gold must be between 0 and 1 times the usual reward."
 	for move in ["advance", "retreat", "jump"]:
 		if distances[move] < 1 or distances[move] != floor(distances[move]):
 			return "Movement distances must be positive whole numbers."
@@ -149,17 +165,7 @@ func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String
 
 func build_stats(style: String, points: int, offset: int = 0) -> Dictionary:
 	var stats := stats_empty()
-	var patterns := {
-		"weapon": ["Strength", "Vitality", "Stamina", "Attack", "Defence"],
-		"brute": ["Strength", "Strength", "Vitality", "Defence", "Stamina", "Attack"],
-		"guard": ["Defence", "Vitality", "Strength", "Defence", "Stamina", "Attack"],
-		"mage": ["Magic", "Magic", "Stamina", "Vitality", "Defence", "Magic"],
-		"skirmish": ["Stamina", "Strength", "Attack", "Vitality", "Defence", "Magic"],
-		"charisma": ["Charisma", "Charisma", "Stamina", "Vitality", "Defence"],
-		"hybrid": ["Magic", "Strength", "Stamina", "Defence", "Vitality", "Attack"],
-		"all_attack": ["Attack"],
-	}
-	var pattern: Array = patterns.get(style, patterns.weapon)
+	var pattern: Array = STAT_PATTERNS.get(style, STAT_PATTERNS.weapon)
 	for index in points:
 		stats[pattern[(offset + index) % pattern.size()]] += 1
 	return stats
@@ -191,15 +197,52 @@ func eligible_loadout(level: int, stats: Dictionary, style: String, armor_level:
 					loadout.enchant = item.id
 	return loadout
 
-func opponent(definition: Dictionary, level: int, arena: int) -> Dictionary:
+func generate_opponent(player_level: int, arena: int, seed_value: int, round_index: int = -1) -> Dictionary:
+	var random := RandomNumberGenerator.new()
+	random.seed = seed_value
+	var venue: Dictionary = arenas[arena]
+	var level := int(venue.cap)
+	if round_index >= 0:
+		var definition: Dictionary = venue.tournament[round_index]
+		var boss: bool = definition.get("boss", false)
+		return opponent(definition, level, arena, null if boss else random)
+	var level_floor := 1 if arena == 0 else int(arenas[arena - 1].cap) + 1
+	var candidates: Array = venue.opponents
+	var style: Dictionary = candidates[random.randi_range(0, candidates.size() - 1)].duplicate()
+	var given: String = GIVEN_NAMES[random.randi_range(0, GIVEN_NAMES.size() - 1)]
+	var family: String = FAMILY_NAMES[random.randi_range(0, FAMILY_NAMES.size() - 1)]
+	style.name = given + " " + family
+	# Most rivals are peers. The opening bout uses the player's exact level.
+	if player_level > level_floor and random.randf() < .45:
+		player_level += -1 if random.randf() < .5 else 1
+	level = clampi(player_level, level_floor, level)
+	return opponent(style, level, arena, random)
+
+func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumberGenerator = null) -> Dictionary:
 	var scaling: float = rules.encounter_scaling
 	if definition.get("boss", false):
 		scaling += rules.boss_scaling_bonus
 	var budget: float = rules.starting_points * rules.encounter_creation_factor + (level - 1) * rules.points_per_level * scaling
-	var points := roundi(budget * definition.get("point_multiplier", 1.0))
-	var stats := build_stats(definition.style, points)
+	var point_multiplier := float(definition.get("point_multiplier", 1.0))
+	if random != null:
+		var variance := float(rules.opponent_point_variance)
+		point_multiplier *= random.randf_range(1.0 - variance, 1.0 + variance)
+	var points := roundi(budget * point_multiplier)
+	var stats: Dictionary
+	if random == null:
+		stats = build_stats(definition.style, points)
+	else:
+		var pattern: Array = STAT_PATTERNS.get(definition.style, STAT_PATTERNS.weapon)
+		var varied := roundi(points * .25)
+		stats = build_stats(definition.style, points - varied, random.randi_range(0, pattern.size() - 1))
+		for index in varied:
+			stats[pattern[random.randi_range(0, pattern.size() - 1)]] += 1
 	var loadout := eligible_loadout(level, stats, definition.style, int(definition.get("armor_level", -1)))
 	if level < arenas[arena].opponent_gear_level and not definition.get("boss", false):
 		loadout.armor = {}
 		loadout.potion = false
-	return fighter(definition.name, stats, loadout, definition.style)
+	var rival := fighter(definition.name, stats, loadout, definition.style)
+	rival.level = level
+	rival.skin = random.randi_range(0, 3) if random != null else clampi(int(definition.get("skin", 0)), 0, 3)
+	rival.hair = random.randi_range(0, 2) if random != null else clampi(int(definition.get("hair", 0)), 0, 2)
+	return rival

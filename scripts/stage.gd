@@ -1,5 +1,6 @@
 extends Control
 
+const Symbol = preload("res://scripts/ui_symbol.gd")
 const GEAR = preload("res://art/gear.png")
 const GLADIATOR = preload("res://art/gladiator-base.png")
 const TRIM = preload("res://art/try-on.png")
@@ -46,6 +47,9 @@ var left_loadout: Dictionary = {}
 var right_loadout: Dictionary = {}
 var skin := 0
 var hair := 0
+var rival_skin := 0
+var rival_hair := 0
+var show_rival := true
 var arena := 0
 var positions: Array = [3, 7]
 var previous_positions: Array = []
@@ -184,7 +188,7 @@ func _draw_battle() -> void:
 	var phase := clampf(elapsed / ACTION_TIME, 0, 1)
 	var animating := side >= 0 and phase < 1
 	var shift := smoothstep(.04, .83, phase)
-	for index in 2:
+	for index in 2 if show_rival else 1:
 		var distance := float(positions[index])
 		if animating and previous_positions.size() == 2:
 			distance = lerpf(float(previous_positions[index]), distance, shift)
@@ -198,7 +202,7 @@ func _draw_battle() -> void:
 		draw_set_transform(marker, 0.0, Vector2(1, .24))
 		draw_arc(Vector2.ZERO, height * .24, 0, TAU, 40, Color(1.0, .75, .42, .8), 2.5, true)
 		draw_set_transform(Vector2.ZERO)
-	for index in 2:
+	for index in feet.size():
 		var loadout := left_loadout if index == 0 else right_loadout
 		_draw_fighter(feet[index], height, loadout, index, side, action, phase)
 	if action == "cast" and animating:
@@ -228,8 +232,8 @@ func _motion_atlas(loadout: Dictionary, skin_index: int, hair_index: int) -> Tex
 	return MAIL_MOTION if mace else MOTION
 
 func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int, actor: int, action: String, phase: float) -> void:
-	var skin_index := skin if index == 0 else 0
-	var hair_index := hair if index == 0 else 0
+	var skin_index := skin if index == 0 else rival_skin
+	var hair_index := hair if index == 0 else rival_hair
 	var motion := _motion_atlas(loadout, skin_index, hair_index)
 	var facing_left := index == 1
 	var direction := -1.0 if facing_left else 1.0
@@ -266,31 +270,26 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		_avatar(feet, height, loadout, facing_left, skin_index, hair_index, lean, swing)
 
 func _draw_impact(feet: Array[Vector2], height: float, side: int, phase: float) -> void:
-	var message := ""
-	var color := Color("#ffe1a1")
+	var symbol := ""
 	var at := feet[1 - side]
 	if event.miss:
-		message = "Miss"
-	elif event.blocked:
-		message = "Blocked"
+		symbol = "miss"
+	elif event.blocked or event.armor_hit > 0 and event.damage == 0:
+		symbol = "armor"
 	elif event.damage > 0:
-		message = ("Critical! " if event.critical else "") + "−%d HP" % event.damage
-		color = Color("#ffc0a4")
-	elif event.armor_hit > 0:
-		message = "−%d armor" % event.armor_hit
-	elif event.action in ["potion", "sleep"]:
-		message = "Restored"
-		color = Color("#b5f4b8")
+		symbol = "critical" if event.critical else "attack"
+	elif event.action in ["potion", "sleep", "guard"]:
+		symbol = event.action
 		at = feet[side]
-	if message.is_empty():
+	elif event.action == "taunt":
+		symbol = "taunt"
+	if symbol.is_empty():
 		return
-	var font := ThemeDB.fallback_font
-	var y := maxf(28.0, at.y - height * (.76 + phase * .15))
-	var width := font.get_string_size(message, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
-	var center := clampf(at.x, width * .5 + 10, size.x - width * .5 - 10)
-	var label_at := Vector2(center - width * .5, y)
-	draw_rect(Rect2(label_at - Vector2(7, 19), Vector2(width + 14, 25)), Color(0.09, .07, .06, .77))
-	draw_string(font, label_at, message, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, color)
+	var rise := remap(phase, IMPACT_TIME / ACTION_TIME, 1.0, 0.0, 1.0)
+	var extent := lerpf(42.0, 32.0, rise)
+	var center := Vector2(at.x, maxf(36.0, at.y - height * .94 - rise * 30.0))
+	draw_circle(center, extent * .58, Color("#392831"), true, -1, true)
+	Symbol.paint(self, symbol, center - Vector2.ONE * extent * .5, extent)
 
 func _weapon_glow(point: Vector2, radius: float, opacity: float) -> void:
 	draw_circle(point, radius * 1.18, Color(1.0, .43, .16, opacity * .12))

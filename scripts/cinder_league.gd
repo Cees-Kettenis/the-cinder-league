@@ -7,6 +7,7 @@ const Simulator = preload("res://scripts/simulator.gd")
 const Stage = preload("res://scripts/stage.gd")
 const Foley = preload("res://scripts/foley.gd")
 const BattleHud = preload("res://scripts/battle_hud.gd")
+const Symbol = preload("res://scripts/ui_symbol.gd")
 
 const SAND := Color("#e1b880")
 const TEXT := Color("#f3e8d6")
@@ -17,8 +18,10 @@ const BORDER := Color("#343f3d")
 const GREEN := Color("#96d4ad")
 const RED := Color("#e38d79")
 const SLOTS := {"helmet": "Helmet", "chest": "Chest plate", "pants": "Pants", "shoes": "Shoes", "shield": "Shield"}
-const OPPONENT_STYLES := {"brute": "Heavy hitter", "guard": "Defensive", "mage": "Spellcaster", "skirmish": "Mobile fighter", "weapon": "Weapon fighter"}
+const STAT_ICONS := {"Attack": "attack", "Strength": "strength", "Defence": "armor", "Magic": "cast",
+	"Vitality": "health", "Stamina": "stamina", "Charisma": "taunt"}
 const USER_BALANCE := "user://balance.override.json"
+const USER_SETTINGS := "user://settings.cfg"
 
 var data := Data.new()
 var game: RefCounted
@@ -34,8 +37,9 @@ var draft_skin := 0
 var draft_hair := 0
 var allocation_grid: VBoxContainer
 var points_notice: Label
-var projected_stats: Label
+var stat_labels: Dictionary = {}
 var confirm_button: Button
+var creation_error: Label
 var name_input: LineEdit
 var creation_stage: Control
 var level_mode := false
@@ -43,10 +47,8 @@ var shop_type := "armor"
 var armor_slot := "chest"
 var selected_item := ""
 var shop_stage: Control
-var shop_note: Label
 var shop_title: Label
-var stat_compare: Label
-var shop_price: Label
+var shop_stats: HBoxContainer
 var shop_buy: Button
 var shop_entries: Dictionary = {}
 var bout: RefCounted
@@ -55,6 +57,7 @@ var battle_stage: Control
 var battle_hud: Control
 var fullscreen_bouts := true
 var window_mode_before_bout := Window.MODE_WINDOWED
+var settings_popup: PopupPanel
 var character_name: Label
 var fight_locked := false
 var fight_generation := 0
@@ -69,6 +72,12 @@ var spell_preview_button: Button
 func _ready() -> void:
 	_make_theme()
 	add_child(sound)
+	var settings := ConfigFile.new()
+	if settings.load(USER_SETTINGS) == OK:
+		sound.enabled = bool(settings.get_value("audio", "enabled", true))
+		fullscreen_bouts = bool(settings.get_value("display", "fullscreen_bouts", true))
+	elif settings.load("user://audio.cfg") == OK:
+		sound.enabled = bool(settings.get_value("audio", "enabled", true))
 	var color := ColorRect.new()
 	color.color = BG
 	color.mouse_filter = MOUSE_FILTER_IGNORE
@@ -171,6 +180,31 @@ func _button(parent: Node, caption: String, call: Callable = Callable(), accent:
 		result.add_theme_color_override("font_color", SAND)
 	return result
 
+func _icon_button(parent: Node, symbol: String, caption: String, call: Callable, accent: bool = false) -> Button:
+	var button := _button(parent, "", call, accent)
+	button.custom_minimum_size = Vector2(45, 42)
+	Symbol.on_button(button, symbol, 26, caption)
+	return button
+
+func _destination(parent: Node, symbol: String, caption: String, call: Callable, accent: bool = false) -> void:
+	var button := _button(parent, "", call, accent)
+	button.accessibility_name = caption
+	button.custom_minimum_size.y = 58
+	_fill(button)
+	var contents := _row(button, 8)
+	contents.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	contents.alignment = BoxContainer.ALIGNMENT_CENTER
+	contents.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	contents.add_child(Symbol.make(symbol, 28))
+	_label(contents, caption, 17).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+func _token(parent: Node, symbol: String, value: String, caption: String) -> void:
+	var pair := _row(parent, 5)
+	pair.mouse_filter = Control.MOUSE_FILTER_PASS
+	pair.tooltip_text = caption
+	pair.add_child(Symbol.make(symbol, 23))
+	_label(pair, value, 17, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
 func _space(parent: Node) -> void:
 	var spacer := Control.new()
 	parent.add_child(spacer)
@@ -182,7 +216,7 @@ func _clear(node: Node) -> void:
 		node.remove_child(child)
 		child.queue_free()
 
-func _page(key: String, heading: String, subheading: String = "") -> void:
+func _page(key: String, heading: String) -> void:
 	if is_instance_valid(battle_layer):
 		remove_child(battle_layer)
 		battle_layer.queue_free()
@@ -193,29 +227,72 @@ func _page(key: String, heading: String, subheading: String = "") -> void:
 	current_screen = key
 	_clear(shell)
 	var nav := _row(shell, 8)
-	_title(nav, "The Cinder League", 27)
+	_title(nav, heading, 32)
 	_space(nav)
-	if not game.state.is_empty() and key not in ["menu", "battle", "allocate", "create"]:
-		_label(nav, "%s  ·  Lv. %d    %d gold" % [game.state.name, game.state.level, game.state.gold], 15, SAND)
-	var sound_button := _button(nav, "Sound on" if sound.enabled else "Sound off")
-	sound_button.pressed.connect(func() -> void:
-		sound.toggle()
-		sound_button.text = "Sound on" if sound.enabled else "Sound off")
-	if key not in ["menu", "battle", "allocate"]:
-		_button(nav, "Title screen", show_menu)
-	var divider := HSeparator.new()
-	shell.add_child(divider)
+	if not game.state.is_empty() and key in ["town", "arena", "scout", "shop", "result"]:
+		_token(nav, "coin", str(int(game.state.gold)), "Gold")
+	_icon_button(nav, "settings", "Settings", _show_settings)
+	if key not in ["menu", "allocate"]:
+		_icon_button(nav, "home", "Title screen", show_menu)
 	if not notification.is_empty():
 		_wrapped(shell, notification, 14, SAND)
 		notification = ""
 	if not game.save_error.is_empty():
 		_wrapped(shell, game.save_error, 14, RED)
-	if not heading.is_empty():
-		_title(shell, heading, 32)
-	if not subheading.is_empty():
-		_wrapped(shell, subheading, 14)
 	content = _column(shell, 10)
 	_fill(content, true)
+
+func _show_settings() -> void:
+	if is_instance_valid(settings_popup):
+		return
+	settings_popup = PopupPanel.new()
+	settings_popup.theme = theme
+	settings_popup.transient = true
+	settings_popup.exclusive = true
+	add_child(settings_popup)
+	var menu := _card(settings_popup, 14)
+	menu.get_parent().set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	_title(menu, "Settings", 30)
+	var audio := CheckButton.new()
+	audio.text = "Game sounds"
+	audio.button_pressed = sound.enabled
+	menu.add_child(audio)
+	var display := CheckButton.new()
+	display.text = "Full-screen fights"
+	display.button_pressed = fullscreen_bouts
+	menu.add_child(display)
+	var save_notice := _wrapped(menu, "Settings could not be saved.", 15, RED)
+	save_notice.hide()
+	audio.toggled.connect(func(enabled: bool) -> void:
+		sound.enabled = enabled
+		if not enabled:
+			sound.stop()
+		save_notice.visible = not _save_settings())
+	display.toggled.connect(func(enabled: bool) -> void:
+		fullscreen_bouts = enabled
+		if current_screen == "battle" and DisplayServer.get_name() != "headless":
+			get_window().mode = Window.MODE_FULLSCREEN if enabled else Window.MODE_WINDOWED
+		save_notice.visible = not _save_settings())
+	if current_screen == "menu":
+		_button(menu, "Simulator", func() -> void:
+			settings_popup.hide()
+			show_simulator())
+		_button(menu, "Playtest balance", func() -> void:
+			settings_popup.hide()
+			show_balance())
+	var done := _button(menu, "Done", settings_popup.hide, true)
+	settings_popup.popup_hide.connect(func() -> void:
+		settings_popup.queue_free()
+		settings_popup = null)
+	settings_popup.popup_centered(Vector2i(360, 0))
+	done.grab_focus()
+
+func _save_settings() -> bool:
+	var settings := ConfigFile.new()
+	settings.load(USER_SETTINGS)
+	settings.set_value("audio", "enabled", sound.enabled)
+	settings.set_value("display", "fullscreen_bouts", fullscreen_bouts)
+	return settings.save(USER_SETTINGS) == OK
 
 func _show_progress(parent: Node) -> void:
 	var status := _row(parent, 10)
@@ -223,14 +300,14 @@ func _show_progress(parent: Node) -> void:
 	var xp := int(game.state.xp)
 	var cap := int(game.arena().cap)
 	if game.state.complete:
-		_label(status, "%d XP   ·   League champion" % xp, 14, GREEN)
+		_token(status, "trophy", "League champion", "Tournament winner")
 	elif game.state.pending:
-		_label(status, "%d XP   ·   Level %d ready" % [xp, level + 1], 14, GREEN)
+		_token(status, "xp", "Level %d" % (level + 1), "Level up")
 	elif level >= cap:
-		_label(status, "%d XP   ·   Level %d tournament ready" % [xp, cap], 14, SAND)
+		_token(status, "trophy", "Tournament ready", "Tournament")
 	else:
 		var threshold := int(data.rules.xp_levels[level])
-		_label(status, "%d / %d XP   ·   Level %d" % [xp, threshold, level + 1], 14, SAND)
+		_token(status, "xp", "Level %d" % level, "Experience")
 		var bar := ProgressBar.new()
 		bar.max_value = threshold
 		bar.min_value = int(data.rules.xp_levels[level - 1])
@@ -257,31 +334,34 @@ func _stage(parent: Node, kind: String, height: int = 205) -> Control:
 	return stage
 
 func show_menu() -> void:
-	_page("menu", "Choose your gladiator")
+	_page("menu", "The Cinder League")
 	_stage(content, "town", 310)
 	var slots := _row(content)
 	for number in range(1, Campaign.SLOT_COUNT + 1):
 		var card := _card(slots)
 		_fill(card.get_parent())
 		var saved: Dictionary = game.read_slot(number)
-		_label(card, "SAVE %d" % number, 13, SAND)
 		if saved.get("invalid", false):
 			_label(card, "Save could not be opened", 17, RED)
 		elif saved.is_empty():
+			_title(card, "Slot %d" % number, 21)
 			_button(card, "Create gladiator", _create_character.bind(number), true)
 		else:
 			_title(card, "%s · Lv. %d" % [saved.name, saved.level], 19)
-			_button(card, "Continue", _resume.bind(number), true)
-	var bottom := _row(content)
-	_button(bottom, "Simulator", show_simulator)
-	_button(bottom, "Playtest balance", show_balance)
+			if saved.get("fallen", false):
+				_label(card, "Fallen", 16, RED)
+				_button(card, "New gladiator", _create_character.bind(number), true)
+			else:
+				_button(card, "Continue", _resume.bind(number), true)
 
 func _resume(number: int) -> void:
 	if not game.resume(number):
 		notification = "That save could not be opened."
 		show_menu()
 		return
-	if game.state.pending:
+	if game.is_fallen():
+		show_menu()
+	elif game.state.pending:
 		_allocate_level()
 	elif game.has_active_bout():
 		_open_bout(game.state.snapshot, game.state.active_bout.practice)
@@ -294,14 +374,14 @@ func _create_character(number: int) -> void:
 	level_mode = false
 	draft_skin = 0
 	draft_hair = 0
-	_page("create", "Create gladiator", "Save slot %d" % number)
+	_page("create", "Create gladiator")
 	_character_form()
 
 func _allocate_level() -> void:
 	sound.play("level_up")
 	draft = data.stats_empty()
 	level_mode = true
-	_page("allocate", "Level %d" % (int(game.state.level) + 1), "Choose how your gladiator improves. Confirmed points are permanent.")
+	_page("allocate", "Level %d" % (int(game.state.level) + 1))
 	_character_form()
 
 func _character_form() -> void:
@@ -313,8 +393,6 @@ func _character_form() -> void:
 	if not level_mode:
 		creation_stage.left_loadout = {}
 	character_name = _title(preview, game.state.name if level_mode else "New gladiator", 23)
-	points_notice = _label(preview, "", 16, SAND)
-	projected_stats = _wrapped(preview, "", 14)
 	var details := _card(row, 7)
 	_fill(details.get_parent(), true)
 	details.get_parent().custom_minimum_size.x = 470
@@ -345,9 +423,11 @@ func _character_form() -> void:
 			draft_hair = index
 			creation_stage.hair = index
 			creation_stage.queue_redraw())
-	_label(details, "Stat points", 16, SAND)
+	points_notice = _title(details, "", 23)
 	allocation_grid = _column(details, 5)
 	confirm_button = _button(details, "Confirm level-up" if level_mode else "Enter town", _confirm_character, true)
+	creation_error = _wrapped(details, "", 15, RED)
+	creation_error.hide()
 	_draw_allocations()
 
 func _point_limit() -> int:
@@ -361,22 +441,23 @@ func _points_left() -> int:
 
 func _draw_allocations() -> void:
 	_clear(allocation_grid)
-	var notes := {"Attack": "accuracy and critical hits", "Strength": "weapon damage and equipment",
-		"Defence": "blocking and armor eligibility", "Magic": "spell accuracy, power, and eligibility",
-		"Vitality": "health and regeneration", "Stamina": "energy and sleep recovery",
-		"Charisma": "gold and taunts"}
+	stat_labels.clear()
 	for stat in Data.STATS:
 		var row := _row(allocation_grid, 5)
-		var column := _column(row, 0)
-		_fill(column)
-		_label(column, stat, 14)
-		_label(column, notes[stat], 12, MUTED)
+		row.add_child(Symbol.make(STAT_ICONS[stat], 24))
+		var title := _label(row, stat, 17)
+		title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		title.mouse_filter = Control.MOUSE_FILTER_PASS
+		_fill(title)
+		stat_labels[stat] = title
 		var base_value: int = int(game.state.stats[stat]) if level_mode else 0
 		var value_label := _label(row, "%d" % (base_value + int(draft[stat])), 16, SAND)
 		value_label.custom_minimum_size.x = 29
 		var minus := _button(row, "−", _change_point.bind(stat, -1))
+		minus.accessibility_name = "Remove %s point" % stat
 		minus.disabled = draft[stat] == 0
 		var plus := _button(row, "+", _change_point.bind(stat, 1))
+		plus.accessibility_name = "Add %s point" % stat
 		plus.disabled = _points_left() == 0
 	_update_point_total()
 
@@ -394,33 +475,25 @@ func _update_point_total() -> void:
 			values[stat] += int(previous_stats[stat])
 	var rule: Dictionary = data.rules
 	var projected: Dictionary = data.fighter("", values, loadout)
-	var stats_text := [
-		"Health %d  ·  +%d HP per turn" % [projected.max_hp, Duel.regeneration(rule, values.Vitality)],
-		"Stamina %d  ·  +%d per sleep" % [projected.max_energy, Duel.recovery(rule, values.Stamina)],
-		"Weapon %d damage  ·  %d%% hit  ·  %d%% crit (×%.2f)" % [
-			roundi(Duel.strike_damage(rule, projected, false)), roundi(Duel.hit_chance(rule, values, false) * 100),
-			roundi(Duel.crit_chance(rule, values.Attack) * 100), Duel.crit_multiplier(rule, values.Attack)],
-		"Defence %d%% block  ·  %d%% when guarding" % [
-			roundi(Duel.block_chance(rule, values.Defence) * 100), roundi(Duel.block_chance(rule, values.Defence, true) * 100)],
-		"Spells +%d damage  ·  %d%% hit (%d%% under threat)" % [
-			roundi(values.Magic * rule.damage_per_magic), roundi(Duel.hit_chance(rule, values, true) * 100),
-			roundi(Duel.hit_chance(rule, values, true, false, true) * 100)],
-		"Taunt %d damage or %d%% provoke  ·  +%d win gold" % [
-			Duel.taunt_damage(rule, values.Charisma), roundi(Duel.taunt_chance(rule, values.Charisma) * 100),
-			roundi(values.Charisma * rule.gold_per_charisma)],
-	]
+	stat_labels.Attack.tooltip_text = "%d%% hit chance · %d%% crit" % [
+		roundi(Duel.hit_chance(rule, values, false) * 100), roundi(Duel.crit_chance(rule, values.Attack) * 100)]
+	stat_labels.Strength.tooltip_text = "%d weapon damage" % roundi(Duel.strike_damage(rule, projected, false))
+	stat_labels.Defence.tooltip_text = "%d%% block chance" % roundi(Duel.block_chance(rule, values.Defence) * 100)
+	stat_labels.Magic.tooltip_text = "+%d spell damage" % roundi(values.Magic * rule.damage_per_magic)
+	stat_labels.Vitality.tooltip_text = "Health and recovery"
+	stat_labels.Stamina.tooltip_text = "Energy for moves"
+	stat_labels.Charisma.tooltip_text = "Stronger taunts and more gold"
 	var before := {"level": previous_level, "stats": previous_stats}
 	var after := {"level": previous_level + int(level_mode), "stats": values}
-	var unlocked := PackedStringArray()
+	var unlocked: Dictionary = {}
 	for item in data.items.values():
-		if not data.lock_reason(before, item).is_empty() and data.lock_reason(after, item).is_empty():
-			unlocked.append(item.name)
-	if not unlocked.is_empty():
-		var names := ", ".join(unlocked.slice(0, 3))
-		if unlocked.size() > 3:
-			names += " and %d more" % (unlocked.size() - 3)
-		stats_text.append("Newly eligible · " + names)
-	projected_stats.text = "\n".join(stats_text)
+		var stat: String = data.stat_requirement(item)
+		if stat in stat_labels and not data.lock_reason(before, item).is_empty() and data.lock_reason(after, item).is_empty():
+			if not unlocked.has(stat):
+				unlocked[stat] = PackedStringArray()
+			unlocked[stat].append(item.name)
+	for stat in unlocked:
+		stat_labels[stat].tooltip_text += "\nUnlocks " + ", ".join(unlocked[stat])
 	confirm_button.disabled = _points_left() != 0 or (not level_mode and name_input.text.strip_edges().is_empty())
 
 func _change_point(stat: String, delta: int) -> void:
@@ -442,20 +515,27 @@ func _confirm_character() -> void:
 		var chosen := name_input.text.strip_edges()
 		if chosen.is_empty():
 			return
-		game.create(selected_slot, chosen, draft_skin, draft_hair, draft)
+		if not game.create(selected_slot, chosen, draft_skin, draft_hair, draft):
+			creation_error.text = game.save_error
+			creation_error.show()
+			return
 	show_town()
 
 func show_town() -> void:
+	if game.is_fallen():
+		show_menu()
+		return
 	if game.state.pending:
 		_allocate_level()
 		return
-	_page("town", "Town square", "Next arena · %s" % game.arena().name)
+	_page("town", "Town square")
 	_show_progress(content)
 	_stage(content, "town", 350)
 	var destinations := _row(content)
-	for pair in [["Weaponsmith", "weapon"], ["Armory", "armor"], ["Magic shop", "spell"]]:
-		_fill(_button(destinations, pair[0], _enter_shop.bind(pair[1])))
-	_fill(_button(destinations, "Arena", show_arena, true))
+	_destination(destinations, "attack", "Weaponsmith", _enter_shop.bind("weapon"))
+	_destination(destinations, "helmet", "Armory", _enter_shop.bind("armor"))
+	_destination(destinations, "cast", "Magic shop", _enter_shop.bind("spell"))
+	_destination(destinations, "trophy", "Arena", show_arena, true)
 
 func _enter_shop(kind: String) -> void:
 	shop_type = kind
@@ -463,6 +543,9 @@ func _enter_shop(kind: String) -> void:
 	show_shop()
 
 func show_shop() -> void:
+	if game.is_fallen():
+		show_menu()
+		return
 	if game.state.pending:
 		_allocate_level()
 		return
@@ -478,11 +561,10 @@ func show_shop() -> void:
 	var rail := _card(row)
 	rail.get_parent().custom_minimum_size.x = 400
 	if shop_type == "armor":
-		_label(rail, "ARMOR SLOT", 13, SAND)
 		var tabs := _row(rail, 4)
 		for part in Data.SLOTS:
-			_button(tabs, SLOTS[part], _select_armor.bind(part), armor_slot == part)
-	_label(rail, SLOTS[armor_slot] if shop_type == "armor" else ("SPELLS & SUPPLIES" if shop_type == "spell" else "WEAPONS"), 15, SAND)
+			var tab := _icon_button(tabs, part, SLOTS[part], _select_armor.bind(part), armor_slot == part)
+			_fill(tab)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	rail.add_child(scroll)
@@ -496,15 +578,21 @@ func show_shop() -> void:
 		if shop_type == "armor" and item.slot != armor_slot:
 			continue
 		var locked: String = data.lock_reason(game.state, item)
-		var badge := "Locked · " + locked if not locked.is_empty() else ("Equipped" if _equipped(item) else ("Owned · Equip" if item.id in game.state.owned else "%d gold" % item.price))
-		var stock_label := badge if game.state.level < item.level else "Level %d  ·  %s" % [item.level, badge]
-		var button := _button(list, "%s\n%s" % [item.name, stock_label], _preview_item.bind(item.id))
+		var button := _button(list, item.name, _preview_item.bind(item.id))
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.custom_minimum_size.y = 58
 		button.icon = _item_icon(item)
 		button.expand_icon = true
 		button.add_theme_constant_override("icon_max_width", 49)
 		if not locked.is_empty():
+			button.tooltip_text = locked
+			var lock_icon := Symbol.make("lock", 23)
+			button.add_child(lock_icon)
+			lock_icon.set_anchors_preset(PRESET_CENTER_RIGHT)
+			lock_icon.offset_left = -33
+			lock_icon.offset_right = -10
+			lock_icon.offset_top = -11.5
+			lock_icon.offset_bottom = 11.5
 			for color in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color"]:
 				button.add_theme_color_override(color, Color("#161616"))
 		shop_entries[item.id] = button
@@ -515,12 +603,10 @@ func show_shop() -> void:
 	shop_stage = _stage(display, "avatar", 305)
 	var detail := _card(right, 6)
 	shop_title = _title(detail, "", 23)
-	shop_note = _wrapped(detail, "")
-	stat_compare = _wrapped(detail, "", 16, SAND)
-	var checkout := _row(detail)
-	shop_price = _label(checkout, "")
+	var checkout := _row(detail, 13)
+	shop_stats = _row(checkout, 13)
 	_space(checkout)
-	spell_preview_button = _button(checkout, "Replay spell preview", _replay_spell)
+	spell_preview_button = _icon_button(checkout, "play", "Replay spell preview", _replay_spell)
 	spell_preview_button.hide()
 	shop_buy = _button(checkout, "Buy & equip", _buy_item, true)
 	if shop_entries.is_empty():
@@ -590,38 +676,41 @@ func _preview_item(id: String) -> void:
 		button.add_theme_stylebox_override("normal", _style(PANEL, SAND if entry == id else BORDER, 9))
 	shop_title.text = item.name
 	var requirement: String = data.stat_requirement(item)
-	var info := "Level %d" % item.level
-	if not requirement.is_empty():
-		info += "  ·  %d %s" % [item.minimum, requirement]
-	if not lock.is_empty():
-		info += "  ·  " + lock
-	shop_note.text = info
 	var owned: bool = id in game.state.owned
-	shop_price.text = "Owned" if owned else "%d gold" % item.price
-	shop_buy.text = "Locked" if not lock.is_empty() else ("Equipped" if _equipped(item) else ("Equip" if owned else "Buy & equip"))
+	shop_buy.text = lock.trim_prefix("Requires ").capitalize() if not lock.is_empty() else ("Equipped" if _equipped(item) else ("Equip" if owned else "Buy"))
 	shop_buy.disabled = not lock.is_empty() or _equipped(item) or (not owned and game.state.gold < item.price)
 	if not owned and game.state.gold < item.price and lock.is_empty():
 		shop_buy.text = "Not enough gold"
+	shop_buy.tooltip_text = lock
+	if not lock.is_empty() and not requirement.is_empty() and item.minimum > 0:
+		shop_buy.tooltip_text = "Level %d · %d %s" % [item.level, item.minimum, requirement]
+	_clear(shop_stats)
+	if not owned:
+		_token(shop_stats, "coin", str(int(item.price)), "Price")
 	match item.kind:
 		"armor":
 			var current: Dictionary = data.items.get(game.state.loadout.armor.get(item.slot, ""), {})
 			var points := int(current.get("armor", 0))
 			var new_points := int(item.armor)
-			stat_compare.text = "Armor points   %d → %d   (%+d)" % [points, new_points, new_points - points]
+			_token(shop_stats, "armor", "%d → %d" % [points, new_points], "Armor points")
 		"weapon":
 			var current: Dictionary = data.items[game.state.loadout.weapon]
-			stat_compare.text = "Base damage   %d → %d   (%+d)    ·    Reach %d    ·    Stamina %d" % [
-				current.damage, item.damage, int(item.damage - current.damage), item.reach, item.energy]
+			_token(shop_stats, "attack", "%d → %d" % [current.damage, item.damage], "Base damage")
+			_token(shop_stats, "advance", str(int(item.reach)), "Reach")
+			_token(shop_stats, "stamina", str(int(item.energy)), "Stamina cost")
 		"spell":
 			var current: Dictionary = data.items.get(game.state.loadout.spell, {})
 			var current_damage := int(current.get("damage", 0))
-			stat_compare.text = "Base damage   %d → %d   (%+d)    ·    Reach %d    ·    %d casts per bout\nStamina per cast   %d" % [
-				current_damage, item.damage, int(item.damage) - current_damage, item.reach, item.uses, item.energy]
+			_token(shop_stats, "attack", "%d → %d" % [current_damage, item.damage], "Base damage")
+			_token(shop_stats, "advance", str(int(item.reach)), "Reach")
+			_token(shop_stats, "stamina", str(int(item.energy)), "Stamina cost")
+			_token(shop_stats, "cast", "×%d" % item.uses, "Uses per fight")
 		"enchant":
 			var old := int(data.items.get(game.state.loadout.get("enchant", ""), {}).get("damage", 0))
-			stat_compare.text = "Extra weapon damage   %d → %d   (%+d)" % [old, item.damage, int(item.damage) - old]
+			_token(shop_stats, "attack", "+%d → +%d" % [old, item.damage], "Extra weapon damage")
 		"potion":
-			stat_compare.text = "Restores %d health  ·  %d per bout" % [data.rules.heal, data.rules.potion_uses]
+			_token(shop_stats, "health", "+%d" % data.rules.heal, "Health restored")
+			_token(shop_stats, "potion", "×%d" % data.rules.potion_uses, "Uses per fight")
 
 func _replay_spell() -> void:
 	shop_stage.elapsed = 0.0
@@ -637,55 +726,139 @@ func _buy_item() -> void:
 	if err.is_empty():
 		var paid := gold_before - int(game.state.gold)
 		sound.play("buy" if paid > 0 else "equip")
-		notification = "%s equipped." % item.name
-		if paid > 0:
-			notification += " Paid %d gold." % paid
 	else:
 		notification = err
 	show_shop()
 
 func show_arena() -> void:
+	if game.is_fallen():
+		show_menu()
+		return
 	if game.state.pending:
 		_allocate_level()
 		return
 	var arena: Dictionary = game.arena()
-	_page("arena", arena.name, arena.descriptor)
+	_page("arena", arena.name)
 	_show_progress(content)
 	var stage := _stage(content, "battle", 310)
 	stage.arena = game.arena_index()
 	stage.arena_width = int(data.rules.arena_size)
 	stage.positions = [1, int(data.rules.arena_size) - 1]
-	var next: Dictionary = game.next_opponent(false)
-	var contender: Dictionary = data.opponent(next, int(game.state.level), game.arena_index())
-	stage.right_loadout = contender.loadout
+	var regular_offer: Dictionary = game.scouted_bout()
+	var tournament_offer: Dictionary = game.scouted_bout(true)
+	var visible_offer := tournament_offer if regular_offer.is_empty() else regular_offer
+	stage.show_rival = not visible_offer.is_empty()
+	if stage.show_rival:
+		_show_rival(stage, visible_offer.rival)
 	var cards := _row(content)
 	var regular := _card(cards)
 	_fill(regular.get_parent())
-	_title(regular, "Regular bout", 20)
-	_label(regular, "%s   ·   %s" % [next.name, OPPONENT_STYLES.get(next.style, next.style.capitalize())], 15)
-	_label(regular, "Win reward   %d gold   ·   Up to %d XP" % [game.win_gold(game.arena_index()), arena.xp], 13, SAND)
-	_button(regular, "Enter the ring", _new_bout.bind(false), true)
+	_title(regular, "Random bout", 23)
+	var rewards := _row(regular, 10)
+	_token(rewards, "coin", str(game.win_gold(game.arena_index())), "Gold for a win")
+	_token(rewards, "xp", str(game.regular_win_xp()), "Experience for a win")
+	var regular_scout := _button(regular, "Scout rival", _scout_bout.bind(false), true)
+	if not regular_offer.is_empty():
+		regular_scout.text = regular_offer.rival.name
+	regular_scout.disabled = not game.can_scout(false)
 	var tournament := _card(cards)
 	_fill(tournament.get_parent())
 	_title(tournament, "Tournament", 20)
-	var winner_label := "League champion" if game.state.complete else (
-		"Bout %d of %d   ·   %s" % [int(game.state.tournament) + 1, arena.tournament.size(), game.next_opponent(true).name]
-		if game.can_tournament() else "Opens at level %d" % arena.cap)
-	_label(tournament, winner_label, 14, SAND)
-	var tournament_button := _button(tournament, "Fight next tournament bout", _new_bout.bind(true), true)
-	tournament_button.disabled = not game.can_tournament()
+	var round_total: int = arena.tournament.size()
+	var tournament_status: String = "League champion" if game.state.complete else (
+		"Round %d/%d" % [mini(int(game.state.tournament) + 1, round_total), round_total] if game.can_tournament() else "Level %d" % arena.cap)
+	_token(tournament, "trophy", tournament_status, "Tournament progress")
+	var tournament_button := _button(tournament, "Scout tournament rival", _scout_bout.bind(true), true)
+	if not tournament_offer.is_empty():
+		tournament_button.text = tournament_offer.rival.name
+	tournament_button.disabled = not game.can_scout(true)
 	var nav := _row(content)
 	_button(nav, "Town square", show_town)
-	if not game.state.outcome.is_empty():
-		if game.state.outcome.winner == 0:
-			_button(nav, "Practice last bout", _retry.bind(true))
+	_last_bout_button(nav, true)
+
+func _show_rival(stage: Control, fighter: Dictionary) -> void:
+	stage.right_loadout = fighter.loadout
+	stage.rival_skin = int(fighter.get("skin", 0))
+	stage.rival_hair = int(fighter.get("hair", 0))
+
+func _scout_bout(tournament: bool) -> void:
+	var offer: Dictionary = game.scout_bout(tournament, randi())
+	if offer.is_empty():
+		show_arena()
+	else:
+		_show_faceoff(offer)
+
+func _show_faceoff(offer: Dictionary) -> void:
+	var rival: Dictionary = offer.rival
+	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout)
+	var heading := "Before the fight"
+	if offer.tournament:
+		heading = "Tournament · Round %d/%d" % [int(offer.round) + 1, int(offer.round_count)]
+	_page("scout", heading)
+	var names := _row(content, 22)
+	_title(names, "%s · Lv. %d" % [player.name, game.state.level], 24)
+	_space(names)
+	_title(names, "%s · Lv. %d" % [rival.name, rival.level], 24)
+	var stage := _stage(content, "battle", 200)
+	stage.arena = game.arena_index()
+	stage.arena_width = int(data.rules.arena_size)
+	stage.positions = [stage.arena_width * .2, stage.arena_width * .8]
+	_show_rival(stage, rival)
+	var comparisons := _row(content, 14)
+	var stats := _card(comparisons, 5)
+	var kit := _card(comparisons, 5)
+	_fill(stats.get_parent())
+	_fill(kit.get_parent())
+	_compare_row(stats, "", "Your stats", "Rival stats", "")
+	_compare_row(kit, "", "Your kit", "Rival kit", "")
+	for stat in Data.STATS:
+		_compare_row(stats, stat, player.stats[stat], rival.stats[stat], STAT_ICONS[stat])
+	_compare_row(kit, "Health", player.max_hp, rival.max_hp, "health")
+	_compare_row(kit, "Armor", player.max_armor, rival.max_armor, "armor")
+	_compare_row(kit, "Energy", player.max_energy, rival.max_energy, "stamina")
+	_compare_row(kit, "Weapon", player.weapon.name, rival.weapon.name, "attack")
+	_compare_row(kit, "Weapon reach", player.weapon.reach, rival.weapon.reach, "advance")
+	_compare_row(kit, "Spell", player.spell.get("name", "None"), rival.spell.get("name", "None"), "cast")
+	_compare_row(kit, "Spell reach", player.spell.get("reach", "–"), rival.spell.get("reach", "–"), "advance")
+	_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
+	var actions := _row(content, 10)
+	_button(actions, "Back", show_arena)
+	_space(actions)
+	var loss_fee := mini(int(game.state.gold), int(data.rules.loss_gold))
+	if not offer.tournament and loss_fee > 0:
+		_token(actions, "coin", "−%d" % loss_fee, "Gold lost on defeat")
+	var fight := _button(actions, "Fight to the death" if offer.tournament else "Fight", _new_bout.bind(offer.tournament), true)
+	if offer.tournament:
+		fight.add_theme_stylebox_override("normal", _style(Color("#512d2a"), RED, 9))
+		fight.add_theme_stylebox_override("hover", _style(Color("#663833"), RED, 9))
+
+func _compare_row(parent: Control, caption: String, left: Variant, right: Variant, symbol: String) -> void:
+	var line := _row(parent, 8)
+	var player := _label(line, str(int(left)) if left is float else str(left), 15)
+	_fill(player)
+	player.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	player.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var category := _row(line, 4)
+	category.custom_minimum_size.x = 132
+	category.alignment = BoxContainer.ALIGNMENT_CENTER
+	if not symbol.is_empty():
+		category.add_child(Symbol.make(symbol, 19))
+	_label(category, caption, 15, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var rival := _label(line, str(int(right)) if right is float else str(right), 15)
+	_fill(rival)
+	rival.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	if (left is int or left is float) and left != right:
+		if left > right:
+			player.add_theme_color_override("font_color", GREEN)
 		else:
-			_button(nav, "Retry last bout", _retry.bind(false))
+			rival.add_theme_color_override("font_color", GREEN)
 
 func _new_bout(tournament: bool) -> void:
-	var snapshot: Dictionary = game.start_bout(tournament, int(Time.get_unix_time_from_system() * 1000) ^ int(Time.get_ticks_usec()))
+	var snapshot: Dictionary = game.start_bout(tournament, randi())
 	if not snapshot.is_empty():
 		_open_bout(snapshot, false)
+	elif not game.scouted_bout(tournament).is_empty():
+		_show_faceoff(game.scouted_bout(tournament))
 
 func _retry(practice: bool) -> void:
 	if game.state.pending:
@@ -718,22 +891,18 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	battle_stage.arena_width = int(bout.rules.arena_size)
 	battle_stage.bout_items = snapshot.equipment
 	battle_stage.left_loadout = bout.fighters[0].loadout
-	battle_stage.right_loadout = bout.fighters[1].loadout
+	_show_rival(battle_stage, bout.fighters[1])
 	battle_hud = BattleHud.new()
 	battle_layer.add_child(battle_hud)
 	battle_hud.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	battle_hud.build(snapshot.arena_name, snapshot.seed, serif)
+	battle_hud.build(snapshot.arena_name, serif)
 	battle_hud.action_selected.connect(_player_action)
-	battle_hud.window_toggled.connect(_toggle_battle_window)
-	battle_hud.sound_toggled.connect(_toggle_battle_sound)
+	battle_hud.settings_requested.connect(_show_settings)
 	battle_hud.resized.connect(_place_battle_actions)
-	if not bout.history.is_empty():
-		battle_hud.event_label.text = bout.history.back().message
 	window_mode_before_bout = get_window().mode
 	if (DisplayServer.get_name() != "headless" and fullscreen_bouts
 			and window_mode_before_bout not in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]):
 		get_window().mode = Window.MODE_FULLSCREEN
-	_refresh_battle_settings()
 	_refresh_battle()
 	if bout.active == 1:
 		_play_opponent_turn(fight_generation)
@@ -742,31 +911,14 @@ func _refresh_battle() -> void:
 	battle_stage.positions = bout.positions.duplicate()
 	battle_stage.queue_redraw()
 	battle_hud.refresh(bout, fight_locked)
-	battle_hud.save_notice.text = game.save_error
-	battle_hud.save_notice.visible = not game.save_error.is_empty()
+	battle_hud.show_save_error(game.save_error)
 	_place_battle_actions()
 
 func _place_battle_actions() -> void:
 	battle_hud.place_actions(battle_stage.fighter_feet(0), battle_stage.fighter_height())
 
-func _refresh_battle_settings() -> void:
-	var mode := get_window().mode
-	battle_hud.window_button.text = "Windowed" if mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN] else "Full screen"
-	battle_hud.sound_button.text = "Sound on" if sound.enabled else "Sound off"
-
-func _toggle_battle_window() -> void:
-	if DisplayServer.get_name() == "headless":
-		return
-	fullscreen_bouts = get_window().mode not in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
-	get_window().mode = Window.MODE_FULLSCREEN if fullscreen_bouts else Window.MODE_WINDOWED
-	_refresh_battle_settings()
-
-func _toggle_battle_sound() -> void:
-	sound.toggle()
-	_refresh_battle_settings()
-
 func _player_action(action: String) -> void:
-	if fight_locked or bout.active != 0 or not bout.reason(action).is_empty():
+	if is_instance_valid(settings_popup) or fight_locked or bout.active != 0 or not bout.reason(action).is_empty():
 		return
 	fight_locked = true
 	var generation := fight_generation
@@ -793,44 +945,52 @@ func _animate_turn(event: Dictionary, generation: int) -> void:
 	bout_result = game.record_turn(event.action, bout.winner)
 	battle_hud.action_layer.hide()
 	var fighter: Dictionary = bout.fighters[event.side]
-	battle_hud.turn_label.text = "%s   ·   %s" % [fighter.name, event.title]
 	battle_stage.animate(event)
 	sound.begin_turn(event, int(fighter.spell.get("art", 0)))
 	await get_tree().create_timer(Stage.IMPACT_TIME).timeout
 	if current_screen != "battle" or generation != fight_generation:
 		return
 	sound.impact(event, int(fighter.weapon.get("art", 0)))
-	battle_hud.event_label.text = event.message
 	_refresh_battle()
 	await get_tree().create_timer(Stage.ACTION_TIME - Stage.IMPACT_TIME).timeout
 
 func _finish_bout() -> void:
-	var snapshot: Dictionary = game.state.snapshot.duplicate(true)
 	var outcome := bout_result
 	var title := "Victory" if bout.winner == 0 else "Defeat"
 	sound.play("victory" if bout.winner == 0 else "defeat")
-	_page("result", title, "Practice result" if practicing else snapshot.opponent)
-	var card := _card(content)
-	_title(card, "Bout results", 22)
-	if not practicing:
-		_label(card, "+%d gold    +%d XP" % [outcome.gold, outcome.xp], 19, SAND)
-		_show_progress(card)
-	if outcome.get("unlocked", false):
-		_wrapped(card, "You won the tournament. %s is open." % game.arena().name, 17, GREEN)
 	if outcome.get("complete", false) and bout.winner == 0:
-		_wrapped(card, "You won the final tournament. You're the Cinder League champion.", 17, GREEN)
-	if not bout.history.is_empty():
-		var messages := RichTextLabel.new()
-		messages.custom_minimum_size.y = 240
-		card.add_child(messages)
-		messages.add_text("\n".join(bout.history.map(func(event: Dictionary) -> String: return "%d  %s" % [event.turn, event.message])))
+		title = "League champion"
+	elif outcome.get("fallen", false):
+		title = "%s has fallen" % game.state.name
+	_page("result", "Practice " + title.to_lower() if practicing else title)
+	_stage(content, "avatar", 290)
+	if outcome.get("fallen", false):
+		_button(content, "Title screen", show_menu, true)
+		return
+	if not practicing:
+		var rewards := _row(content, 16)
+		_token(rewards, "coin", "%+d" % outcome.gold, "Gold")
+		if int(outcome.xp) > 0:
+			_token(rewards, "xp", "+%d" % outcome.xp, "Experience")
+		if outcome.get("unlocked", false):
+			_token(rewards, "trophy", game.arena().name, "New arena")
+		if not game.state.complete:
+			_show_progress(content)
 	var controls := _row(content)
 	if game.state.pending:
 		_button(controls, "Spend level-up points", _allocate_level, true)
 	else:
 		_button(controls, "Return to town", show_town, true)
-		_button(controls, "Practice last bout" if game.state.outcome.get("winner", -2) == 0 else "Retry bout", _retry.bind(game.state.outcome.get("winner", -2) == 0))
+		_last_bout_button(controls, false)
 		_button(controls, "Arena", show_arena)
+
+func _last_bout_button(parent: Control, in_arena: bool) -> void:
+	if game.state.outcome.is_empty():
+		return
+	if game.state.outcome.winner == 0:
+		_button(parent, "Practice last bout", _retry.bind(true))
+	elif not game.state.snapshot.tournament and game.scouted_bout().is_empty():
+		_button(parent, "Retry last bout" if in_arena else "Retry bout", _retry.bind(false))
 
 func _number(parent: Node, caption: String, minimum: int, maximum: int, initial: int) -> SpinBox:
 	_label(parent, caption, 13, MUTED)
@@ -852,7 +1012,7 @@ func _styles(parent: Node, label: String, initial: int) -> OptionButton:
 	return selector
 
 func show_simulator() -> void:
-	_page("simulator", "Simulator", "Run a seeded matchup or test how a build progresses through the campaign.")
+	_page("simulator", "Simulator")
 	var buttons := _row(content, 9)
 	var left := _styles(buttons, "Fighter", 0)
 	var right := _styles(buttons, "Opponent", 2)
@@ -865,7 +1025,6 @@ func show_simulator() -> void:
 	_button(actions, "Playtest balance", show_balance)
 	sim_output = TextEdit.new()
 	sim_output.editable = false
-	sim_output.placeholder_text = "Results and the first bout's turn-by-turn trace will appear here."
 	content.add_child(sim_output)
 	_fill(sim_output, true)
 
@@ -880,7 +1039,7 @@ func _simulate(left: OptionButton, right: OptionButton, level: SpinBox, seeds: S
 	if result.has("error"):
 		lines.append(result.error)
 	elif campaign:
-		var status := "All tournaments won" if result.complete else "Run ended at the bout limit"
+		var status := "All tournaments won" if result.complete else ("Gladiator fell" if result.fallen else "Run ended at the bout limit")
 		lines.append("%s  ·  Level %d  ·  Arena %d" % [status, result.level, result.arena])
 		for entry in result.bouts:
 			var bout_status := "win" if entry.winner == 0 else "draw" if entry.winner == -1 else "loss"
@@ -897,7 +1056,7 @@ func _simulate(left: OptionButton, right: OptionButton, level: SpinBox, seeds: S
 	sim_output.text = "\n".join(lines)
 
 func show_balance() -> void:
-	_page("balance", "Playtest balance", "Combat, item, and economy values are editable. Changes apply to new bouts and simulations.")
+	_page("balance", "Playtest balance")
 	balance_editor = TextEdit.new()
 	balance_editor.text = FileAccess.get_file_as_string(USER_BALANCE if FileAccess.file_exists(USER_BALANCE) else Data.DEFAULT_FILE)
 	content.add_child(balance_editor)
