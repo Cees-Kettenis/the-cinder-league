@@ -23,6 +23,7 @@ func _run() -> void:
 	_check_starter_weapon(data)
 	_check_exhaustion(data)
 	_check_movement(data)
+	_check_lunge(data)
 	_check_legacy_lunge(data)
 	_check_attack_styles(data)
 	_check_arena_view(data)
@@ -91,7 +92,7 @@ func _check_movement(data: RefCounted) -> void:
 	var duel := Duel.new(data, fighter, fighter, 42)
 	var opening := duel.positions.duplicate()
 	_check(duel.distance() == 5, "New bouts should start five spaces apart")
-	for action in ["attack", "quick", "power", "rush"]:
+	for action in ["attack", "quick", "power", "lunge", "rush"]:
 		_check(not duel.act(action).valid and duel.turn == 0 and duel.positions == opening,
 			"A melee attack from the opening distance must spend no turn and move neither fighter")
 	var jump := duel.act("jump")
@@ -100,6 +101,7 @@ func _check_movement(data: RefCounted) -> void:
 		"A jump should spend stamina and a turn on movement alone")
 	var retreat := duel.act("retreat")
 	_check(retreat.valid and duel.distance() == 3, "A retreat should reopen the gap on the defender's turn")
+	duel.fighters[0].energy = duel.cost("lunge") - 1
 	_check(duel.choose("weapon") == "advance", "The AI should step when a jump would land in melee reach")
 	var approach := Duel.new(data, fighter, fighter, 42)
 	_check(approach.choose("weapon") == "jump", "The AI should leap across safe open ground")
@@ -110,6 +112,39 @@ func _check_movement(data: RefCounted) -> void:
 		var exhausted := Duel.new(data, fighter, fighter, 42)
 		exhausted.fighters[0].energy = 0
 		_check(not exhausted.act(action).valid and exhausted.positions == opening, "Movement must still cost stamina")
+
+func _check_lunge(data: RefCounted) -> void:
+	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "dagger"})
+	var duel := Duel.new(data, fighter, fighter, 42)
+	duel.act("advance")
+	_check(duel.distance() == 4 and duel.reason("lunge") == "Too far to lunge", "A lunge must close at most two spaces")
+	duel.act("advance")
+	var cost := int(fighter.weapon.energy) + 7 + 5 * 2
+	_check(duel.in_lunge_range() and duel.cost("lunge") == cost and duel.chance("lunge") < duel.chance("attack"),
+		"A short lunge should cost extra stamina and be less accurate than a normal attack")
+	var starting_positions := duel.positions.duplicate()
+	for stamina in [0, cost - 1]:
+		duel.fighters[0].energy = stamina
+		_check(not duel.act("lunge").valid and duel.positions == starting_positions and duel.turn == 2,
+			"A lunge without enough stamina must spend no turn and move neither fighter")
+	duel.fighters[0].energy = cost
+	var lunge := duel.act("lunge")
+	_check(lunge.valid and duel.positions[0] == starting_positions[0] + 2 and duel.distance() == fighter.weapon.reach
+		and duel.fighters[0].energy == 0 and duel.active == 1, "A lunge should move into reach and spend the full cost")
+	_check(duel.in_weapon_reach() and not duel.act("lunge").valid, "Within weapon reach the fighter should use a regular attack")
+
+	var long_weapon: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "court_mace"})
+	var nearer_opening := Duel.new(data, long_weapon, long_weapon, 42, 4)
+	nearer_opening.act("guard")
+	_check(nearer_opening.reason("lunge") == "Too far to lunge", "Even a long weapon needs a shorter gap than the opening")
+	nearer_opening.act("advance")
+	nearer_opening.act("advance")
+	_check(nearer_opening.in_weapon_reach(), "Moving all the way into weapon reach should also allow an attack")
+
+	var rival_lunge := Duel.new(data, fighter, fighter, 42)
+	rival_lunge.act("jump")
+	_check(rival_lunge.choose("weapon") == "lunge" and rival_lunge.act("lunge").valid and rival_lunge.distance() == 1,
+		"A rival can take a short lunge after the gap closes")
 
 func _check_legacy_lunge(data: RefCounted) -> void:
 	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "dagger"})
@@ -125,6 +160,7 @@ func _check_legacy_lunge(data: RefCounted) -> void:
 	legacy_rules.erase("lunge_base_cost")
 	legacy_rules.erase("lunge_hit_penalty")
 	legacy_rules.erase("lunge_cost_per_space")
+	legacy_rules.erase("lunge_max_spaces")
 	var free_moves: Dictionary = data.moves.duplicate()
 	free_moves.jump = 0
 	var free_weapon := fighter.duplicate(true)
@@ -133,6 +169,13 @@ func _check_legacy_lunge(data: RefCounted) -> void:
 	var oldest := Duel.new(data, free_weapon, fighter, 42, 2, {"rules": legacy_rules, "moves": free_moves})
 	_check(oldest.restore_history(["rush"]) and oldest.fighters[0].energy == 0 and oldest.distance() == 1,
 		"An already-recorded lunge from an older save should still replay with its saved cost")
+	var continued := Duel.new(data, fighter, fighter, 42, 5, {"rules": legacy_rules})
+	continued.act("advance")
+	continued.act("advance")
+	var new_lunge := continued.act("lunge")
+	var reloaded := Duel.new(data, fighter, fighter, 42, 5, {"rules": legacy_rules})
+	_check(new_lunge.valid and new_lunge.energy_cost == 21 and reloaded.restore_history(["advance", "advance", "lunge"])
+		and reloaded.history == continued.history, "A new short lunge in an older bout should reload with the same cost and result")
 
 func _check_attack_styles(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -473,8 +516,8 @@ func _check_game_buttons() -> void:
 	_press_escape()
 	_check(ui.current_screen == "battle" and not is_instance_valid(ui.settings_popup), "Escape should keep the player in the bout")
 	var attack: Button = ui.battle_hud.action_buttons.attack
-	_check(not ui.battle_hud.action_buttons.has("rush") and attack.disabled
-		and attack.tooltip_text.contains("Out of weapon reach"), "From a distance the HUD should offer movement instead of a lunge")
+	_check(not ui.battle_hud.action_buttons.has("lunge") and attack.disabled
+		and attack.tooltip_text.contains("Move closer"), "The HUD should require movement from the starting gap")
 	attack.pressed.emit()
 	_check(ui.bout.turn == 0, "Pressing Attack out of range must not spend a turn")
 	_check(not ui.battle_hud.action_buttons.quick.visible and not ui.battle_hud.action_buttons.power.visible,
@@ -482,6 +525,10 @@ func _check_game_buttons() -> void:
 	_check(ui.battle_hud.action_buttons.jump.tooltip_text.contains("3 spaces") and not ui.battle_hud.action_buttons.jump.disabled,
 		"The leap button should show the available movement distance")
 	var rival_start: int = ui.bout.positions[1]
+	ui.bout.positions[1] = ui.bout.positions[0] + 2
+	ui._refresh_battle()
+	_check(attack.accessibility_name == "Lunge" and not attack.disabled and attack.tooltip_text.contains("16 stamina"),
+		"The sword button should become Lunge in short range and show the stamina cost")
 	ui.bout.positions[1] = ui.bout.positions[0] + 1
 	ui._refresh_battle()
 	_check(ui.battle_hud.action_buttons.quick.visible and ui.battle_hud.action_buttons.power.visible

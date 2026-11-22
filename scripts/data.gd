@@ -37,6 +37,7 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		if not profile.has(section) or typeof(profile[section]) != typeof(reference[section]):
 			return "Missing or invalid balance section: " + section
 	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier",
+			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier"]:
 		if not profile.rules.has(key):
@@ -63,6 +64,9 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Sleep must be free and restore at least 1 stamina."
 	if rules.crit_power_cap < 1 or rules.maximum_hit > 1 or rules.spell_close_penalty > 1:
 		return "Check the critical multiplier cap and hit probabilities."
+	if (rules.lunge_hit_penalty > 1 or rules.lunge_cost_per_space < 1
+			or rules.lunge_max_spaces < 1 or rules.lunge_max_spaces != floor(rules.lunge_max_spaces)):
+		return "Check the lunge accuracy penalty, stamina per space, and whole-number travel limit."
 	if (rules.power_hit_penalty <= 0 or rules.power_hit_penalty > 1 or rules.power_damage_multiplier <= 1
 			or rules.power_stamina_extra < 1 or rules.power_strength_per_space < 1):
 		return "Power attacks need an accuracy penalty, extra damage and stamina cost, and a positive Strength threshold."

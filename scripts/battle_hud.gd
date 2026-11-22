@@ -22,6 +22,7 @@ var save_notice: Label
 var settings_button: Button
 var cast_charges: Label
 var split_attacks := false
+var weapon_action := "attack"
 
 func build(arena_name: String, title_font: Font) -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
@@ -37,8 +38,10 @@ func build(arena_name: String, title_font: Font) -> void:
 	action_layer.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	action_layer.mouse_filter = MOUSE_FILTER_IGNORE
 	for action in Duel.ACTIONS:
+		if action == "lunge":
+			continue
 		var button := _button(action_layer, "")
-		button.pressed.connect(func() -> void: action_selected.emit(action))
+		button.pressed.connect(func() -> void: action_selected.emit(weapon_action if action == "attack" else action))
 		button.custom_minimum_size = BUTTON_SIZE
 		Symbol.on_button(button, action, 36, Duel.LABELS[action])
 		var fill := Color("#45312b")
@@ -119,17 +122,24 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 	var player: Dictionary = bout.fighters[0]
 	cast_charges.visible = not player.spell.is_empty()
 	cast_charges.text = str(int(player.casts))
+	weapon_action = "lunge" if bout.in_lunge_range() else "attack"
 	split_attacks = bout.in_weapon_reach() and bout.has_attack_styles()
 	action_buttons.quick.visible = split_attacks
 	action_buttons.power.visible = split_attacks
-	for action in action_buttons:
-		var button: Button = action_buttons[action]
+	for key in action_buttons:
+		var action: String = weapon_action if key == "attack" else key
+		var button: Button = action_buttons[key]
 		var reason: String = bout.reason(action)
 		button.disabled = not reason.is_empty()
 		var icon: Control = button.get_child(0)
 		icon.modulate = Color("#afa4a7") if button.disabled else Color.WHITE
+		if icon.symbol != action:
+			icon.symbol = action
+			icon.queue_redraw()
 		if reason.begins_with("Needs"):
 			reason = "Not enough stamina"
+		elif reason == "Out of weapon reach" and action == "attack":
+			reason = "Out of weapon reach. Move closer."
 		var title: String = Duel.LABELS[action]
 		if action == "attack" and split_attacks:
 			title = "Normal attack"
@@ -137,6 +147,9 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 			title = "%s · %d %s left" % [player.spell.name, player.casts, "cast" if player.casts == 1 else "casts"]
 		button.accessibility_name = title
 		match action:
+			"lunge":
+				var spaces: int = bout.lunge_spaces()
+				title += " · %d %s · %d stamina · Lower accuracy" % [spaces, "space" if spaces == 1 else "spaces", bout.cost(action)]
 			"advance", "retreat", "jump":
 				var spaces: int = bout.travel(action)
 				if spaces > 0:

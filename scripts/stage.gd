@@ -169,6 +169,9 @@ func animate(change: Dictionary) -> void:
 		"power":
 			impact_time = .41
 			action_time = .97 if event.critical else .87
+		"lunge":
+			impact_time = .42
+			action_time = .98 if event.critical else .85
 		"cast":
 			action_time = .80
 			impact_time = action_time * SPELL_CONTACT
@@ -341,7 +344,7 @@ func _draw_weapon(gear: Dictionary, body: Transform2D, grip: Vector2, angle: flo
 		var tip: Vector2 = (Vector2(source.size.x - 43, 38) - sprite[1]) * scale_value
 		var tint := Color("#89dfff") if weapon.id == "warden_sword" else Color("#ffc278")
 		var mace := int(weapon.art) == 1
-		if event.action == "quick" and not mace:
+		if event.action in ["lunge", "quick"] and not mace:
 			_draw_thrust_trail(tip, tint, trail)
 		else:
 			_draw_weapon_trail(tip, tint, trail, mace)
@@ -406,6 +409,8 @@ func _draw_battle() -> void:
 	var approach := clampf(elapsed / impact_time, 0, 1)
 	var recovery := clampf((elapsed - impact_time) / (action_time - impact_time), 0, 1)
 	var shift := smoothstep(.17, 1.0, approach) if action == "jump" else smoothstep(.04, .90, phase)
+	if action == "lunge":
+		shift = smoothstep(.22, .97, approach)
 	var stagger := _hit_recoil(recovery) if animating and elapsed >= impact_time else 0.0
 	var visible_positions: Array[float] = [float(positions[0]), float(positions[1])]
 	var pushed := false
@@ -435,10 +440,12 @@ func _draw_battle() -> void:
 		draw_set_transform(foot + Vector2(height * .06, height * .008), 0.0, Vector2(1, .24))
 		draw_circle(Vector2.ZERO, height * .24, Color(0.08, 0.07, 0.055, .26))
 		draw_set_transform(Vector2.ZERO)
-	if animating and action in ["advance", "retreat", "jump"] and elapsed >= impact_time:
+	if animating and action in ["advance", "retreat", "jump", "lunge"] and elapsed >= impact_time:
 		_draw_dust(feet[side], height, recovery)
 	if stagger > 0.0:
 		_draw_dust(feet[1 - side], height, clampf(recovery * 1.4, 0.0, 1.0))
+	if animating and action == "lunge" and approach > .22 and approach < .97:
+		_draw_lunge_lines(feet[side], height, 1.0 if side == 0 else -1.0, approach)
 	if full_arena and not animating:
 		var marker := feet[0] + Vector2(0, 7)
 		draw_set_transform(marker, 0.0, Vector2(1, .24))
@@ -478,6 +485,21 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		arm.y = sin(idle_time * 2.8 + index * 2.2) * .025
 	if actor == index and phase < 1:
 		match action:
+			"lunge":
+				var coil := smoothstep(.0, .22, approach) * (1.0 - smoothstep(.37, .76, approach))
+				var strike := smoothstep(.61, .99, approach) * (1.0 - smoothstep(.17, .90, recovery))
+				var plant := smoothstep(.37, .93, approach) * (1.0 - smoothstep(.22, .92, recovery))
+				var stride := sin(TAU * clampf((approach - .22) / .66, 0.0, 1.0)) * (1.0 - plant)
+				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
+				feet.x -= direction * height * (.055 * coil + (.09 if event.miss else .022) * strike)
+				feet.y += height * (.036 * (coil + plant) - .018 * absf(stride))
+				lean = -.10 * coil + .028 * strike
+				legs = Vector4(.23, -.10, -.43, .29) * plant + Vector4(-.20, .29, -.21, .32) * coil
+				legs += Vector4(.44, -.26, -.43, .25) * stride
+				arm += (Vector2(-.32, -1.39) if mace else Vector2(.60, -.96)) * coil
+				arm += (Vector2(-.86, .59) if mace else Vector2(-1.07, .73)) * strike
+				wrist = (-.51 if mace else -.65) * coil + (1.46 if mace else 1.05) * strike
+				trail = smoothstep(.72, .97, approach) * (1.0 - smoothstep(.09, .43, recovery))
 			"attack", "quick", "power":
 				var windup := smoothstep(.0, .55, approach) * (1.0 - smoothstep(.58, .94, approach))
 				var follow := smoothstep(.60, 1.0, approach) * (1.0 - smoothstep(.28, .96, recovery))
@@ -557,6 +579,13 @@ func _draw_pit(at: Vector2, height: float) -> void:
 	draw_circle(Vector2(0, radius * .02), radius * .67, Color("#17151f"), true, -1, true)
 	draw_arc(Vector2.ZERO, radius * .94, .1, PI - .1, 29, Color("#e3aa68"), height * .020, true)
 	draw_set_transform(Vector2.ZERO)
+
+func _draw_lunge_lines(feet: Vector2, height: float, direction: float, approach: float) -> void:
+	var strength := smoothstep(.22, .49, approach) * (1.0 - smoothstep(.70, .97, approach))
+	for index in 4:
+		var tip := feet + Vector2(-direction * height * (.16 + index * .095), -height * (.31 + index * .101))
+		var trail := Vector2(-direction * height * (.12 + index * .04) * strength, 0)
+		draw_line(tip, tip + trail, Color(.99, .89, .70, strength * .64), 2.5, true)
 
 func _draw_thrust_trail(tip: Vector2, tint: Color, pulse: float) -> void:
 	var along := tip.normalized()

@@ -35,7 +35,10 @@ func _draw() -> void:
 static func paint(canvas: CanvasItem, key: String, origin: Vector2, extent: float) -> void:
 	canvas.draw_set_transform(origin, 0, Vector2.ONE * extent / 32.0)
 	match key:
-		"attack", "strength":
+		"attack", "strength", "lunge":
+			if key == "lunge":
+				_line(canvas, [Vector2(2,10), Vector2(13,10)], GOLD, 2.5)
+				_line(canvas, [Vector2(7,4), Vector2(19,4)], GOLD, 2.5)
 			_shape(canvas, [Vector2(10,17), Vector2(23,4), Vector2(29,3), Vector2(28,10), Vector2(15,23)], STEEL)
 			_line(canvas, [Vector2(15,18), Vector2(25,8)], CREAM, 1.5)
 			_shape(canvas, [Vector2(5,14), Vector2(18,26), Vector2(15,29), Vector2(2,17)], GOLD)

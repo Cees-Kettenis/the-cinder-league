@@ -1,10 +1,10 @@
 extends RefCounted
 
-const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power"]
+const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power", "lunge"]
 const ACTIONS: Array[String] = ["advance", "retreat", "jump"] + WEAPON_ACTIONS + ["guard", "sleep", "taunt", "cast", "potion"]
 const LABELS := {
 	"advance": "Advance", "retreat": "Retreat", "jump": "Leap forward", "attack": "Attack",
-	"quick": "Quick attack", "power": "Power attack", "rush": "Lunge",
+	"quick": "Quick attack", "power": "Power attack", "lunge": "Lunge", "rush": "Lunge",
 	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Cast", "potion": "Drink potion",
 }
 
@@ -13,6 +13,7 @@ var moves: Dictionary
 var distances: Dictionary
 var fighters: Array
 var positions: Array[int]
+var opening_distance: int
 var seed_value: int
 var random := RandomNumberGenerator.new()
 var strategy_random := RandomNumberGenerator.new()
@@ -31,9 +32,9 @@ func _init(rules_data: RefCounted, left: Dictionary, right: Dictionary, fight_se
 	seed_value = fight_seed
 	random.seed = seed_value
 	var size := int(rules.arena_size)
-	var start := clampi(int(rules.starting_distance) if opening < 0 else opening, 1, size)
-	var edge := int((size - start) * .5)
-	positions = [edge, edge + start]
+	opening_distance = clampi(int(rules.starting_distance) if opening < 0 else opening, 1, size)
+	var edge := int((size - opening_distance) * .5)
+	positions = [edge, edge + opening_distance]
 
 func distance() -> int:
 	return positions[1] - positions[0]
@@ -88,12 +89,12 @@ func cost(action: String, side: int = -1) -> int:
 		"attack": return int(fighter.weapon.energy)
 		"quick": return _quick_cost(fighter)
 		"power": return int(fighter.weapon.energy) + ceili(rules.get("power_stamina_extra", 0.0))
-		"rush":
-			# Reconstruct lunges already recorded by earlier builds.
-			if not rules.has("lunge_base_cost"):
+		"lunge", "rush":
+			# The old action ID is only used to reconstruct recorded turns.
+			if action == "rush" and not rules.has("lunge_base_cost"):
 				return int(fighter.weapon.energy) + int(moves.jump)
-			var spaces := maxi(0, distance() - int(fighter.weapon.reach))
-			return int(fighter.weapon.energy) + ceili(rules.lunge_base_cost + spaces * rules.lunge_cost_per_space)
+			var extra: float = rules.get("lunge_base_cost", 7.0) + lunge_spaces(side) * rules.get("lunge_cost_per_space", 5.0)
+			return int(fighter.weapon.energy) + ceili(extra)
 		"cast": return int(fighter.spell.get("energy", 0))
 	return int(moves.get(action, 0))
 
@@ -102,6 +103,14 @@ func _quick_cost(fighter: Dictionary) -> int:
 
 func in_weapon_reach() -> bool:
 	return distance() <= fighters[active].weapon.reach
+
+func lunge_spaces(side: int = -1) -> int:
+	var fighter: Dictionary = fighters[active if side < 0 else side]
+	return maxi(0, distance() - int(fighter.weapon.reach))
+
+func in_lunge_range() -> bool:
+	return (fighters[active].weapon.reach >= 1 and not in_weapon_reach() and distance() < opening_distance
+		and lunge_spaces() <= int(rules.get("lunge_max_spaces", 2)))
 
 func has_attack_styles() -> bool:
 	return rules.has("power_damage_multiplier")
@@ -124,6 +133,7 @@ func chance(action: String) -> float:
 	var target: Dictionary = fighters[1 - active]
 	var accuracy := hit_chance(rules, fighter.stats, action == "cast", target.exposed, threatens_cast(target))
 	match action:
+		"lunge": return maxf(0.0, accuracy - float(rules.get("lunge_hit_penalty", .20)))
 		"rush": return maxf(0.0, accuracy - float(rules.get("lunge_hit_penalty", 0.0)))
 		"power": return maxf(0.0, accuracy - float(rules.get("power_hit_penalty", 0.0)))
 		"quick": return minf(1.0, accuracy + float(rules.get("quick_hit_bonus", 0.0)))
@@ -153,6 +163,11 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 		"quick", "attack", "power":
 			if not in_weapon_reach():
 				return "Out of weapon reach"
+		"lunge":
+			if in_weapon_reach():
+				return "Use Attack at this distance"
+			if not in_lunge_range():
+				return "Too far to lunge"
 		"rush":
 			if in_weapon_reach():
 				return "Use Attack at this distance"
@@ -216,11 +231,11 @@ func act(action: String) -> Dictionary:
 			fighter.hp = mini(fighter.max_hp, before + int(rules.heal))
 			fighter.potions -= 1
 			event.message = "%s restores %d health." % [fighter.name, fighter.hp - before]
-		"quick", "attack", "power", "rush", "cast":
+		"quick", "attack", "power", "lunge", "rush", "cast":
 			if action == "cast":
 				fighter.casts -= 1
-			elif action == "rush":
-				positions[side] += (1 if side == 0 else -1) * (distance() - int(fighter.weapon.reach))
+			elif action in ["lunge", "rush"]:
+				positions[side] += (1 if side == 0 else -1) * lunge_spaces()
 			_strike(action, fighter, enemy, event)
 			if action == "power" and not event.miss and not event.blocked and enemy.hp > 0:
 				_knock_back(enemy, event)
@@ -337,6 +352,8 @@ func choose(profile: String) -> String:
 		return "cast"
 	if "quick" in legal:
 		return "quick"
+	if "lunge" in legal and not enemy.guarding:
+		return "lunge"
 	if "jump" in legal:
 		var step_gap := distance() - travel("advance")
 		var jump_gap := distance() - travel("jump")
