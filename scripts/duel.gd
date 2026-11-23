@@ -70,9 +70,13 @@ static func crit_chance(rule: Dictionary, attack: float) -> float:
 static func crit_multiplier(rule: Dictionary, attack: float) -> float:
 	return minf(rule.crit_power_cap, rule.crit_power + attack * rule.crit_power_per_attack)
 
-static func strike_damage(rule: Dictionary, fighter: Dictionary, spell: bool) -> float:
+static func spell_base_damage(rule: Dictionary, spell: Dictionary, first_blood: bool) -> float:
+	var scale := float(rule.get("bout_spell_base_multiplier", 1.0)) if first_blood else 1.0
+	return spell.damage * scale
+
+static func strike_damage(rule: Dictionary, fighter: Dictionary, spell: bool, first_blood: bool = false) -> float:
 	if spell:
-		return fighter.spell.damage + fighter.stats.Magic * rule.damage_per_magic
+		return spell_base_damage(rule, fighter.spell, first_blood) + fighter.stats.Magic * rule.damage_per_magic
 	return fighter.weapon.damage + fighter.stats.Strength * rule.damage_per_strength + fighter.get("enchant_damage", 0)
 
 static func recovery(rule: Dictionary, stamina: float) -> int:
@@ -315,7 +319,7 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 	event.message = "%s uses %s.%s %s" % [fighter.name, event.title.to_lower(), marker, _impact(event)]
 
 func action_damage(action: String, fighter: Dictionary) -> float:
-	var damage := strike_damage(rules, fighter, action == "cast")
+	var damage := strike_damage(rules, fighter, action == "cast", first_blood)
 	match action:
 		"power": return damage * rules.power_damage_multiplier
 		"quick": return damage * rules.quick_damage_multiplier
@@ -402,7 +406,7 @@ func _can_guard_against_cast(fighter: Dictionary, enemy: Dictionary) -> bool:
 	if (enemy.casts <= 0 or enemy.provoked or distance() > enemy.spell.reach or enemy.energy < enemy.spell.energy
 			or block_chance(rules, fighter.stats.Defence, true) <= 0.0):
 		return false
-	var damage := strike_damage(rules, enemy, true)
+	var damage := strike_damage(rules, enemy, true, first_blood)
 	return roundi(damage) > fighter.armor and maxi(1, roundi(damage * rules.guard_damage_factor)) <= fighter.armor
 
 func _should_close(fighter: Dictionary, enemy: Dictionary) -> bool:
@@ -411,7 +415,7 @@ func _should_close(fighter: Dictionary, enemy: Dictionary) -> bool:
 		and _expected_strike(fighter, enemy, false) > _expected_strike(enemy, fighter, false))
 
 func _expected_strike(fighter: Dictionary, enemy: Dictionary, spell: bool) -> float:
-	var damage := strike_damage(rules, fighter, spell)
+	var damage := strike_damage(rules, fighter, spell, first_blood)
 	if not spell:
 		var attack: float = fighter.stats.Attack
 		damage *= 1.0 + crit_chance(rules, attack) * (crit_multiplier(rules, attack) - 1.0)

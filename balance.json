@@ -54,6 +54,7 @@
     "maximum_hit": 0.97,
     "damage_per_strength": 1.35,
     "damage_per_magic": 0.72,
+    "bout_spell_base_multiplier": 0.5,
     "guard_damage_factor": 0.48,
     "taunt_minimum": 9,
     "taunt_base_damage": 4,

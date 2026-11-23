@@ -32,6 +32,7 @@ func _run() -> void:
 	_check_fighter_rig()
 	_check_hit_feedback()
 	_check_fatality_variants(data)
+	_check_bout_spell_damage(data)
 	_check_spell_charges(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
@@ -463,6 +464,35 @@ func _check_fatality_variants(data: RefCounted) -> void:
 	stage.animate(fatal)
 	_check(stage.finisher == "heart", "Blunt weapons should retain their existing finisher")
 	stage.free()
+
+func _check_bout_spell_damage(data: RefCounted) -> void:
+	var mage: Dictionary = data.fighter("Mage", data.build_stats("mage", 40), {"spell": "storm"})
+	var rival: Dictionary = data.fighter("Rival", data.stats_empty(), {})
+	rival.armor = 28
+	var rules: Dictionary = data.rules.duplicate()
+	rules.minimum_hit = 1.0
+	rules.maximum_hit = 1.0
+	rules.block_cap = 0.0
+	var regular := Duel.new(data, mage, rival, 42, 5, {"rules": rules, "first_blood": true})
+	var lethal := Duel.new(data, mage, rival, 42, 5, {"rules": rules})
+	var full_damage := roundi(lethal.action_damage("cast", mage))
+	var bout_damage := roundi(regular.action_damage("cast", mage))
+	var armour_hit := regular.act("cast")
+	_check(bout_damage < 28 and armour_hit.armor_hit == bout_damage and armour_hit.damage == 0 and regular.winner == -2,
+		"Forked Lightning should damage 28 armor without drawing first blood on the opening cast")
+	_check(lethal.act("cast").damage == full_damage - 28 and full_damage > bout_damage,
+		"Death matches should apply the full spell damage and agree with the preview")
+
+	var veteran := mage.duplicate(true)
+	veteran.stats.Magic += 4
+	var bonus := regular.action_damage("cast", veteran) - regular.action_damage("cast", mage)
+	_check(is_equal_approx(bonus, 4 * float(rules.damage_per_magic)), "Magic points should contribute their full bonus in regular bouts")
+
+	var previous_rules := rules.duplicate()
+	previous_rules.erase("bout_spell_base_multiplier")
+	var saved := Duel.new(data, mage, rival, 42, 5, {"rules": previous_rules, "first_blood": true})
+	_check(saved.act("cast").damage == full_damage - 28 and saved.winner == 0,
+		"A regular bout saved before the spell adjustment should replay with its original damage")
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()

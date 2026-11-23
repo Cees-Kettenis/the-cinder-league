@@ -39,7 +39,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier",
 			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"power_hit_penalty", "power_damage_multiplier",
-			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier"]:
+			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier",
+			"bout_spell_base_multiplier"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -77,6 +78,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Opponent point variance must be 0.25 or less."
 	if rules.capped_gold_multiplier > 1:
 		return "Capped bout gold must be between 0 and 1 times the usual reward."
+	if rules.bout_spell_base_multiplier > 1:
+		return "Bout spell base damage must be between 0 and 1 times the death match base damage."
 	for move in ["advance", "retreat", "jump"]:
 		if distances[move] < 1 or distances[move] != floor(distances[move]):
 			return "Movement distances must be positive whole numbers."

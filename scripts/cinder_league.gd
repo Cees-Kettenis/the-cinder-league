@@ -1096,10 +1096,11 @@ func _preview_item(id: String) -> void:
 			_shop_stat("armor", "Armor points", "%d → %d" % [points, new_points])
 		"weapon", "spell":
 			var current: Dictionary = data.items.get(game.state.loadout.get(item.kind, ""), {})
-			var damage := str(int(item.damage))
+			var damage := _shop_base_damage(item)
 			if not current.is_empty() and current.damage != item.damage:
-				damage = "%d → %d" % [current.damage, item.damage]
-			_shop_stat("attack", "Base damage", damage)
+				damage = _shop_base_damage(current) + " → " + damage
+			var caption := "Base damage · Bout / Death match" if item.kind == "spell" else "Base damage"
+			_shop_stat("attack", caption, damage)
 			_shop_stat("advance", "Reach", "1 space" if item.reach == 1 else "%d spaces" % item.reach)
 			var action := "attack" if item.kind == "weapon" else "cast"
 			_shop_stat("stamina", "Stamina cost", "%d per %s" % [item.energy, action])
@@ -1111,6 +1112,12 @@ func _preview_item(id: String) -> void:
 		"potion":
 			_shop_stat("health", "Health restored", "+%d" % data.rules.heal)
 			_shop_stat("potion", "Uses per death match", str(int(data.rules.potion_uses)))
+
+func _shop_base_damage(item: Dictionary) -> String:
+	if item.kind == "spell":
+		var regular := Duel.spell_base_damage(data.rules, item, true)
+		return "%s / %s" % [String.num(regular, 2).trim_suffix(".0"), String.num(item.damage, 2).trim_suffix(".0")]
+	return str(int(item.damage))
 
 func _shop_stat(symbol: String, caption: String, value: String) -> void:
 	var stat := _column(shop_stats, 3)
