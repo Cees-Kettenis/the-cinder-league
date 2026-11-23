@@ -29,7 +29,7 @@ The crests at each top corner show the fighter's current and maximum health, arm
 
 New bouts use a 30-space arena with a pit at each end. The camera follows the fight and pulls back when the fighters spread out. Steps, jumps, attack ranges, and knockback use the same distances at any window size. Saved bouts keep their original arena width.
 
-The **Pack** shows remaining spell casts and, in death matches, healing potions. Spells deal half their base damage in regular bouts and gain the full damage bonus from invested Magic points. Fireball and Lightning Strike start with two casts. The heavier spells start with one. At 30 Magic, your equipped spell gets one extra cast per death match. The Magic shop lists base damage and cast counts for both fight types. A miss spends a cast, and sleeping only restores stamina.
+The **Pack** shows remaining spell casts and, in death matches, healing potions. Spells deal half their base damage in regular bouts and gain the full damage bonus from invested Magic points. From outside your rival's weapon reach, spells can strip armor. Get inside that reach to draw first blood with a spell. Fireball and Lightning Strike start with two casts. The heavier spells start with one. At 30 Magic, use **Equip as reserve** in the Magic shop to bring a different spell for one cast per death match. An empty reserve slot gives the extra cast to your main spell. A miss spends a cast, and sleeping only restores stamina.
 
 Choose **Scout rival** in the arena to reveal a randomly generated opponent near your level. Compare your stats, equipment, and reach before choosing **Fight**. You can go back to town or close the game and return to the same rival. A scouted tournament opponent stays in place while you fight regular bouts or buy gear. Your latest gear is used when you enter the ring.
 
@@ -56,7 +56,7 @@ godot --headless --path . --script scripts/simulate.gd -- --campaign --left=weap
 
 Preset names are `weapon`, `guard`, `mage`, `skirmish`, `charisma`, `hybrid`, `all_attack`, and `brute`. The terminal outputs JSON after Godot's startup banner.
 
-Pass `--scenario=/absolute/path/scenario.json` to supply either side's full stat spread, a loadout, an opening distance, or a sequence of moves. A loadout uses the IDs in the balance file. Once scripted moves finish, the chosen AI presets continue the bout.
+Pass `--scenario=/absolute/path/scenario.json` to supply either side's full stat spread, a loadout, an opening distance, or a sequence of moves. A loadout uses the IDs in the balance file. A qualifying death match loadout can set `reserve_spell` to a spell distinct from its main `spell` and use `cast_reserve` in the script. Once scripted moves finish, the chosen AI presets continue the bout.
 
 ```json
 {

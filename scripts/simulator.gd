@@ -122,6 +122,10 @@ func _validate_scenario(options: Dictionary, level: int, points: int) -> String:
 				var id = loadout.get(kind, "")
 				if not id is String or (not id.is_empty() and data.items.get(id, {}).get("kind") != kind):
 					return "Unknown %s item in %s." % [kind, loadout_key]
+			var reserve = loadout.get("reserve_spell", "")
+			if not reserve is String or (not reserve.is_empty() and (data.items.get(reserve, {}).get("kind") != "spell"
+					or reserve == loadout.get("spell", "") or str(loadout.get("spell", "")).is_empty())):
+				return "Reserve spell in %s must differ from the equipped main spell." % loadout_key
 			if loadout.has("potion") and not loadout.potion is bool:
 				return "The potion field must be true or false."
 			if loadout.has("armor"):

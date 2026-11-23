@@ -40,7 +40,7 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier",
-			"bout_spell_base_multiplier", "death_match_extra_cast_magic"]:
+			"bout_spell_base_multiplier", "bout_ranged_spells_armor_only", "death_match_extra_cast_magic"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -169,11 +169,17 @@ func item_name(id: String) -> String:
 func spell_casts(spell: Dictionary, magic: int, death_match: bool = false) -> int:
 	if spell.is_empty():
 		return 0
-	return int(spell.uses) + int(death_match and magic >= int(rules.death_match_extra_cast_magic))
+	return int(spell.uses) + int(death_match and has_reserve_slot(magic))
+
+func has_reserve_slot(magic: int) -> bool:
+	return magic >= int(rules.death_match_extra_cast_magic)
 
 func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String = "weapon", death_match: bool = false) -> Dictionary:
 	var weapon: Dictionary = items.get(loadout.get("weapon", ""), items[rules.starter_weapon])
 	var spell: Dictionary = items.get(loadout.get("spell", ""), {})
+	var reserve: Dictionary = {}
+	if death_match and has_reserve_slot(int(stats.Magic)) and not spell.is_empty() and loadout.get("reserve_spell", "") != spell.id:
+		reserve = items.get(loadout.get("reserve_spell", ""), {})
 	var protection := 0
 	for id in loadout.get("armor", {}).values():
 		protection += int(items.get(id, {}).get("armor", 0))
@@ -183,7 +189,8 @@ func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String
 		"name": name, "stats": stats.duplicate(), "loadout": loadout.duplicate(true), "style": style,
 		"hp": health, "max_hp": health, "armor": protection, "max_armor": protection,
 		"energy": energy, "max_energy": energy, "weapon": weapon, "spell": spell,
-		"casts": spell_casts(spell, int(stats.Magic), death_match),
+		"casts": spell_casts(spell, int(stats.Magic), death_match and reserve.is_empty()),
+		"reserve_spell": reserve, "reserve_casts": int(not reserve.is_empty()),
 		"enchant_damage": int(items.get(loadout.get("enchant", ""), {}).get("damage", 0)),
 		"potions": int(rules.potion_uses) if loadout.get("potion", false) else 0,
 		"guarding": false, "exposed": false, "provoked": false,

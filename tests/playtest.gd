@@ -35,6 +35,7 @@ func _run() -> void:
 	_check_bout_spell_damage(data)
 	_check_spell_charges(data)
 	_check_death_match_spell_bonus(data)
+	_check_reserve_spell(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
 	_check_defeats(data)
@@ -297,7 +298,7 @@ func _check_first_blood(data: RefCounted) -> void:
 	_check(cut.get("first_blood", false) and cut.health[1] == 1 and heavy_hit.winner == 0,
 		"A finishing hit should leave the yielding fighter alive even if the blow would otherwise be fatal")
 	for action in ["cast", "taunt"]:
-		var special := Duel.new(data, attacker, attacker, 42, 2, mode)
+		var special := Duel.new(data, attacker, attacker, 42, 1, mode)
 		var event := special.act(action)
 		_check(event.damage > 0 and event.get("yielded", -1) == 1, "%s should win by dealing health damage" % action)
 
@@ -491,9 +492,24 @@ func _check_bout_spell_damage(data: RefCounted) -> void:
 
 	var previous_rules := rules.duplicate()
 	previous_rules.erase("bout_spell_base_multiplier")
+	previous_rules.erase("bout_ranged_spells_armor_only")
 	var saved := Duel.new(data, mage, rival, 42, 5, {"rules": previous_rules, "first_blood": true})
 	_check(saved.act("cast").damage == full_damage - 28 and saved.winner == 0,
 		"A regular bout saved before the spell adjustment should replay with its original damage")
+	rival.armor = 2
+	var mode := {"rules": rules, "first_blood": true}
+	var edge_hit := Duel.new(data, mage, rival, 42, 3, mode)
+	var chip := edge_hit.act("cast")
+	_check(chip.armor_hit == 2 and chip.damage == 0 and edge_hit.winner == -2,
+		"A ranged first-blood spell should stop at the last armor point")
+	rival.armor = 0
+	var opener := Duel.new(data, mage, rival, 42, 5, mode)
+	_check(not opener.act("cast").valid and opener.fighters[0].casts == mage.casts,
+		"A ranged cast against an unarmored rival should be unavailable and preserve the charge")
+	rival.weapon = data.items.court_mace
+	var inside_reach := Duel.new(data, mage, rival, 42, 2, mode)
+	_check(inside_reach.act("cast").damage > 0 and inside_reach.winner == 0,
+		"A spell inside the rival's weapon reach can win the bout")
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -560,6 +576,35 @@ func _check_death_match_spell_bonus(data: RefCounted) -> void:
 	campaign.record_turn("cast", -2)
 	var resumed: RefCounted = campaign.open_bout(snapshot)
 	_check(resumed.fighters[0].casts == 1, "Replaying a saved death match should spend the recorded cast only once")
+
+func _check_reserve_spell(data: RefCounted) -> void:
+	var campaign := Campaign.new(data)
+	var stats: Dictionary = data.stats_empty()
+	var threshold := int(data.rules.death_match_extra_cast_magic)
+	stats.Magic = threshold - 1
+	campaign.create(0, "Spell specialist", 0, 0, stats)
+	campaign.state.level = int(data.rules.arena_caps.front())
+	campaign.state.gold = 100
+	_check(campaign.purchase(data.items.fireball).is_empty(), "The main spell should equip normally")
+	_check(not campaign.purchase(data.items.storm, true).is_empty(), "Reserve spells should require the Magic threshold")
+	campaign.state.stats.Magic = threshold
+	_check(not campaign.purchase(data.items.fireball, true).is_empty(), "The same spell should not occupy both slots")
+	_check(campaign.purchase(data.items.storm, true).is_empty(), "A specialist should be able to buy a distinct reserve spell")
+	var regular := campaign.start_bout(false, 42)
+	_check(regular.fighters[0].reserve_spell.is_empty() and regular.fighters[0].casts == 2,
+		"First-blood bouts should use the main spell only")
+	campaign.settle(0)
+	var snapshot := campaign.start_bout(true, 42)
+	var duel: RefCounted = campaign.open_bout(snapshot)
+	_check(duel.fighters[0].casts == 2 and duel.fighters[0].reserve_casts == 1
+		and snapshot.equipment.has("storm"), "The bonus cast should transfer to the reserve spell")
+	var cast: Dictionary = duel.act("cast_reserve")
+	_check(cast.get("title") == data.items.storm.name and cast.get("spell_art") == int(data.items.storm.art)
+		and cast.get("energy_cost") == int(data.items.storm.energy), "The reserve spell should use its own effect and cost")
+	campaign.record_turn("cast_reserve", -2)
+	var resumed: RefCounted = campaign.open_bout(snapshot)
+	_check(resumed.fighters[0].reserve_casts == 0 and resumed.fighters[0].casts == 2,
+		"Resuming a saved reserve cast should preserve the main spell's charges")
 
 func _check_saved_bout(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)

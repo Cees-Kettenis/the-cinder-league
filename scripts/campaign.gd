@@ -204,7 +204,7 @@ func regular_win_xp() -> int:
 func _xp_cap() -> int:
 	return int(data.rules.xp_levels[int(arena().cap) - 1])
 
-func purchase(item: Dictionary) -> String:
+func purchase(item: Dictionary, reserve: bool = false) -> String:
 	if is_fallen():
 		return "This gladiator has fallen."
 	if tournament_in_progress():
@@ -212,6 +212,11 @@ func purchase(item: Dictionary) -> String:
 	var reason: String = data.lock_reason(state, item)
 	if not reason.is_empty():
 		return reason
+	if reserve:
+		if item.kind != "spell" or not data.has_reserve_slot(int(state.stats.Magic)):
+			return "The reserve spell slot is locked."
+		if state.loadout.spell.is_empty() or state.loadout.spell == item.id:
+			return "Equip a different spell in the main slot first."
 	if item.id not in state.owned:
 		if state.gold < item.price:
 			return "Not enough gold."
@@ -220,11 +225,22 @@ func purchase(item: Dictionary) -> String:
 	match item.kind:
 		"armor": state.loadout.armor[item.slot] = item.id
 		"weapon": state.loadout.weapon = item.id
-		"spell": state.loadout.spell = item.id
+		"spell":
+			if reserve:
+				state.loadout.reserve_spell = item.id
+			else:
+				if state.loadout.get("reserve_spell", "") == item.id:
+					state.loadout.reserve_spell = state.loadout.spell
+				state.loadout.spell = item.id
 		"enchant": state.loadout.enchant = item.id
 		"potion": state.loadout.potion = true
 	save()
 	return ""
+
+func clear_reserve_spell() -> void:
+	if not is_fallen() and not tournament_in_progress():
+		state.loadout.erase("reserve_spell")
+		save()
 
 func scout_bout(tournament: bool, seed_value: int) -> Dictionary:
 	if not can_scout(tournament):
@@ -294,12 +310,12 @@ func _record_bout_conditions(snapshot: Dictionary) -> void:
 	for fighter in snapshot.fighters:
 		var gear: Dictionary = fighter.loadout
 		var ids: Array = gear.get("armor", {}).values()
-		ids.append_array([gear.get("weapon", ""), gear.get("spell", ""), gear.get("enchant", "")])
+		ids.append_array([gear.get("weapon", ""), gear.get("spell", ""), gear.get("reserve_spell", ""), gear.get("enchant", "")])
 		for id in ids:
 			if data.items.has(id):
 				snapshot.equipment[id] = data.items[id].duplicate()
-		for kind in ["weapon", "spell"]:
-			var item: Dictionary = fighter[kind]
+		for kind in ["weapon", "spell", "reserve_spell"]:
+			var item: Dictionary = fighter.get(kind, {})
 			if not item.is_empty():
 				snapshot.equipment[item.id] = item.duplicate()
 

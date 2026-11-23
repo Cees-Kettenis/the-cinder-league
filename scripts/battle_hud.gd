@@ -13,7 +13,7 @@ const STRIKE_SIZE := Vector2(118, 72)
 const BUTTON_LABELS := {
 	"advance": "Step in", "retreat": "Step back", "jump": "Leap in", "jump_back": "Leap back",
 	"attack": "Attack", "quick": "Quick", "power": "Power", "lunge": "Lunge",
-	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Spell", "potion": "Potion",
+	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Spell", "cast_reserve": "Reserve", "potion": "Potion",
 }
 const METERS := [
 	["hp", "max_hp", "health", Color("#e25855")],
@@ -96,7 +96,7 @@ func build(title_font: Font) -> void:
 		if action == "lunge":
 			continue
 		var button := ActionButton.new()
-		var parent: Control = items if action in ["cast", "potion"] else action_layer
+		var parent: Control = items if action in Duel.SPELL_ACTIONS or action == "potion" else action_layer
 		parent.add_child(button)
 		button.pressed.connect(func() -> void: action_selected.emit(weapon_action if action == "attack" else action))
 		var strike := action in Duel.WEAPON_ACTIONS
@@ -107,11 +107,13 @@ func build(title_font: Font) -> void:
 		content.mouse_filter = MOUSE_FILTER_IGNORE
 		content.alignment = BoxContainer.ALIGNMENT_CENTER
 		content.add_theme_constant_override("separation", 0)
-		var icon := Symbol.make(action, 26)
+		var icon := Symbol.make("cast" if action in Duel.SPELL_ACTIONS else action, 26)
 		icon.size_flags_horizontal = SIZE_SHRINK_CENTER
 		content.add_child(icon)
 		button.glyph = icon
 		button.caption = _action_caption(content, BUTTON_LABELS[action], 15, IVORY)
+		if action in Duel.SPELL_ACTIONS:
+			button.caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		if strike:
 			button.summary = _action_caption(content, "", 13, SAND)
 		button.add_theme_stylebox_override("normal", _plate(Color("#3b2c2b"), EDGE, 0, 13))
@@ -124,7 +126,7 @@ func build(title_font: Font) -> void:
 		button.visible = action not in ["quick", "power"]
 		button.accessibility_name = Duel.LABELS[action]
 		action_buttons[action] = button
-	for action in ["cast", "potion"]:
+	for action in Duel.SPELL_ACTIONS + ["potion"]:
 		var count := _label(action_buttons[action], "", 14, IVORY)
 		count.mouse_filter = MOUSE_FILTER_IGNORE
 		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -223,12 +225,17 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		_update_action_preview()
 		return
 	var player: Dictionary = bout.fighters[0]
-	var has_spell: bool = not player.spell.is_empty()
 	var has_potion: bool = not bout.first_blood and (player.loadout.get("potion", false) or player.potions > 0)
-	action_buttons.cast.visible = has_spell
+	var supplies := int(has_potion)
+	for action in Duel.SPELL_ACTIONS:
+		var spell := Duel.spell_for_action(player, action)
+		action_buttons[action].visible = not spell.is_empty()
+		charges[action].text = str(Duel.spell_charges(player, action))
+		supplies += int(not spell.is_empty())
 	action_buttons.potion.visible = has_potion
-	pack.visible = has_spell or has_potion
-	charges.cast.text = str(int(player.casts))
+	pack.visible = supplies > 0
+	var pack_width := maxf(208.0, supplies * (BUTTON_SIZE.x + 7) + 14)
+	_dock(pack, Vector2.ONE, Rect2(-98 - pack_width, -100, pack_width, 78))
 	charges.potion.text = str(int(player.potions))
 	weapon_action = "lunge" if bout.in_lunge_range() else "attack"
 	split_attacks = bout.in_weapon_reach() and bout.has_attack_styles()
@@ -240,8 +247,9 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		var reason: String = bout.reason(action)
 		button.disabled = not reason.is_empty()
 		button.glyph.modulate = Color("#afa4a7") if button.disabled else Color.WHITE
-		if button.glyph.symbol != action:
-			button.glyph.symbol = action
+		var icon := "cast" if action in Duel.SPELL_ACTIONS else action
+		if button.glyph.symbol != icon:
+			button.glyph.symbol = icon
 			button.glyph.queue_redraw()
 		if reason.begins_with("Needs"):
 			reason = reason.replace("Needs", "Requires")
@@ -251,8 +259,9 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 			button.caption.text = "Normal" if split_attacks else "Attack"
 			if split_attacks:
 				title = "Normal attack"
-		if action == "cast" and has_spell:
-			title = player.spell.name
+		if action in Duel.SPELL_ACTIONS and button.visible:
+			title = Duel.spell_for_action(player, action).name
+			button.caption.text = title
 		button.accessibility_name = title
 		if not button.visible:
 			continue
@@ -262,7 +271,7 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 func _describe_action(bout: RefCounted, action: String, title: String, button: ActionButton, reason: String) -> String:
 	var player: Dictionary = bout.fighters[0]
 	var cost := "%d stamina" % bout.cost(action)
-	if action in Duel.WEAPON_ACTIONS or action == "cast":
+	if action in Duel.WEAPON_ACTIONS or action in Duel.SPELL_ACTIONS:
 		if reason in ["Out of weapon reach", "Out of spell range"]:
 			if button.summary != null:
 				button.summary.text = "Out of reach"
@@ -293,11 +302,14 @@ func _strike_preview(bout: RefCounted, action: String, title: String, cost: Stri
 	var rival: Dictionary = bout.fighters[1]
 	var block := 0 if rival.exposed else roundi(100.0 * Duel.block_chance(bout.rules, rival.stats.Defence, rival.guarding))
 	var odds := "%d%% hit · %d%% block if hit" % [accuracy, block]
-	if action == "cast":
+	var spell := action in Duel.SPELL_ACTIONS
+	if spell:
 		odds = title + "\n" + odds
 	if not reason.is_empty():
 		return odds + "\n" + reason
 	var armor := mini(damage, rival.armor)
+	if spell and bout.spell_armor_only(rival):
+		return odds + "\n" + cost + "\nClean hit takes %d armor · Armor only at this range" % armor
 	var first_blood: bool = bout.first_blood and damage > armor
 	var health := mini(damage - armor, maxi(0, int(rival.hp) - int(bout.first_blood)))
 	var losses := "%d HP" % health if armor == 0 else "%d armor" % armor

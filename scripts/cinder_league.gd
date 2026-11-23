@@ -98,6 +98,10 @@ var balance_notice: Label
 var sim_output: TextEdit
 var sound := Foley.new()
 var spell_preview_button: Button
+var reserve_row: HBoxContainer
+var reserve_label: Label
+var reserve_button: Button
+var clear_reserve_button: Button
 
 func _ready() -> void:
 	_make_theme()
@@ -868,7 +872,7 @@ func _update_point_total() -> void:
 		roundi(Duel.hit_chance(rule, values, false) * 100), roundi(Duel.crit_chance(rule, values.Attack) * 100)]
 	stat_labels.Strength.tooltip_text = "%d weapon damage" % roundi(Duel.strike_damage(rule, projected, false))
 	stat_labels.Defence.tooltip_text = "%d%% block chance" % roundi(Duel.block_chance(rule, values.Defence) * 100)
-	stat_labels.Magic.tooltip_text = "+%d spell damage\n%d Magic unlocks +1 cast in death matches" % [
+	stat_labels.Magic.tooltip_text = "+%d spell damage\n%d Magic unlocks a reserve spell or +1 main cast in death matches" % [
 		roundi(values.Magic * rule.damage_per_magic), int(rule.death_match_extra_cast_magic)]
 	stat_labels.Vitality.tooltip_text = "Health and recovery"
 	stat_labels.Stamina.tooltip_text = "Energy for moves"
@@ -1009,6 +1013,12 @@ func show_shop() -> void:
 	shop_stats.add_theme_constant_override("h_separation", 24)
 	shop_stats.add_theme_constant_override("v_separation", 8)
 	detail.add_child(shop_stats)
+	reserve_row = _row(detail)
+	reserve_label = _label(reserve_row, "", 15, SAND)
+	_space(reserve_row)
+	reserve_button = _button(reserve_row, "Equip as reserve", _buy_item.bind(true))
+	clear_reserve_button = _button(reserve_row, "Clear reserve", _clear_reserve_spell)
+	reserve_row.hide()
 	if shop_entries.is_empty():
 		shop_buy.disabled = true
 		shop_title.text = "No stock available"
@@ -1086,6 +1096,14 @@ func _preview_item(id: String) -> void:
 			shop_buy.text += " and %d %s" % [item.minimum, requirement]
 	elif not owned and game.state.gold < item.price:
 		shop_buy.text = "Not enough gold"
+	var reserve_id := str(game.state.loadout.get("reserve_spell", ""))
+	reserve_row.visible = item.kind == "spell" and data.has_reserve_slot(int(game.state.stats.Magic))
+	if reserve_row.visible:
+		reserve_label.text = "Reserve · " + data.item_name(reserve_id)
+		reserve_button.text = "Equip as reserve" if owned else "Buy for reserve"
+		reserve_button.disabled = (not lock.is_empty() or _equipped(item) or reserve_id == item.id
+			or game.state.loadout.spell.is_empty() or (not owned and game.state.gold < item.price))
+		clear_reserve_button.visible = not reserve_id.is_empty()
 	_clear(shop_stats)
 	if not owned:
 		_shop_stat("coin", "Price", "%d gold" % item.price)
@@ -1106,8 +1124,8 @@ func _preview_item(id: String) -> void:
 			var action := "attack" if item.kind == "weapon" else "cast"
 			_shop_stat("stamina", "Stamina cost", "%d per %s" % [item.energy, action])
 			if item.kind == "spell":
-				var casts: int = data.spell_casts(item, int(game.state.stats.Magic), true)
-				_shop_stat("cast", "Casts · Bout / Death match", "%d / %d" % [int(item.uses), casts])
+				var casts: int = data.spell_casts(item, int(game.state.stats.Magic), reserve_id.is_empty())
+				_shop_stat("cast", "Main casts · Bout / Death match", "%d / %d" % [int(item.uses), casts])
 		"enchant":
 			var old := int(data.items.get(game.state.loadout.get("enchant", ""), {}).get("damage", 0))
 			_shop_stat("attack", "Extra weapon damage", "+%d → +%d" % [old, item.damage])
@@ -1133,17 +1151,21 @@ func _replay_spell() -> void:
 	shop_stage.queue_redraw()
 	sound.cast(shop_stage.spell_art)
 
-func _buy_item() -> void:
+func _buy_item(reserve: bool = false) -> void:
 	if selected_item not in data.items:
 		return
 	var item: Dictionary = data.items[selected_item]
 	var gold_before := int(game.state.gold)
-	var err: String = game.purchase(item)
+	var err: String = game.purchase(item, reserve)
 	if err.is_empty():
 		var paid := gold_before - int(game.state.gold)
 		sound.play("buy" if paid > 0 else "equip")
 	else:
 		page_notice = err
+	show_shop()
+
+func _clear_reserve_spell() -> void:
+	game.clear_reserve_spell()
 	show_shop()
 
 func show_arena() -> void:
@@ -1248,6 +1270,10 @@ func _show_faceoff(offer: Dictionary) -> void:
 	_compare_row(kit, "Spell reach", player.spell.get("reach", "–"), rival.spell.get("reach", "–"), "advance")
 	_compare_row(kit, "Spell casts", player.casts, rival.casts, "cast")
 	if offer.tournament:
+		var player_reserve: Dictionary = player.get("reserve_spell", {})
+		var rival_reserve: Dictionary = rival.get("reserve_spell", {})
+		if not player_reserve.is_empty() or not rival_reserve.is_empty():
+			_compare_row(kit, "Reserve · 1 cast", player_reserve.get("name", "–"), rival_reserve.get("name", "–"), "cast")
 		_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
 	var actions := _row(content, 10)
 	if not game.tournament_in_progress():
@@ -1388,12 +1414,16 @@ func _animate_turn(event: Dictionary, generation: int) -> void:
 	bout_result = game.record_turn(event.action, bout.winner)
 	battle_hud.action_layer.hide()
 	var fighter: Dictionary = bout.fighters[event.side]
-	battle_stage.animate(event)
-	sound.begin_turn(event, int(fighter.spell.get("art", 0)))
+	var presentation := event
+	if event.action == "cast_reserve":
+		presentation = event.duplicate()
+		presentation.action = "cast"
+	battle_stage.animate(presentation)
+	sound.begin_turn(presentation, int(event.get("spell_art", 0)))
 	await battle_stage.impact_reached
 	if current_screen != "battle" or generation != fight_generation:
 		return
-	sound.impact(event, int(fighter.weapon.get("art", 0)))
+	sound.impact(presentation, int(fighter.weapon.get("art", 0)))
 	_refresh_battle()
 	await battle_stage.turn_animation_finished
 

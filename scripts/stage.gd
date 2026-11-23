@@ -177,7 +177,7 @@ func animate(change: Dictionary) -> void:
 	if lethal_bout and _knockout():
 		var kit := left_loadout if int(event.side) == 0 else right_loadout
 		if event.action == "cast":
-			finishing_spell_art = clampi(int(_item(kit.get("spell", "")).get("art", 0)), 0, SPELL_COLORS.size() - 1)
+			finishing_spell_art = _casting_art(int(event.side))
 			finisher = "ash" if finishing_spell_art == 1 else "burn"
 		elif event.action in Duel.WEAPON_ACTIONS and int(_item(kit.get("weapon", "")).get("art", 1)) != 1:
 			finisher = "arm" if event.action == "power" else "decapitation"
@@ -284,6 +284,11 @@ func _draw_arena_backdrop(pan: float) -> void:
 func _item(id: String) -> Dictionary:
 	var catalog: Dictionary = data.items if bout_items.is_empty() else bout_items
 	return catalog.get(id, {})
+
+func _casting_art(side: int) -> int:
+	var kit := left_loadout if side == 0 else right_loadout
+	var art := int(event.get("spell_art", _item(kit.get("spell", "")).get("art", 0)))
+	return clampi(art, 0, SPELL_COLORS.size() - 1)
 
 func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0,
 		pose: Rig.Pose = null, look: Dictionary = {}, root_tilt: float = 0.0, firm_weapon_arm: bool = false,
@@ -539,8 +544,7 @@ func _draw_battle() -> void:
 	if animating and action in Duel.WEAPON_ACTIONS and approach >= float(STRIKE_RELEASE[action]) - .035:
 		_draw_swing_trace(points[side], view, height, action)
 	if action == "cast" and animating:
-		var kit := left_loadout if side == 0 else right_loadout
-		var attack_art := int(_item(kit.get("spell", "")).get("art", 0))
+		var attack_art := _casting_art(side)
 		var target := view * Vector2(visible_positions[1 - side], 0)
 		var direction := 1.0 if side == 0 else -1.0
 		var defender := points[1 - side]
@@ -937,9 +941,7 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 		var metal: bool = event.blocked or event.armor_hit > 0
 		var tint := Color("#ffdc79") if metal else Color("#ffead1")
 		if spell and not metal:
-			var kit := left_loadout if side == 0 else right_loadout
-			var art := clampi(int(_item(kit.get("spell", "")).get("art", 0)), 0, SPELL_COLORS.size() - 1)
-			tint = SPELL_COLORS[art]
+			tint = SPELL_COLORS[_casting_art(side)]
 		if spell or (not weapon and metal):
 			_draw_sparks(contact, height * (.48 if event.critical else .36), tint, particle_phase)
 		if weapon:
