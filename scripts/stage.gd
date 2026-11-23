@@ -169,7 +169,7 @@ func animate(change: Dictionary) -> void:
 		"advance", "retreat":
 			impact_time = .21
 			action_time = .35
-		"jump":
+		"jump", "jump_back":
 			impact_time = .51
 			action_time = .67
 		_:
@@ -390,7 +390,7 @@ func _draw_battle() -> void:
 	var animating := side >= 0 and phase < 1
 	var approach := clampf(elapsed / impact_time, 0, 1)
 	var recovery := clampf((elapsed - impact_time) / (action_time - impact_time), 0, 1)
-	var shift := smoothstep(.17, 1.0, approach) if action == "jump" else smoothstep(.04, .90, phase)
+	var shift := smoothstep(.17, 1.0, approach) if action in ["jump", "jump_back"] else smoothstep(.04, .90, phase)
 	if action == "lunge":
 		shift = smoothstep(.22, .97, approach)
 	var stagger := _hit_recoil(recovery) if animating and elapsed >= impact_time else 0.0
@@ -435,7 +435,7 @@ func _draw_battle() -> void:
 		draw_set_transform(shadow, 0.0, Vector2(1, .24))
 		draw_circle(Vector2.ZERO, shadow_radius, Color(0.08, 0.07, 0.055, .26))
 		draw_set_transform(Vector2.ZERO)
-	if animating and action in ["advance", "retreat", "jump", "lunge"] and elapsed >= impact_time:
+	if animating and (action in Duel.MOVEMENT or action == "lunge") and elapsed >= impact_time:
 		_draw_dust(feet[side], height, recovery)
 	if stagger > 0.0:
 		_draw_dust(feet[1 - side], height, clampf(recovery * 1.4, 0.0, 1.0))
@@ -552,7 +552,7 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				pose.head += .06 * (follow_lift - first_lift)
 				pose.weapon_arm += Vector3(.29, -.36, .15) * arm_swing
 				pose.off_arm += Vector3(-.32, -.19, .20) * arm_swing
-			"jump":
+			"jump", "jump_back":
 				var launch := smoothstep(.0, .14, approach) * (1.0 - smoothstep(.16, .29, approach))
 				var flight := clampf((approach - .17) / .83, 0.0, 1.0)
 				var airborne := sin(PI * flight)
@@ -568,6 +568,10 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				pose.off_arm += Vector3(-.30, -.32, .13) * landing
 				pose.rear_leg = Vector3(.49, -.56, .63) * airborne + Vector3(.31, -.52, .21) * (launch + landing)
 				pose.lead_leg = Vector3(-.65, .97, -.48) * airborne + Vector3(-.34, .56, -.22) * (launch + landing)
+				if action == "jump_back":
+					pose.spine -= .38 * airborne
+					pose.weapon_arm += Vector3(.43, -.25, .26) * airborne
+					pose.rear_leg += Vector3(.17, -.16, .08) * airborne
 			"cast":
 				var release := smoothstep(.44, 1.0, approach) * (1.0 - recovery)
 				pose.spine += .17 * release

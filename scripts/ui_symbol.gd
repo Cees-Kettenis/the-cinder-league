@@ -71,10 +71,13 @@ static func paint(canvas: CanvasItem, key: String, origin: Vector2, extent: floa
 			_star(canvas, Vector2(25,24), 5, STEEL)
 			_line(canvas, [Vector2(5,28), Vector2(17,15)], INK, 6)
 			_line(canvas, [Vector2(5,28), Vector2(17,15)], CREAM, 3)
-		"advance", "retreat", "jump":
+		"advance", "retreat", "jump", "jump_back":
 			var route: Array[Vector2] = [Vector2(5,16), Vector2(25,16)]
-			if key == "jump":
+			if key in ["jump", "jump_back"]:
 				route = [Vector2(5,25), Vector2(10,15), Vector2(18,9), Vector2(26,8)]
+				if key == "jump_back":
+					for index in route.size():
+						route[index].x = 32.0 - route[index].x
 			elif key == "retreat":
 				route.reverse()
 			var tip: Vector2 = route.back()

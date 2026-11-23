@@ -1,9 +1,11 @@
 extends RefCounted
 
 const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power", "lunge"]
-const ACTIONS: Array[String] = ["advance", "retreat", "jump"] + WEAPON_ACTIONS + ["guard", "sleep", "taunt", "cast", "potion"]
+const MOVEMENT: Array[String] = ["advance", "retreat", "jump", "jump_back"]
+const ACTIONS: Array[String] = MOVEMENT + WEAPON_ACTIONS + ["guard", "sleep", "taunt", "cast", "potion"]
 const LABELS := {
 	"advance": "Advance", "retreat": "Retreat", "jump": "Leap forward", "attack": "Attack",
+	"jump_back": "Leap back",
 	"quick": "Quick attack", "power": "Power attack", "lunge": "Lunge", "rush": "Lunge",
 	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Cast", "potion": "Drink potion",
 }
@@ -40,8 +42,8 @@ func distance() -> int:
 	return positions[1] - positions[0]
 
 func travel(action: String) -> int:
-	var steps := int(distances[action])
-	if action == "retreat":
+	var steps := int(distances["jump" if action == "jump_back" else action])
+	if action in ["retreat", "jump_back"]:
 		var room := positions[0] if active == 0 else int(rules.arena_size) - positions[1]
 		return mini(steps, room)
 	return mini(steps, distance() - 1)
@@ -96,6 +98,7 @@ func cost(action: String, side: int = -1) -> int:
 			var extra: float = rules.get("lunge_base_cost", 7.0) + lunge_spaces(side) * rules.get("lunge_cost_per_space", 5.0)
 			return int(fighter.weapon.energy) + ceili(extra)
 		"cast": return int(fighter.spell.get("energy", 0))
+		"jump_back": return int(moves.jump)
 	return int(moves.get(action, 0))
 
 func _quick_cost(fighter: Dictionary) -> int:
@@ -186,7 +189,7 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 		"advance", "jump":
 			if distance() <= 1:
 				return "Already face to face"
-		"retreat":
+		"retreat", "jump_back":
 			if positions[active] == (0 if active == 0 else int(rules.arena_size)):
 				return "At the arena edge"
 		"potion":
@@ -198,6 +201,14 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 	if fighter.energy < stamina_cost:
 		return "Needs %d stamina" % stamina_cost
 	return ""
+
+func must_sleep() -> bool:
+	if not reason("sleep").is_empty():
+		return false
+	for action in ACTIONS:
+		if action != "sleep" and reason(action).is_empty():
+			return false
+	return true
 
 func act(action: String) -> Dictionary:
 	var blocked := reason(action)
@@ -215,9 +226,9 @@ func act(action: String) -> Dictionary:
 	fighter.exposed = false
 	fighter.provoked = false
 	match action:
-		"advance", "jump", "retreat":
+		"advance", "jump", "retreat", "jump_back":
 			var toward := 1 if side == 0 else -1
-			positions[side] += toward * travel(action) * (-1 if action == "retreat" else 1)
+			positions[side] += toward * travel(action) * (-1 if action in ["retreat", "jump_back"] else 1)
 		"guard":
 			fighter.guarding = true
 			event.message = "%s raises their guard." % fighter.name

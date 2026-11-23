@@ -77,6 +77,12 @@ func _check_exhaustion(data: RefCounted) -> void:
 	duel.fighters[0].energy = 0
 	duel.fighters[0].provoked = true
 	_check(duel.choose("weapon") == "sleep" and duel.reason("sleep").is_empty(), "An exhausted provoked fighter needs a legal recovery action")
+	_check(duel.must_sleep(), "Exhaustion should force sleep when it is the only legal turn")
+	var with_potion := Duel.new(data, fighter, fighter, 42)
+	with_potion.fighters[0].energy = 0
+	with_potion.fighters[0].potions = 1
+	with_potion.fighters[0].hp -= 1
+	_check(not with_potion.must_sleep(), "An exhausted fighter who can drink a potion should keep the choice")
 	duel.act("sleep")
 	_check(duel.fighters[0].energy > 0, "Sleep must restore stamina")
 	var profile: Dictionary = data.profile.duplicate(true)
@@ -111,10 +117,22 @@ func _check_movement(data: RefCounted) -> void:
 	approach.act("guard")
 	_check(approach.choose("weapon") == "jump" and approach.act("jump").damage == 0,
 		"The opponent also has to spend a turn closing the gap")
-	for action in ["advance", "retreat", "jump"]:
+	for action in Duel.MOVEMENT:
 		var exhausted := Duel.new(data, fighter, fighter, 42)
 		exhausted.fighters[0].energy = 0
 		_check(not exhausted.act(action).valid and exhausted.positions == opening, "Movement must still cost stamina")
+	var escape := Duel.new(data, fighter, fighter, 42, 1)
+	escape.positions = [1, 2]
+	var leap_back := escape.act("jump_back")
+	_check(leap_back.valid and escape.positions == [0, 2] and leap_back.energy_cost == int(data.moves.jump),
+		"A backward leap should create distance without crossing into a pit")
+	escape.act("guard")
+	_check(not escape.act("jump_back").valid, "A gladiator at the edge cannot leap back")
+	var mirrored := Duel.new(data, fighter, fighter, 42, 1)
+	mirrored.act("guard")
+	var gap := mirrored.distance()
+	_check(mirrored.act("jump_back").valid and mirrored.distance() == gap + int(data.distances.jump),
+		"The right fighter's backward leap should move away too")
 
 func _check_lunge(data: RefCounted) -> void:
 	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "dagger"})
@@ -591,6 +609,7 @@ func _check_game_buttons() -> void:
 	_press_escape()
 	_check(ui.current_screen == "battle" and not is_instance_valid(ui.settings_popup), "Escape should keep the player in the bout")
 	var attack: Button = ui.battle_hud.action_buttons.attack
+	_check(not ui.battle_hud.pack.visible, "A starter fight should only show Pack when something is equipped")
 	_check(not ui.battle_hud.action_buttons.has("lunge") and attack.disabled
 		and attack.tooltip_text.contains("Move closer"), "The HUD should require movement from the starting gap")
 	attack.pressed.emit()
@@ -599,6 +618,16 @@ func _check_game_buttons() -> void:
 		"Quick and Power should be hidden outside weapon reach")
 	_check(ui.battle_hud.action_buttons.jump.tooltip_text.contains("3 spaces") and not ui.battle_hud.action_buttons.jump.disabled,
 		"The leap button should show the available movement distance")
+	_check(ui.battle_hud.action_buttons.jump_back.tooltip_text.contains("3 spaces") and not ui.battle_hud.action_buttons.jump_back.disabled,
+		"The backward leap should be available at the starting position")
+	var player: Dictionary = ui.bout.fighters[0]
+	player.spell = ui.data.items.fireball
+	player.casts = 2
+	player.potions = 1
+	player.loadout.potion = true
+	ui._refresh_battle()
+	_check(ui.battle_hud.pack.visible and ui.battle_hud.charges.cast.text == "2" and ui.battle_hud.charges.potion.text == "1",
+		"Equipped spells and potions should appear in the Pack with use counts")
 	var rival_start: int = ui.bout.positions[1]
 	ui.bout.positions[1] = ui.bout.positions[0] + 2
 	ui._refresh_battle()

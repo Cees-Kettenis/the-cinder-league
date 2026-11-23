@@ -338,7 +338,8 @@ func _show_popup(section: String, back: String = "") -> void:
 				settings_popup.hide())
 		settings_popup.popup_hide.connect(func() -> void:
 			settings_popup.queue_free()
-			settings_popup = null)
+			settings_popup = null
+			_offer_auto_sleep())
 	var menu := _card(settings_popup, 12)
 	var panel: Control = menu.get_parent()
 	panel.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
@@ -1204,6 +1205,8 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	_refresh_battle()
 	if bout.active == 1:
 		_play_opponent_turn(fight_generation)
+	else:
+		_offer_auto_sleep()
 
 func _refresh_battle() -> void:
 	battle_stage.positions = bout.positions.duplicate()
@@ -1214,6 +1217,15 @@ func _refresh_battle() -> void:
 
 func _place_battle_actions() -> void:
 	battle_hud.place_actions(battle_stage.fighter_feet(0), battle_stage.fighter_height())
+
+func _offer_auto_sleep() -> void:
+	if current_screen != "battle" or fight_locked or bout.active != 0 or is_instance_valid(settings_popup) or not bout.must_sleep():
+		return
+	var generation := fight_generation
+	var turn: int = bout.turn
+	await get_tree().create_timer(.60).timeout
+	if current_screen == "battle" and generation == fight_generation and turn == bout.turn and bout.must_sleep():
+		_player_action("sleep")
 
 func _player_action(action: String) -> void:
 	if is_instance_valid(settings_popup) or fight_locked or bout.active != 0 or not bout.reason(action).is_empty():
@@ -1238,6 +1250,7 @@ func _play_opponent_turn(generation: int) -> void:
 		return
 	fight_locked = false
 	_refresh_battle()
+	_offer_auto_sleep()
 
 func _animate_turn(event: Dictionary, generation: int) -> void:
 	bout_result = game.record_turn(event.action, bout.winner)
