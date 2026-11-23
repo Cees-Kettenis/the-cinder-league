@@ -225,7 +225,7 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		_update_action_preview()
 		return
 	var player: Dictionary = bout.fighters[0]
-	var has_potion: bool = not bout.first_blood and (player.loadout.get("potion", false) or player.potions > 0)
+	var has_potion: bool = not bout.regular_bout and (player.loadout.get("potion", false) or player.potions > 0)
 	var supplies := int(has_potion)
 	for action in Duel.SPELL_ACTIONS:
 		var spell := Duel.spell_for_action(player, action)
@@ -308,17 +308,15 @@ func _strike_preview(bout: RefCounted, action: String, title: String, cost: Stri
 	if not reason.is_empty():
 		return odds + "\n" + reason
 	var armor := mini(damage, rival.armor)
-	if spell and bout.spell_armor_only(rival):
-		return odds + "\n" + cost + "\nClean hit takes %d armor · Armor only at this range" % armor
-	var first_blood: bool = bout.first_blood and damage > armor
-	var health := mini(damage - armor, maxi(0, int(rival.hp) - int(bout.first_blood)))
+	var health: int = bout.health_damage(action, damage, rival)
+	var wins: bool = bout.health_hit_wins(rival, health)
 	var losses := "%d HP" % health if armor == 0 else "%d armor" % armor
 	if armor > 0 and health > 0:
 		losses += " and %d HP" % health
 	var impact := "Clean hit takes " + losses
-	if first_blood:
-		impact += " · Wins bout"
-	elif action == "power" and health < rival.hp and bout.power_push() > 0:
+	if wins:
+		impact += " · Wins bout" if bout.regular_bout else " · Fatal"
+	elif action == "power" and bout.power_push() > 0:
 		cost += " · Pushes " + _spaces(bout.power_push())
 	if action == "lunge":
 		cost += " · Moves " + _spaces(bout.lunge_spaces())

@@ -1195,7 +1195,7 @@ func show_arena() -> void:
 	var cards := _row(content)
 	var regular := _card(cards)
 	_fill(regular.get_parent())
-	_title(regular, "First blood bout", 23)
+	_title(regular, "Regular bout", 23)
 	var rewards := _row(regular, 10)
 	_token(rewards, "coin", str(game.win_gold(game.arena_index())), "Gold for a win")
 	_token(rewards, "xp", str(game.regular_win_xp()), "Experience for a win")
@@ -1239,7 +1239,7 @@ func _scout_bout(tournament: bool) -> void:
 func _show_faceoff(offer: Dictionary) -> void:
 	var rival: Dictionary = offer.rival
 	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout, "weapon", offer.tournament)
-	var heading := "First blood bout"
+	var heading := "Bout · Yield below %d%% HP" % int(data.rules.bout_yield_health_percent)
 	if offer.tournament:
 		heading = "Tournament · Round %d/%d" % [int(offer.round) + 1, int(offer.round_count)]
 	_page("scout", heading)
@@ -1441,6 +1441,8 @@ func _finish_bout() -> void:
 		title = "Ring-out victory" if bout.winner == 0 else "Ring-out defeat"
 	elif not bout.history.is_empty() and bout.history.back().get("first_blood", false):
 		title = "First blood victory" if bout.winner == 0 else "Defeat · Yielded"
+	elif not bout.history.is_empty() and bout.history.back().get("yield_threshold_reached", false):
+		title = "Victory · Rival yielded" if bout.winner == 0 else "Defeat · Yielded"
 	current_screen = "result"
 	fight_locked = true
 	_refresh_battle()
@@ -1557,7 +1559,7 @@ func show_simulator() -> void:
 	var seeds := _number(buttons, "Seed", 0, 99999999, 42)
 	var runs := _number(buttons, "Bouts", 1, 500, 20)
 	var actions := _row(content)
-	_button(actions, "Run first blood", _simulate.bind(left, right, level, seeds, runs, false), true)
+	_button(actions, "Run regular bout", _simulate.bind(left, right, level, seeds, runs, false), true)
 	_button(actions, "Run death match", _simulate.bind(left, right, level, seeds, runs, false, true))
 	_button(actions, "Run campaign", _simulate.bind(left, right, level, seeds, runs, true))
 	_button(actions, "Playtest balance", show_balance)

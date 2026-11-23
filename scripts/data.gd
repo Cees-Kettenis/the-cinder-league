@@ -40,7 +40,7 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier",
-			"bout_spell_base_multiplier", "bout_ranged_spells_armor_only", "death_match_extra_cast_magic"]:
+			"bout_spell_base_multiplier", "bout_yield_health_percent", "death_match_extra_cast_magic"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -80,6 +80,9 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Capped bout gold must be between 0 and 1 times the usual reward."
 	if rules.bout_spell_base_multiplier > 1:
 		return "Bout spell base damage must be between 0 and 1 times the death match base damage."
+	if (rules.bout_yield_health_percent < 1 or rules.bout_yield_health_percent >= 100
+			or rules.bout_yield_health_percent != floor(rules.bout_yield_health_percent)):
+		return "Bout yield health must be a whole percent between 1 and 99."
 	if rules.death_match_extra_cast_magic < 1 or rules.death_match_extra_cast_magic != floor(rules.death_match_extra_cast_magic):
 		return "The Magic requirement for an extra death match cast must be a positive whole number."
 	for move in ["advance", "retreat", "jump"]:

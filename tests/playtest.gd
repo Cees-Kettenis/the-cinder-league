@@ -33,6 +33,7 @@ func _run() -> void:
 	_check_hit_feedback()
 	_check_fatality_variants(data)
 	_check_bout_spell_damage(data)
+	_check_yield_bout(data)
 	_check_spell_charges(data)
 	_check_death_match_spell_bonus(data)
 	_check_reserve_spell(data)
@@ -475,13 +476,13 @@ func _check_bout_spell_damage(data: RefCounted) -> void:
 	rules.minimum_hit = 1.0
 	rules.maximum_hit = 1.0
 	rules.block_cap = 0.0
-	var regular := Duel.new(data, mage, rival, 42, 5, {"rules": rules, "first_blood": true})
+	var regular := Duel.new(data, mage, rival, 42, 5, {"rules": rules, "regular_bout": true})
 	var lethal := Duel.new(data, mage, rival, 42, 5, {"rules": rules})
 	var full_damage := roundi(lethal.action_damage("cast", mage))
 	var bout_damage := roundi(regular.action_damage("cast", mage))
 	var armour_hit := regular.act("cast")
 	_check(bout_damage < 28 and armour_hit.armor_hit == bout_damage and armour_hit.damage == 0 and regular.winner == -2,
-		"Forked Lightning should damage 28 armor without drawing first blood on the opening cast")
+		"An opening Forked Lightning cast should chip a rival's 28 armor without damaging health")
 	_check(lethal.act("cast").damage == full_damage - 28 and full_damage > bout_damage,
 		"Death matches should apply the full spell damage and agree with the preview")
 
@@ -497,11 +498,13 @@ func _check_bout_spell_damage(data: RefCounted) -> void:
 	_check(saved.act("cast").damage == full_damage - 28 and saved.winner == 0,
 		"A regular bout saved before the spell adjustment should replay with its original damage")
 	rival.armor = 2
-	var mode := {"rules": rules, "first_blood": true}
+	var legacy_rules := rules.duplicate()
+	legacy_rules.bout_ranged_spells_armor_only = true
+	var mode := {"rules": legacy_rules, "first_blood": true}
 	var edge_hit := Duel.new(data, mage, rival, 42, 3, mode)
 	var chip := edge_hit.act("cast")
 	_check(chip.armor_hit == 2 and chip.damage == 0 and edge_hit.winner == -2,
-		"A ranged first-blood spell should stop at the last armor point")
+		"A saved armor-only ranged spell should stop at the last armor point")
 	rival.armor = 0
 	var opener := Duel.new(data, mage, rival, 42, 5, mode)
 	_check(not opener.act("cast").valid and opener.fighters[0].casts == mage.casts,
@@ -509,7 +512,34 @@ func _check_bout_spell_damage(data: RefCounted) -> void:
 	rival.weapon = data.items.court_mace
 	var inside_reach := Duel.new(data, mage, rival, 42, 2, mode)
 	_check(inside_reach.act("cast").damage > 0 and inside_reach.winner == 0,
-		"A spell inside the rival's weapon reach can win the bout")
+		"An old first-blood spell inside the rival's weapon reach can still win immediately")
+
+func _check_yield_bout(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	stats.Magic = 80
+	var mage: Dictionary = data.fighter("Mage", stats, {"spell": "lightning"})
+	var rival: Dictionary = data.fighter("Rival", data.stats_empty(), {})
+	rival.hp = 50
+	rival.max_hp = 50
+	rival.armor = 2
+	var rules: Dictionary = data.rules.duplicate()
+	rules.minimum_hit = 1.0
+	rules.maximum_hit = 1.0
+	rules.block_cap = 0.0
+	var mode := {"rules": rules, "regular_bout": true}
+	var bout := Duel.new(data, mage, rival, 42, 5, mode)
+	var preview_damage := bout.health_damage("cast", roundi(bout.action_damage("cast", mage)), rival)
+	var opening := bout.act("cast")
+	_check(opening.armor_hit == 2 and opening.damage == preview_damage and opening.health[1] == 10
+		and bout.winner == -2, "A full-health rival should survive a ranged hit at exactly 20 percent")
+	bout.act("guard")
+	var followup := bout.act("cast")
+	_check(followup.health[1] > 0 and followup.health[1] < 10 and followup.get("yielded", -1) == 1
+		and followup.get("yield_threshold_reached", false) and bout.winner == 0 and bout.distance() == 5,
+		"A second ranged cast should be able to win without killing the rival")
+	var death_match := Duel.new(data, mage, rival, 42, 5, {"rules": rules})
+	_check(death_match.act("cast").health[1] == 0 and death_match.winner == 0,
+		"A fatal ranged hit should still be possible in a death match")
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -592,7 +622,7 @@ func _check_reserve_spell(data: RefCounted) -> void:
 	_check(campaign.purchase(data.items.storm, true).is_empty(), "A specialist should be able to buy a distinct reserve spell")
 	var regular := campaign.start_bout(false, 42)
 	_check(regular.fighters[0].reserve_spell.is_empty() and regular.fighters[0].casts == 2,
-		"First-blood bouts should use the main spell only")
+		"Regular bouts should use the main spell only")
 	campaign.settle(0)
 	var snapshot := campaign.start_bout(true, 42)
 	var duel: RefCounted = campaign.open_bout(snapshot)
@@ -610,10 +640,11 @@ func _check_saved_bout(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)
 	campaign.create(0, "Gladiator", 0, 0, data.build_stats("weapon", 10))
 	var snapshot := campaign.start_bout(false, 42)
-	_check(campaign.open_bout(snapshot).first_blood, "New regular bouts should save the first-blood rules")
+	_check(campaign.open_bout(snapshot).regular_bout and not campaign.open_bout(snapshot).first_blood,
+		"New regular bouts should save the yield rules")
 	var legacy_snapshot := snapshot.duplicate(true)
-	legacy_snapshot.combat.erase("first_blood")
-	_check(not campaign.open_bout(legacy_snapshot).first_blood, "A regular bout saved before first blood should retain its original win condition")
+	legacy_snapshot.combat.erase("regular_bout")
+	_check(not campaign.open_bout(legacy_snapshot).regular_bout, "A bout saved before nonlethal rules should retain its original win condition")
 	var tie_snapshot := snapshot.duplicate(true)
 	tie_snapshot.combat.rules.turn_limit = 2
 	var tied: RefCounted = campaign.open_bout(tie_snapshot)

@@ -17,16 +17,16 @@ func batch(left: String, right: String, level: int, start_seed: int, count: int,
 	var right_stats: Dictionary = options.get("right_stats", data.build_stats(right, points))
 	var left_items: Dictionary = options.get("left_loadout", data.eligible_loadout(level, left_stats, left))
 	var right_items: Dictionary = options.get("right_loadout", data.eligible_loadout(level, right_stats, right))
-	var first_blood: bool = not options.get("death_match", false)
-	var left_fighter: Dictionary = data.fighter(left.capitalize(), left_stats, left_items, left, not first_blood)
-	var right_fighter: Dictionary = data.fighter(right.capitalize(), right_stats, right_items, right, not first_blood)
+	var regular_bout: bool = not options.get("death_match", false)
+	var left_fighter: Dictionary = data.fighter(left.capitalize(), left_stats, left_items, left, not regular_bout)
+	var right_fighter: Dictionary = data.fighter(right.capitalize(), right_stats, right_items, right, not regular_bout)
 	var summary := {"mode": "duel", "left": left, "right": right, "seed": str(start_seed), "level": level,
 		"bouts": count, "left_wins": 0, "right_wins": 0, "draws": 0, "turns": 0, "damage": 0, "blocks": 0, "misses": 0,
 		"left_stats": left_stats, "right_stats": right_stats, "left_loadout": left_items, "right_loadout": right_items,
-		"first_blood": first_blood, "trace": []}
+		"regular_bout": regular_bout, "trace": []}
 	for index in count:
 		var match_seed := start_seed + index
-		var bout := Duel.new(data, left_fighter, right_fighter, match_seed, int(options.get("distance", -1)), {"first_blood": first_blood})
+		var bout := Duel.new(data, left_fighter, right_fighter, match_seed, int(options.get("distance", -1)), {"regular_bout": regular_bout})
 		var scripted: Array = options.get("actions", [])
 		while bout.winner == -2:
 			var action := str(scripted[bout.turn]) if bout.turn < scripted.size() else bout.choose(left if bout.active == 0 else right)

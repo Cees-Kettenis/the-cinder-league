@@ -282,7 +282,7 @@ func start_bout(tournament: bool, fight_seed: int) -> Dictionary:
 	state.snapshot = {"fighters": [left, right], "seed": offer.seed, "opponent_seed": offer.opponent_seed,
 		"arena": arena_index(), "tournament": tournament, "opponent": right.name}
 	_record_bout_conditions(state.snapshot)
-	state.snapshot.combat.first_blood = not tournament
+	state.snapshot.combat.regular_bout = not tournament
 	state.snapshot.rewards.tournament_size = offer.round_count
 	state.snapshot.rewards.lethal_defeat = tournament
 	state.outcome = {}
