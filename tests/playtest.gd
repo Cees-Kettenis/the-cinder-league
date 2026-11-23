@@ -313,6 +313,23 @@ func _check_hit_feedback() -> void:
 	strike.health = [44, 39]
 	stage.animate(strike)
 	_check(stage._bloodied_hit() and stage._hit_recoil(.13) > armor_recoil, "A health hit should add blood and a stronger flinch")
+	stage.full_arena = true
+	stage.kind = "battle"
+	var impacts := [0]
+	stage.impact_reached.connect(func() -> void: impacts[0] += 1)
+	stage._process(stage.impact_time + .01)
+	stage._process(.02)
+	_check(impacts[0] == 1 and is_equal_approx(stage.elapsed, stage.impact_time) and stage.contact_hold_elapsed > 0.0,
+		"Landed strikes should signal impact once and hold the pose while the particles move")
+	stage._process(.10)
+	_check(impacts[0] == 1 and stage.elapsed > stage.impact_time, "The strike should recover after the hold")
+	var miss := strike.duplicate()
+	miss.miss = true
+	miss.damage = 0
+	stage.animate(miss)
+	stage._process(stage.impact_time + .01)
+	_check(impacts[0] == 2 and stage.contact_hold_left == 0.0 and stage.elapsed > stage.impact_time,
+		"A missed swing should keep moving through its follow-through")
 	strike.health = [44, 0]
 	stage.animate(strike)
 	_check(stage._knockout() and stage.action_time > strike_time, "A standard knockout should leave time for the full collapse")

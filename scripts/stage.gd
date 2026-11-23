@@ -107,6 +107,11 @@ var full_arena := false
 var lethal_bout := false
 var has_pits := false
 var shield_mask: Array[Vector2] = []
+var contact_hold_left := 0.0
+var contact_hold_elapsed := 0.0
+var impact_anchor_set := false
+var impact_anchor := Vector2.ZERO
+var wound_anchor := Vector2.ZERO
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -124,8 +129,14 @@ func _process(delta: float) -> void:
 		idle_time += delta
 		if not event.is_empty() and elapsed < action_time:
 			var before := elapsed
-			elapsed = minf(elapsed + delta, action_time)
+			var hold := minf(delta, contact_hold_left)
+			contact_hold_left -= hold
+			contact_hold_elapsed += hold
+			elapsed = minf(elapsed + delta - hold, action_time)
 			if before < impact_time and elapsed >= impact_time:
+				if _landed_strike():
+					elapsed = impact_time
+					contact_hold_left = .075 if event.blocked or event.critical or event.action == "power" else .045
 				impact_reached.emit()
 			if elapsed >= action_time:
 				turn_animation_finished.emit()
@@ -136,6 +147,9 @@ func animate(change: Dictionary) -> void:
 	positions = change.positions.duplicate()
 	event = change
 	elapsed = 0.0
+	contact_hold_left = 0.0
+	contact_hold_elapsed = 0.0
+	impact_anchor_set = false
 	match event.action:
 		"attack":
 			impact_time = .27
@@ -161,6 +175,8 @@ func animate(change: Dictionary) -> void:
 		_:
 			impact_time = .22
 			action_time = .45
+	if _landed_strike():
+		action_time = maxf(action_time, impact_time + .35)
 	if event.get("ring_out", false):
 		action_time += .55
 	elif _knockout():
@@ -174,6 +190,9 @@ func _knockout() -> bool:
 func _bloodied_hit() -> bool:
 	return (event.damage > 0 and not event.get("ring_out", false)
 		and (event.action in Duel.WEAPON_ACTIONS or event.action == "cast"))
+
+func _landed_strike() -> bool:
+	return not event.get("miss", false) and event.damage + event.armor_hit > 0 and event.action in Duel.WEAPON_ACTIONS
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#1a2024"))
@@ -451,7 +470,7 @@ func _draw_battle() -> void:
 		_draw_spell(points[side].hand, target, height, attack_art, phase, direction, event.miss)
 	if animating and elapsed >= impact_time:
 		var contact_offset: float = (previous_positions[1 - side] - visible_positions[1 - side]) * view.x.x if pushed else 0.0
-		_draw_impact(feet, points[1 - side], height, side, recovery, contact_offset)
+		_draw_impact(feet, points[1 - side], height, side, recovery, contact_offset, view)
 
 func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int, gap: float, approach: float, recovery: float,
 		phase: float) -> FighterPoints:
@@ -600,9 +619,19 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			pose.weapon_arm += Vector3(.17, -.16, .08) * buckle + Vector3(.26, .51, -.48) * topple
 			pose.weapon_arm.z += 1.15 * smoothstep(.74, .98, recovery)
 			pose.off_arm += Vector3(-.16, -.35, .19) * buckle + Vector3(.34, .33, -.40) * topple
-	if actor >= 0 and index != actor and phase < 1.0 and event.blocked:
-		var catch_blow := smoothstep(.28, .92, approach) * (1.0 - smoothstep(.06, .41, recovery))
-		_brace(pose, catch_blow, shielded)
+	if actor >= 0 and index != actor and phase < 1.0:
+		if event.blocked:
+			var catch_blow := smoothstep(.28, .92, approach) * (1.0 - smoothstep(.06, .41, recovery))
+			_brace(pose, catch_blow, shielded)
+		elif event.miss and action in Duel.WEAPON_ACTIONS:
+			var dodge := smoothstep(.54, .98, approach) * (1.0 - smoothstep(.13, .82, recovery))
+			feet.x -= direction * height * .08 * dodge
+			feet.y += height * .065 * dodge
+			pose.spine -= .28 * dodge
+			pose.neck += .12 * dodge
+			pose.head -= .10 * dodge
+			pose.rear_leg += Vector3(.19, -.39, .12) * dodge
+			pose.lead_leg += Vector3(-.20, .42, -.18) * dodge
 	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {}, root_tilt, trail)
 
 func _brace(pose: Rig.Pose, amount: float, shielded: bool) -> void:
@@ -631,8 +660,11 @@ func _draw_dust(at: Vector2, height: float, progress: float) -> void:
 		var spread := float(index) - 2.5
 		var x := spread * height * (.04 + progress * .08)
 		var y := -height * progress * (.07 + (index % 3) * .045)
-		var alpha := .43 * sin(progress * PI) * (1.0 - progress)
-		draw_circle(at + Vector2(x, y), height * (.012 + progress * .028), Color(.94, .77, .55, alpha), true, -1, true)
+		var alpha := .86 * sin(progress * PI) * (1.0 - progress)
+		var point := at + Vector2(x, y)
+		var radius := height * (.022 + progress * .042)
+		draw_circle(point, radius * 1.10, Color("#69432f", alpha * .76), true, -1, true)
+		draw_circle(point - Vector2(0, radius * .13), radius, Color("#ffddab", alpha), true, -1, true)
 
 func _draw_pit(at: Vector2, height: float) -> void:
 	var radius := height * .23
@@ -672,33 +704,45 @@ func _draw_weapon_trail(tip: Vector2, tint: Color, pulse: float, mace: bool) -> 
 			colors.append(Color(tint.lightened(.18) if edge == 0 else tint, pulse * (1.0 - progress) * (.91 if edge == 0 else .31)))
 	draw_polygon(vertices, colors)
 
-func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, side: int, recovery: float, contact_offset: float) -> void:
+func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, side: int, recovery: float,
+		contact_offset: float, view: Transform2D) -> void:
 	var symbol := ""
 	var at := feet[1 - side]
 	var direction := 1.0 if side == 0 else -1.0
 	var spell: bool = event.action == "cast"
+	var weapon: bool = event.action in Duel.WEAPON_ACTIONS
 	if defender != null and event.damage + event.armor_hit > 0:
-		var chest := defender.chest + Vector2(contact_offset, 0)
-		var contact := chest
-		if event.blocked:
-			contact = defender.shield if defender.has_shield else defender.hand
-			contact += Vector2(-direction * .085, -.015) * height
+		if not impact_anchor_set:
+			var chest := defender.chest + Vector2(contact_offset, 0)
+			var struck := chest
+			if event.blocked:
+				struck = defender.shield if defender.has_shield else defender.hand
+				struck += Vector2(-direction * .085, -.015) * height
+			var inverse := view.affine_inverse()
+			impact_anchor = inverse * struck / Vector2(1.0, height)
+			wound_anchor = inverse * chest / Vector2(1.0, height)
+			impact_anchor_set = true
+		# Let the debris stay at the impact as the defender recoils and the camera pans.
+		var contact := view * (impact_anchor * Vector2(1.0, height))
+		var chest := view * (wound_anchor * Vector2(1.0, height))
+		var particle_phase := clampf((elapsed - impact_time + contact_hold_elapsed) / .43, 0.0, 1.0)
 		var metal: bool = event.blocked or event.armor_hit > 0
-		var tint := Color("#fff0ad") if metal else Color("#ffc68d")
+		var tint := Color("#ffdc79") if metal else Color("#ffead1")
 		if spell and not metal:
 			var kit := left_loadout if side == 0 else right_loadout
 			var art := clampi(int(_item(kit.get("spell", "")).get("art", 0)), 0, SPELL_COLORS.size() - 1)
 			tint = SPELL_COLORS[art]
 		if metal or spell or event.critical:
-			_draw_sparks(contact, height * (.38 if event.critical else .25), tint, recovery)
-		if event.blocked or event.action == "power":
-			_draw_impact_burst(contact, height * (.16 if event.blocked else .26), tint, recovery)
+			_draw_sparks(contact, height * (.48 if event.critical else .36), tint, particle_phase)
+		if weapon:
+			var large: bool = metal or event.action == "power" or event.critical
+			_draw_impact_burst(contact, height * (.21 if large else .13), tint, particle_phase)
 		if event.armor_hit > 0:
 			var armor_after: Array = event.get("armor", [])
 			var broken: bool = armor_after.size() == 2 and armor_after[1 - side] == 0
-			_draw_armor_chips(contact, height, direction, recovery, broken)
+			_draw_armor_chips(contact, height, direction, particle_phase, broken)
 		if _bloodied_hit():
-			_draw_blood_drops(chest + Vector2(-direction * height * .045, 0), height, direction, recovery, _knockout())
+			_draw_blood_drops(chest + Vector2(-direction * height * .045, 0), height, direction, particle_phase, _knockout())
 	if event.miss:
 		symbol = "miss"
 	elif event.blocked or event.armor_hit > 0 and event.damage == 0:
@@ -736,41 +780,45 @@ func _draw_impact_burst(at: Vector2, radius: float, tint: Color, recovery: float
 		outline.append(at + ray * radius * (1.0 if index % 2 == 0 else .38))
 	draw_colored_polygon(outline, Color(tint.lightened(.50), fade))
 	outline.append(outline[0])
-	draw_polyline(outline, Color(tint.darkened(.55), fade), 2.5, true)
+	draw_polyline(outline, Color("#533027", fade), 3.0, true)
 
 func _draw_armor_chips(at: Vector2, height: float, direction: float, recovery: float, broken: bool) -> void:
 	var flight := clampf(recovery / .82, 0, 1)
 	var fade := 1.0 - smoothstep(.34, 1.0, flight)
 	for index in (7 if broken else 4):
-		var speed := float(index) * .068 - .20
-		var lift := .19 + (index % 3) * .16
+		var speed := float(index) * .104 - .29
+		var lift := .33 + (index % 3) * .18
 		var point := at + Vector2(direction * speed * flight, -.03 - lift * flight + .74 * flight * flight) * height
-		var sliver := Vector2.from_angle(index * 1.93 + flight * 6.0) * height * (.016 if broken else .011)
+		var sliver := Vector2.from_angle(index * 1.93 + flight * 6.0) * height * (.024 if broken else .016)
 		var across := sliver.orthogonal() * .46
 		var tint := Color("#fff6ce") if index % 2 == 0 else Color("#e2a66d")
-		draw_colored_polygon(PackedVector2Array([point - sliver, point + across, point + sliver, point - across]), Color(tint, fade))
+		var chip := PackedVector2Array([point - sliver, point + across, point + sliver, point - across])
+		draw_colored_polygon(chip, Color(tint, fade))
+		chip.append(chip[0])
+		draw_polyline(chip, Color("#673b31", fade), 1.5, true)
 
 func _draw_blood_drops(at: Vector2, height: float, direction: float, recovery: float, finishing: bool) -> void:
 	var flight := clampf(recovery / (.48 if finishing else .65), 0, 1)
 	var fade := 1.0 - smoothstep(.18, 1.0, flight)
 	for index in (5 if finishing else 3):
-		var spread := float(index) * .054 + .075
+		var spread := float(index) * .065 + .13
 		var point := at + Vector2(direction * spread * flight, -.018 - (.10 + spread * .56) * flight + .32 * flight * flight) * height
 		var radius := height * (.013 - .001 * (index % 3))
-		draw_circle(point, radius, Color(.63, .09, .18, fade * .94), true, -1, true)
+		draw_circle(point, radius * 1.17, Color("#591c30", fade), true, -1, true)
+		draw_circle(point, radius, Color("#c54553", fade), true, -1, true)
 
 func _draw_sparks(at: Vector2, radius: float, tint: Color, recovery: float) -> void:
-	var progress := clampf(recovery / .75, 0, 1)
+	var progress := clampf(recovery / .92, 0, 1)
 	var fade := 1.0 - smoothstep(.03, 1.0, progress)
-	var spread := lerpf(.15, 1.25, progress) * radius
+	var spread := lerpf(.31, 1.23, progress) * radius
 	for index in 10:
 		var ray := Vector2.from_angle(float(index) * TAU / 10.0 + .31)
 		var point := at + ray * spread * (1.0 if index % 2 == 0 else .66)
-		var length := radius * (.30 if index % 3 == 0 else .17)
-		draw_line(point - ray * length, point, Color(tint, fade), 2.0 + fade, true)
+		var length := radius * (.26 if index % 3 == 0 else .17)
+		draw_line(point - ray * length, point, Color("#673b31", fade), 5.0, true)
+		draw_line(point - ray * length, point, Color(tint, fade), 3.0, true)
 		if index % 2 == 0:
-			draw_circle(point, 2.0 + fade, Color(tint.lightened(.38), fade), true, -1, true)
-	draw_circle(at, radius * (.30 + progress * .45), Color(tint, fade * .34), true, -1, true)
+			draw_circle(point, 2.5 + fade, Color(tint.lightened(.38), fade), true, -1, true)
 
 func _weapon_glow(point: Vector2, radius: float, opacity: float) -> void:
 	draw_circle(point, radius * 1.18, Color(1.0, .43, .16, opacity * .12))
