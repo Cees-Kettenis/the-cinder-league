@@ -36,6 +36,8 @@ const WEAPON_SPRITES := {
 }
 const SPELL_CONTACT := .60
 const SPELL_COLORS := [Color("#ffc378"), Color("#cf9eff"), Color("#ffb66e"), Color("#7cdfff")]
+const FIRE_CORES := {0: Color("#fff9bd"), 2: Color("#ffad65"), 3: Color("#c5f6ff")}
+const FIRE_EDGES := {0: Color("#ff5025"), 2: Color("#ff662b"), 3: Color("#366fea")}
 const STRIKE_COLORS := {"quick": Color("#7ee8ff"), "attack": Color("#ffca6e"),
 	"power": Color("#ff9156"), "lunge": Color("#a5eaff")}
 const STRIKE_RELEASE := {"quick": .57, "attack": .73, "power": .83, "lunge": .76}
@@ -53,6 +55,7 @@ class FighterPoints:
 	var shield := Vector2.ZERO
 	var has_shield := false
 	var neck := Vector2.ZERO
+	var elbow := Vector2.ZERO
 const MASKS := {
 	"helmet": [Vector2(.30,0),Vector2(.63,0),Vector2(.62,.09),Vector2(.51,.10),Vector2(.48,.17),Vector2(.39,.18),Vector2(.32,.14)],
 	"chest": [Vector2(.123,.25),Vector2(.173,.203),Vector2(.30,.173),Vector2(.405,.170),Vector2(.47,.221),Vector2(.565,.216),Vector2(.629,.258),Vector2(.655,.307),Vector2(.593,.356),Vector2(.55,.387),Vector2(.543,.453),Vector2(.605,.489),Vector2(.66,.562),Vector2(.663,.622),Vector2(.587,.645),Vector2(.391,.64),Vector2(.399,.527),Vector2(.384,.436),Vector2(.352,.351),Vector2(.223,.331),Vector2(.143,.329)],
@@ -112,6 +115,7 @@ var demo := false
 var full_arena := false
 var lethal_bout := false
 var finisher := ""
+var finishing_spell_art := -1
 var has_pits := false
 var shield_mask: Array[Vector2] = []
 var impact_played := false
@@ -121,6 +125,7 @@ var impact_anchor_set := false
 var impact_anchor := Vector2.ZERO
 var wound_anchor := Vector2.ZERO
 var neck_anchor := Vector2.ZERO
+var elbow_anchor := Vector2.ZERO
 var swing_trace: Array[Vector3] = []
 var result_winner := -2
 var celebration_time := 0.0
@@ -168,9 +173,16 @@ func animate(change: Dictionary) -> void:
 	impact_anchor_set = false
 	swing_trace.clear()
 	finisher = ""
+	finishing_spell_art = -1
 	if lethal_bout and _knockout():
-		var weapon: Dictionary = _item((left_loadout if int(event.side) == 0 else right_loadout).get("weapon", ""))
-		finisher = "decapitation" if event.action in Duel.WEAPON_ACTIONS and int(weapon.get("art", 1)) != 1 else "heart"
+		var kit := left_loadout if int(event.side) == 0 else right_loadout
+		if event.action == "cast":
+			finishing_spell_art = clampi(int(_item(kit.get("spell", "")).get("art", 0)), 0, SPELL_COLORS.size() - 1)
+			finisher = "ash" if finishing_spell_art == 1 else "burn"
+		elif event.action in Duel.WEAPON_ACTIONS and int(_item(kit.get("weapon", "")).get("art", 1)) != 1:
+			finisher = "arm" if event.action == "power" else "decapitation"
+		else:
+			finisher = "heart"
 	match event.action:
 		"attack":
 			impact_time = .35
@@ -275,7 +287,7 @@ func _item(id: String) -> Dictionary:
 
 func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0,
 		pose: Rig.Pose = null, look: Dictionary = {}, root_tilt: float = 0.0, firm_weapon_arm: bool = false,
-		headless: bool = false) -> FighterPoints:
+		skin_part: Rig.SkinPart = Rig.SkinPart.WHOLE, tint: Color = Color.WHITE) -> FighterPoints:
 	if height <= 0:
 		return null
 	var scale_value := height / 1024.0
@@ -283,13 +295,17 @@ func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, 
 	var body := Transform2D(-root_tilt if facing_left else root_tilt, feet).scaled_local(Vector2(-width if facing_left else width, scale_value))
 	var bones := Rig.transforms(Rig.Pose.new() if pose == null else pose)
 	var hand := body * bones[Rig.WEAPON_WRIST]
-	var tip := _draw_weapon(gear, hand.translated_local(Rig.local(Rig.GRIP)))
+	var grip := hand.translated_local(Rig.local(Rig.GRIP))
+	var tip := grip.origin if skin_part == Rig.SkinPart.WITHOUT_ARM else _draw_weapon(gear, grip, tint)
 	draw_set_transform_matrix(body)
-	Rig.draw_skin(self, bones, skin_index, hair_index, firm_weapon_arm, Rig.SkinPart.BODY if headless else Rig.SkinPart.WHOLE)
-	if headless:
+	Rig.draw_skin(self, bones, skin_index, hair_index, firm_weapon_arm, skin_part, tint)
+	_draw_armor(gear.get("armor", {}), look, body, bones, skin_part == Rig.SkinPart.BODY, tint)
+	if skin_part == Rig.SkinPart.BODY:
 		draw_set_transform_matrix(body * bones[Rig.NECK])
-		_draw_neck_cut(Rig.local(Rig.NECK_CUT))
-	_draw_armor(gear.get("armor", {}), look, body, bones, headless)
+		_draw_cut(Rig.local(Rig.NECK_CUT))
+	elif skin_part == Rig.SkinPart.WITHOUT_ARM:
+		draw_set_transform_matrix(body * bones[Rig.WEAPON_ELBOW])
+		_draw_cut(Rig.local(Rig.ARM_CUT))
 	draw_set_transform(Vector2.ZERO)
 	var points := FighterPoints.new()
 	points.hand = hand * Rig.local(Rig.GRIP)
@@ -298,15 +314,16 @@ func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, 
 	points.shield = body * bones[Rig.OFF_WRIST] * SHIELD_CENTER
 	points.has_shield = not str(gear.get("armor", {}).get("shield", "")).is_empty()
 	points.neck = body * bones[Rig.NECK] * Rig.local(Rig.NECK_CUT)
+	points.elbow = body * bones[Rig.WEAPON_ELBOW] * Rig.local(Rig.ARM_CUT)
 	return points
 
-func _draw_armor(armor: Dictionary, look: Dictionary, body: Transform2D, bones: Array[Transform2D], headless: bool) -> void:
+func _draw_armor(armor: Dictionary, look: Dictionary, body: Transform2D, bones: Array[Transform2D], headless: bool, tint: Color) -> void:
 	for slot in ["pants", "shoes", "chest", "helmet", "shield"]:
 		match slot:
 			"helmet":
 				if not headless:
 					draw_set_transform_matrix(body * bones[Rig.HEAD])
-					_draw_helmet(armor, look)
+					_draw_helmet(armor, look, tint)
 				continue
 			"chest": draw_set_transform_matrix(body * bones[Rig.SPINE])
 			"shield": draw_set_transform_matrix(body * bones[Rig.OFF_WRIST])
@@ -316,8 +333,8 @@ func _draw_armor(armor: Dictionary, look: Dictionary, body: Transform2D, bones: 
 			var index := int(look.get(slot, -1))
 			if index >= 0 and index < sheet.size():
 				var piece: Array = sheet[index]
-				var tint: Color = RIVAL_PALETTES[clampi(int(look.get("palette", 0)), 0, RIVAL_PALETTES.size() - 1)]
-				draw_texture_rect_region(RIVAL_ARMOR, piece[1], piece[0], tint)
+				var palette: Color = RIVAL_PALETTES[clampi(int(look.get("palette", 0)), 0, RIVAL_PALETTES.size() - 1)]
+				draw_texture_rect_region(RIVAL_ARMOR, piece[1], piece[0], palette * tint)
 			continue
 		var item := _item(armor.get(slot, ""))
 		if item.is_empty():
@@ -325,45 +342,45 @@ func _draw_armor(armor: Dictionary, look: Dictionary, body: Transform2D, bones: 
 		var tier := int(item.get("tier", 0))
 		var texture := MAIL if tier >= 2 else (TRIM if tier == 1 else GEAR)
 		if texture == MAIL and slot != "shield":
-			_draw_mail_piece(slot, bones)
+			_draw_mail_piece(slot, bones, tint)
 			continue
 		match slot:
-			"chest": _mesh(texture, MASKS.chest, KIT_SIZE, Vector2(-296, -1034), Vector2(.89, .99))
-			"pants": _mesh(texture, MASKS.pants, KIT_SIZE, Vector2(-307, -975), Vector2.ONE, bones)
+			"chest": _mesh(texture, MASKS.chest, KIT_SIZE, Vector2(-296, -1034), tint, Vector2(.89, .99))
+			"pants": _mesh(texture, MASKS.pants, KIT_SIZE, Vector2(-307, -975), tint, Vector2.ONE, bones)
 			"shoes":
-				_mesh(texture, MASKS.shoe_left, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68), bones, 0)
-				_mesh(texture, MASKS.shoe_right, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68), bones, 1)
-			"shield": _mesh(texture, shield_mask, KIT_SIZE, SHIELD_ORIGIN)
+				_mesh(texture, MASKS.shoe_left, KIT_SIZE, Vector2(-290, -696), tint, Vector2(.90, .68), bones, 0)
+				_mesh(texture, MASKS.shoe_right, KIT_SIZE, Vector2(-290, -696), tint, Vector2(.90, .68), bones, 1)
+			"shield": _mesh(texture, shield_mask, KIT_SIZE, SHIELD_ORIGIN, tint)
 
-func _draw_helmet(armor: Dictionary, look: Dictionary) -> void:
+func _draw_helmet(armor: Dictionary, look: Dictionary, tint: Color = Color.WHITE) -> void:
 	if not look.is_empty():
 		var index := int(look.get("helmet", -1))
 		if index >= 0 and index < RIVAL_HELMETS.size():
 			var piece: Array = RIVAL_HELMETS[index]
-			var tint: Color = RIVAL_PALETTES[clampi(int(look.get("palette", 0)), 0, RIVAL_PALETTES.size() - 1)]
-			draw_texture_rect_region(RIVAL_ARMOR, piece[1], piece[0], tint)
+			var palette: Color = RIVAL_PALETTES[clampi(int(look.get("palette", 0)), 0, RIVAL_PALETTES.size() - 1)]
+			draw_texture_rect_region(RIVAL_ARMOR, piece[1], piece[0], palette * tint)
 		return
 	var helmet := _item(armor.get("helmet", ""))
 	if helmet.is_empty():
 		return
 	var tier := int(helmet.get("tier", 0))
 	if tier >= 2:
-		_mesh(MAIL, MAIL_HELMET, Vector2.ONE, Vector2(-399, -1027), Vector2(1.12, 1.0))
+		_mesh(MAIL, MAIL_HELMET, Vector2.ONE, Vector2(-399, -1027), tint, Vector2(1.12, 1.0))
 	else:
-		_mesh(TRIM if tier == 1 else GEAR, MASKS.helmet, KIT_SIZE, Vector2(-359, -1010))
+		_mesh(TRIM if tier == 1 else GEAR, MASKS.helmet, KIT_SIZE, Vector2(-359, -1010), tint)
 
-func _draw_mail_piece(slot: String, bones: Array[Transform2D]) -> void:
+func _draw_mail_piece(slot: String, bones: Array[Transform2D], tint: Color) -> void:
 	match slot:
 		"chest":
-			_mesh(MAIL, MAIL_CHEST, Vector2.ONE, Vector2(-296, -1034), Vector2(.89, .99))
+			_mesh(MAIL, MAIL_CHEST, Vector2.ONE, Vector2(-296, -1034), tint, Vector2(.89, .99))
 		"pants":
-			_mesh(MAIL, MAIL_LEGS[0], Vector2.ONE, Vector2(-331, -1354), Vector2(1.0, 1.43), bones, 0)
-			_mesh(MAIL, MAIL_LEGS[1], Vector2.ONE, Vector2(-312, -1354), Vector2(1.0, 1.43), bones, 1)
+			_mesh(MAIL, MAIL_LEGS[0], Vector2.ONE, Vector2(-331, -1354), tint, Vector2(1.0, 1.43), bones, 0)
+			_mesh(MAIL, MAIL_LEGS[1], Vector2.ONE, Vector2(-312, -1354), tint, Vector2(1.0, 1.43), bones, 1)
 		"shoes":
-			_mesh(MAIL, MAIL_BOOTS[0], Vector2.ONE, Vector2(-307, -699), Vector2(.92, .70), bones, 0)
-			_mesh(MAIL, MAIL_BOOTS[1], Vector2.ONE, Vector2(-280, -686), Vector2(.90, .70), bones, 1)
+			_mesh(MAIL, MAIL_BOOTS[0], Vector2.ONE, Vector2(-307, -699), tint, Vector2(.92, .70), bones, 0)
+			_mesh(MAIL, MAIL_BOOTS[1], Vector2.ONE, Vector2(-280, -686), tint, Vector2(.90, .70), bones, 1)
 
-func _draw_weapon(gear: Dictionary, hand: Transform2D) -> Vector2:
+func _draw_weapon(gear: Dictionary, hand: Transform2D, tint: Color) -> Vector2:
 	var weapon := _item(gear.get("weapon", ""))
 	if weapon.is_empty():
 		return hand.origin
@@ -371,8 +388,8 @@ func _draw_weapon(gear: Dictionary, hand: Transform2D) -> Vector2:
 	var source := _cell(WEAPONS, 3, 2, int(sprite[0]))
 	var scale_value: float = sprite[2]
 	draw_set_transform_matrix(hand)
-	draw_texture_rect_region(WEAPONS, Rect2(-sprite[1] * scale_value, source.size * scale_value), source)
-	if not str(gear.get("enchant", "")).is_empty():
+	draw_texture_rect_region(WEAPONS, Rect2(-sprite[1] * scale_value, source.size * scale_value), source, tint)
+	if tint == Color.WHITE and not str(gear.get("enchant", "")).is_empty():
 		_weapon_glow(Vector2(.54, -.57) * source.size * scale_value, 46.0, .6 + sin(elapsed * 4.0) * .12)
 	return hand * ((sprite[3] - sprite[1]) * scale_value)
 
@@ -384,8 +401,8 @@ static func weapon_icon(item: Dictionary) -> AtlasTexture:
 	icon.filter_clip = true
 	return icon
 
-func _mesh(texture: Texture2D, mask: Array, source_size: Vector2, origin: Vector2, stretch: Vector2 = Vector2.ONE,
-		bones: Array[Transform2D] = [], leg: int = -1) -> void:
+func _mesh(texture: Texture2D, mask: Array, source_size: Vector2, origin: Vector2, tint: Color,
+		stretch: Vector2 = Vector2.ONE, bones: Array[Transform2D] = [], leg: int = -1) -> void:
 	var vertices := PackedVector2Array()
 	var uv := PackedVector2Array()
 	var texture_size := texture.get_size()
@@ -393,7 +410,7 @@ func _mesh(texture: Texture2D, mask: Array, source_size: Vector2, origin: Vector
 		var pixel := point * source_size
 		vertices.append(origin + pixel * stretch)
 		uv.append(pixel / texture_size)
-	var colors := PackedColorArray([Color.WHITE])
+	var colors := PackedColorArray([tint])
 	if bones.is_empty():
 		draw_polygon(vertices, colors, uv, texture)
 		return
@@ -457,11 +474,13 @@ func _draw_battle() -> void:
 	if height <= 0.0:
 		return
 	var knocked_out := (animating or result_winner != -2) and _knockout()
-	var topple := smoothstep(.32, .76, recovery) if knocked_out else 0.0
+	var topple := smoothstep(.32, .76, recovery) if knocked_out and finisher != "ash" else 0.0
 	if topple > 0.0:
 		var target_x := (view * Vector2(visible_positions[1 - side], 0)).x
 		var room := size.x - target_x if side == 0 else target_x
-		var fall_room := 1.62 if not finisher.is_empty() else 1.27
+		var fall_room := 1.62 if finishing_spell_art < 0 and not finisher.is_empty() else 1.27
+		if finisher == "arm":
+			fall_room = 1.77
 		view.origin.x -= (1.0 if side == 0 else -1.0) * maxf(0.0, height * fall_room * topple - room)
 	var pan := .5
 	if full_arena and view.x.x > 0.0:
@@ -490,7 +509,8 @@ func _draw_battle() -> void:
 			shadow += Vector2(.61 if side == 0 else -.71, .22) * (topple * height)
 			shadow_radius = height * lerpf(.24, .48, topple)
 		draw_set_transform(shadow, 0.0, Vector2(1, .24))
-		draw_circle(Vector2.ZERO, shadow_radius, Color(0.08, 0.07, 0.055, .26))
+		var ash_fade := smoothstep(.17, .62, recovery) if index == 1 - side and finisher == "ash" else 0.0
+		draw_circle(Vector2.ZERO, shadow_radius, Color(0.08, 0.07, 0.055, .26 * (1.0 - ash_fade)))
 		draw_set_transform(Vector2.ZERO)
 	if animating and (action in Duel.MOVEMENT or action == "lunge") and elapsed >= impact_time:
 		_draw_dust(feet[side], height, recovery)
@@ -526,7 +546,8 @@ func _draw_battle() -> void:
 		var defender := points[1 - side]
 		if event.blocked and defender != null and defender.has_shield:
 			target.x = defender.shield.x - direction * height * .09
-		_draw_spell(points[side].hand, target, height, attack_art, phase, direction, event.miss)
+		var spell_phase := clampf(elapsed * SPELL_CONTACT / impact_time, 0.0, 1.0)
+		_draw_spell(points[side].hand, target, height, attack_art, spell_phase, direction, event.miss)
 	if animating and elapsed >= impact_time:
 		var contact_offset: float = (previous_positions[1 - side] - visible_positions[1 - side]) * view.x.x if pushed else 0.0
 		_draw_impact(feet, points[1 - side], height, side, recovery, contact_offset, view)
@@ -546,7 +567,18 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 	var pulse := sin(phase * PI)
 	var shielded := not str(loadout.get("armor", {}).get("shield", "")).is_empty()
 	var yielding := int(event.get("yielded", -1)) == index
-	var headless := finisher == "decapitation" and actor == 1 - index and recovery >= .024
+	var skin_part := Rig.SkinPart.WHOLE
+	var tint := Color.WHITE
+	if actor == 1 - index and recovery >= .024:
+		match finisher:
+			"decapitation": skin_part = Rig.SkinPart.BODY
+			"arm": skin_part = Rig.SkinPart.WITHOUT_ARM
+			"burn": tint = tint.lerp(Color("#504651"), smoothstep(.025, .42, recovery))
+			"ash":
+				tint = tint.lerp(Color("#a3a2bb"), smoothstep(.03, .19, recovery))
+				tint.a = 1.0 - smoothstep(.17, .62, recovery)
+				if tint.a <= 0.0:
+					return null
 	var striking := actor == index and phase < 1.0 and action in Duel.WEAPON_ACTIONS
 	if full_arena:
 		var breath := sin(idle_time * 2.8 + index * 2.2)
@@ -660,6 +692,16 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			height *= 1.0 - fall
 			pose.rear_leg += Vector3(-.20, .37, -.11) * fall
 			pose.lead_leg += Vector3(.18, .62, -.30) * fall
+		elif finisher == "ash":
+			var shock := sin(recovery * 62.0) * (1.0 - smoothstep(.20, .62, recovery))
+			var slump := smoothstep(.08, .58, recovery)
+			feet.y += height * (.24 * slump - .023 * shock)
+			feet.x -= direction * height * .015 * shock
+			root_tilt = -.37 * slump
+			pose.spine += .21 * slump - .055 * shock
+			pose.weapon_arm += Vector3(-.32, .61, -.20) * slump
+			pose.lead_leg += Vector3(-.42, .81, -.32) * slump
+			pose.rear_leg += Vector3(.30, -.69, .33) * slump
 		elif _knockout():
 			var buckle := smoothstep(.08, .36, recovery)
 			var topple := smoothstep(.32, .76, recovery)
@@ -706,7 +748,7 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		pose.weapon_arm = pose.weapon_arm.lerp(Rig.aim_weapon_arm(Vector2(758, 754), 1.15), kneel)
 		pose.off_arm = pose.off_arm.lerp(Vector3(.18, -.06, -.01), kneel)
 	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {},
-		root_tilt, striking or result_winner == index or yielding, headless)
+		root_tilt, striking or result_winner == index or yielding, skin_part, tint)
 
 func _victory_pose(pose: Rig.Pose) -> void:
 	var raise_weapon := smoothstep(.02, .40, celebration_time)
@@ -742,6 +784,8 @@ func _close_strike(pose: Rig.Pose, action: String, approach: float, recovery: fl
 			guard_windup = Vector3(.39, -.59, .18)
 	if finisher == "decapitation":
 		hit_arm = Vector3(895, 447, .27)
+	elif finisher == "arm":
+		hit_arm = Vector3(897, 550, .88)
 	# Finish the windup early so the raised weapon has a readable pose before it snaps forward.
 	var windup := smoothstep(.01, release_start - .15, approach)
 	var release := smoothstep(release_start, 1.0, approach)
@@ -873,7 +917,10 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 		if not impact_anchor_set:
 			var chest_at_impact := defender.chest + Vector2(contact_offset, 0)
 			var neck_at_impact := defender.neck + Vector2(contact_offset, 0)
+			var elbow_at_impact := defender.elbow + Vector2(contact_offset, 0)
 			var struck := neck_at_impact if finisher == "decapitation" else chest_at_impact
+			if finisher == "arm":
+				struck = elbow_at_impact
 			if event.blocked:
 				struck = defender.shield if defender.has_shield else defender.hand
 				struck += Vector2(-direction * .085, -.015) * height
@@ -881,6 +928,7 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 			impact_anchor = inverse * struck / Vector2(1.0, height)
 			wound_anchor = inverse * chest_at_impact / Vector2(1.0, height)
 			neck_anchor = inverse * neck_at_impact / Vector2(1.0, height)
+			elbow_anchor = inverse * elbow_at_impact / Vector2(1.0, height)
 			impact_anchor_set = true
 		# Let the debris stay at the impact as the defender recoils and the camera pans.
 		var contact := view * (impact_anchor * Vector2(1.0, height))
@@ -935,14 +983,20 @@ func _draw_finisher(feet: Vector2, height: float, loser: int, recovery: float, v
 	if not impact_anchor_set:
 		return
 	var severed_head := finisher == "decapitation"
-	var wound := view * ((neck_anchor if severed_head else wound_anchor) * Vector2(1.0, height))
+	var severed_arm := finisher == "arm"
+	var anchor := neck_anchor if severed_head else elbow_anchor if severed_arm else wound_anchor
+	var wound := view * (anchor * Vector2(1.0, height))
 	var direction := 1.0 if loser == 1 else -1.0
+	if finishing_spell_art >= 0:
+		_draw_spell_finisher(feet, wound, height, direction, recovery)
+		return
+	var body_part := severed_head or severed_arm
 	var flight := clampf((recovery - .024) / .75, 0.0, 1.0)
-	var ground := feet + Vector2(direction * (1.43 if severed_head else 1.22), -.026) * height
+	var ground := feet + Vector2(direction * (1.43 if body_part else 1.22), -.026) * height
 	var part := wound.lerp(ground, flight)
-	part.y -= height * sin(PI * flight) * (.48 if severed_head else .30)
+	part.y -= height * sin(PI * flight) * (.48 if body_part else .30)
 	part.y -= height * .052 * sin(PI * clampf((recovery - .774) / .16, 0, 1))
-	var rotation := direction * (TAU + 1.62) * flight
+	var rotation := direction * (TAU + (.48 if severed_arm else 1.62)) * flight
 	var splatter := clampf((recovery - .024) / .62, 0.0, 1.0)
 	var spray_alpha := 1.0 - smoothstep(.36, 1.0, splatter)
 	if spray_alpha > 0.0:
@@ -957,24 +1011,106 @@ func _draw_finisher(feet: Vector2, height: float, loser: int, recovery: float, v
 				tint, radius * 1.25, true)
 			draw_circle(drop, radius, tint, true, -1, true)
 	var pool := smoothstep(.73, 1.0, recovery)
-	_draw_blood_pool(ground, height * (.14 if severed_head else .085) * pool)
-	if severed_head:
+	_draw_blood_pool(ground, height * (.14 if body_part else .085) * pool)
+	if body_part:
 		var look := rival_look if loser == 1 else {}
 		var loadout := right_loadout if loser == 1 else left_loadout
 		var scale_value := height / 1024.0
 		var width := scale_value * clampf(float(look.get("build", 100)) / 100.0, .85, 1.2)
 		var scale_xy := Vector2(width * -direction, scale_value)
-		var head := Transform2D(rotation, part).scaled_local(scale_xy).translated_local(-Rig.local(Rig.NECK_CUT))
-		draw_set_transform_matrix(head)
-		Rig.draw_skin(self, Rig.transforms(Rig.Pose.new()), rival_skin if loser == 1 else skin,
-			rival_hair if loser == 1 else hair, false, Rig.SkinPart.HEAD_ONLY)
-		_draw_neck_cut(Rig.local(Rig.NECK_CUT))
-		_draw_helmet(loadout.get("armor", {}), look)
+		var cut := Rig.local(Rig.NECK_CUT if severed_head else Rig.ARM_CUT)
+		var piece := Transform2D(rotation, part).scaled_local(scale_xy).translated_local(-cut)
+		var bones := Rig.transforms(Rig.Pose.new())
+		if severed_arm:
+			var drop := smoothstep(.43, .91, recovery)
+			var grip := (piece * Rig.local(Rig.GRIP)).lerp(ground + Vector2(direction * .20, .036) * height, drop)
+			var dropped := Transform2D(lerp_angle(rotation, -direction * .77, drop), grip).scaled_local(scale_xy)
+			_draw_weapon(loadout, dropped, Color.WHITE)
+		draw_set_transform_matrix(piece)
+		Rig.draw_skin(self, bones, rival_skin if loser == 1 else skin, rival_hair if loser == 1 else hair,
+			false, Rig.SkinPart.HEAD_ONLY if severed_head else Rig.SkinPart.ARM_ONLY)
+		_draw_cut(cut)
+		if severed_head:
+			_draw_helmet(loadout.get("armor", {}), look)
 		draw_set_transform(Vector2.ZERO)
 	else:
 		_draw_heart(part, height * .075, rotation)
 
-func _draw_neck_cut(at: Vector2) -> void:
+func _draw_spell_finisher(feet: Vector2, wound: Vector2, height: float, direction: float, recovery: float) -> void:
+	var settling := smoothstep(.19, .71, recovery)
+	var ash := finisher == "ash"
+	var ground := feet + Vector2(direction * (.08 if ash else .91), .20) * height
+	var source := wound.lerp(ground, settling)
+	if ash:
+		_draw_ash_pile(ground, height, settling)
+		_draw_discharge(wound, height, recovery)
+	else:
+		var edge: Color = FIRE_EDGES[finishing_spell_art]
+		var core: Color = FIRE_CORES[finishing_spell_art]
+		var growth := smoothstep(.026, .18, recovery) * (1.0 - .82 * smoothstep(.35, .91, recovery))
+		if growth > 0.0:
+			draw_circle(source, height * .33 * growth, Color(edge, .15 * growth), true, -1, true)
+			for index in 8:
+				var flicker := sin(idle_time * 19.0 + index * 3.7)
+				var lift := (.32 + .14 * (index % 3)) * growth * (.86 + .14 * flicker)
+				var width := (.07 + .04 * (index % 3)) * (.68 + growth * .32)
+				var curl := .11 * sin(idle_time * 10.0 + index * 2.2)
+				var base := source + Vector2((float(index * 5 % 9) - 4.0) * .074, .075 + .042 * (index % 4)) * height
+				var flare := PackedVector2Array([base + Vector2(-width * .58, .077) * height,
+					base + Vector2(-width, -lift * .21) * height,
+					base + Vector2(-width * .37 + curl * .24, -lift * .59) * height,
+					base + Vector2(curl, -lift) * height,
+					base + Vector2(width * .41 + curl * .44, -lift * .67) * height,
+					base + Vector2(width * .71, -lift * .23) * height, base + Vector2(width * .59, .047) * height])
+				draw_polygon(flare, PackedColorArray([Color(edge, 0), Color(edge, growth * .60), Color(edge, growth * .80),
+					Color(edge, 0), Color(edge, growth * .65), Color(core, growth), Color(core, 0)]))
+	var smoke := smoothstep(.04, .23, recovery) * (1.0 - .50 * smoothstep(.56, 1.0, recovery))
+	var smoke_tint := Color("#605a69") if ash else Color("#3a3037")
+	for index in 10:
+		var drift := fposmod(idle_time * (.74 if ash else .58) + index * .21, 1.0)
+		var curl := sin(index * 3.7 + drift * 4.3)
+		var point := source + Vector2(curl * (.04 + drift * .22), -drift * .67) * height
+		var alpha := smoke * smoothstep(0.0, .12, drift) * (1.0 - drift)
+		draw_circle(point, height * (.037 + drift * .095), Color(smoke_tint, alpha * .67), true, -1, true)
+		var spark: Color = Color("#d3cdde") if ash else FIRE_CORES[finishing_spell_art]
+		draw_circle(point + Vector2(.06 * curl, -.065) * height, height * (.006 + .004 * (index % 3)),
+			Color(spark, alpha), true, -1, true)
+
+func _draw_discharge(wound: Vector2, height: float, recovery: float) -> void:
+	var fade := 1.0 - smoothstep(.095, .37, recovery)
+	if fade <= 0.0:
+		return
+	var flicker := floorf(idle_time * 38.0)
+	for index in 5:
+		var ray := Vector2.from_angle(index * TAU / 5.0 + .37) * height * (.28 + recovery)
+		var bend := ray.orthogonal() * sin(index * 5.3 + flicker) * .52
+		var bolt := PackedVector2Array([wound, wound + ray * .29 + bend,
+			wound + ray * .63 - bend * .31, wound + ray])
+		draw_polyline(bolt, Color("#ae83fc", fade * .77), height * .025, true)
+		draw_polyline(bolt, Color("#f5ebff", fade), height * .009, true)
+
+func _draw_ash_pile(at: Vector2, height: float, settled: float) -> void:
+	if settled <= 0.0:
+		return
+	var scale_value := height * settled
+	draw_set_transform(at + Vector2(0, .02) * scale_value, 0.0, Vector2(1.0, .31) * scale_value)
+	draw_circle(Vector2.ZERO, .34, Color("#504751"), true, -1, true)
+	draw_set_transform(at, 0.0, Vector2.ONE * scale_value)
+	var pile := PackedVector2Array([Vector2(-.33, 0), Vector2(-.23, -.08), Vector2(-.12, -.095), Vector2(-.044, -.19),
+		Vector2(.04, -.15), Vector2(.11, -.16), Vector2(.17, -.09), Vector2(.31, -.03), Vector2(.37, .035),
+		Vector2(.12, .075), Vector2(-.14, .070)])
+	var shades := PackedColorArray()
+	for point in pile:
+		shades.append(Color("#514851").lerp(Color("#a3979d"), clampf(-point.y * 5.0, 0.0, 1.0)))
+	draw_polygon(pile, shades)
+	for index in 21:
+		var x := float((index * 13) % 23) / 22.0 - .5
+		var y := float((index * 9) % 23) / 22.0 - .5
+		draw_circle(Vector2(x * .61, y * .16 - .039 + absf(x) * .09), .008 + .004 * (index % 3),
+			Color("#c3bbc1") if index % 4 == 0 else Color("#6a6168"), true, -1, true)
+	draw_set_transform(Vector2.ZERO)
+
+func _draw_cut(at: Vector2) -> void:
 	var rim := PackedVector2Array([at + Vector2(-47, 1), at + Vector2(-33, -9), at + Vector2(24, -9),
 		at + Vector2(45, -2), at + Vector2(25, 12), at + Vector2(-19, 13)])
 	draw_colored_polygon(rim, Color("#67192a"))
@@ -1004,6 +1140,8 @@ func _draw_blood_pool(at: Vector2, radius: float) -> void:
 	draw_set_transform(Vector2.ZERO)
 
 func _draw_fall_ground(feet: Vector2, height: float, direction: float, recovery: float) -> void:
+	if finishing_spell_art >= 0:
+		return
 	var ground := feet + Vector2(direction * .99, .27) * height
 	_draw_dust(ground, height, clampf((recovery - .70) / .25, 0, 1))
 	if _bloodied_hit() or not finisher.is_empty():

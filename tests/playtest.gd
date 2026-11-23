@@ -31,6 +31,7 @@ func _run() -> void:
 	_check_arena_view(data)
 	_check_fighter_rig()
 	_check_hit_feedback()
+	_check_fatality_variants(data)
 	_check_spell_charges(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
@@ -425,6 +426,42 @@ func _check_hit_feedback() -> void:
 	strike.positions = [29, 31]
 	stage.animate(strike)
 	_check(not stage._knockout() and not stage._bloodied_hit(), "A ring-out should use the fall into the pit")
+	stage.free()
+
+func _check_fatality_variants(data: RefCounted) -> void:
+	var stage := Stage.new()
+	stage.data = data
+	stage.lethal_bout = true
+	var fatal := {"action": "cast", "side": 0, "critical": false, "blocked": false, "miss": false, "damage": 5, "armor_hit": 0,
+		"positions": [14, 15], "health": [44, 0]}
+	for spell in ["fireball", "lightning", "meteor", "hellfire", "storm", "arc"]:
+		stage.left_loadout = {"spell": spell}
+		stage.animate(fatal)
+		var art := int(data.items[spell].art)
+		_check(stage.finisher == ("ash" if art == 1 else "burn") and stage.finishing_spell_art == art,
+			"%s should choose its own fatal effect" % spell)
+	var survived := fatal.duplicate()
+	survived.health = [44, 1]
+	stage.animate(survived)
+	_check(stage.finisher.is_empty() and stage.finishing_spell_art == -1, "An ordinary spell hit should clear any previous fatal effect")
+	var yielded := survived.duplicate()
+	yielded.yielded = 1
+	stage.lethal_bout = false
+	stage.animate(yielded)
+	_check(stage.finisher.is_empty(), "A first-blood spell hit should still finish with a yield")
+	stage.lethal_bout = true
+	fatal.action = "power"
+	stage.right_loadout = {"weapon": "sword"}
+	fatal.side = 1
+	fatal.health = [0, 44]
+	stage.animate(fatal)
+	_check(stage.finisher == "arm", "Fatal blade power attacks should detach the weapon arm on either side")
+	fatal.action = "attack"
+	stage.animate(fatal)
+	_check(stage.finisher == "decapitation", "Normal fatal blade attacks should still decapitate")
+	stage.right_loadout.weapon = "mace"
+	stage.animate(fatal)
+	_check(stage.finisher == "heart", "Blunt weapons should retain their existing finisher")
 	stage.free()
 
 func _check_spell_charges(data: RefCounted) -> void:
