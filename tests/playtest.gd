@@ -34,6 +34,7 @@ func _run() -> void:
 	_check_fatality_variants(data)
 	_check_bout_spell_damage(data)
 	_check_spell_charges(data)
+	_check_death_match_spell_bonus(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
 	_check_defeats(data)
@@ -528,6 +529,37 @@ func _check_spell_charges(data: RefCounted) -> void:
 	snapshot.fighters[1].spell = rival.spell
 	snapshot.fighters[1].casts = 5
 	_check(campaign.open_bout(snapshot).fighters[1].casts == 5, "A saved fight should preserve its original spell charges")
+
+func _check_death_match_spell_bonus(data: RefCounted) -> void:
+	var threshold := int(data.rules.death_match_extra_cast_magic)
+	var storm: Dictionary = data.items.storm
+	_check(data.spell_casts(storm, threshold - 1, true) == 1 and data.spell_casts(storm, threshold, true) == 2,
+		"An extra death match cast should require the full Magic threshold")
+	_check(data.spell_casts(storm, threshold) == 1 and data.spell_casts({}, threshold, true) == 0,
+		"Regular bouts and a fighter without a spell should receive no extra casts")
+	var campaign := Campaign.new(data)
+	var stats: Dictionary = data.stats_empty()
+	stats.Magic = threshold
+	campaign.create(0, "Mage", 0, 0, stats)
+	campaign.state.level = int(data.rules.arena_caps.front())
+	campaign.state.loadout.spell = "storm"
+	var regular := campaign.start_bout(false, 42)
+	_check(regular.fighters[0].casts == 1, "A specialized caster should keep the normal charges in a regular bout")
+	campaign.settle(0)
+	campaign.scout_bout(true, 42)
+	var rival: Dictionary = campaign.state.scouted_tournament.rival
+	rival.stats.Magic = threshold
+	rival.loadout.spell = "storm"
+	rival.spell = storm
+	rival.casts = 1
+	_check(campaign.scouted_bout(true).rival.casts == 2, "A qualifying rival's face-off should include their bonus cast")
+	var snapshot := campaign.start_bout(true, 42)
+	var tournament: RefCounted = campaign.open_bout(snapshot)
+	_check(tournament.fighters[0].casts == 2 and tournament.fighters[1].casts == 2,
+		"The death match should start both qualifying fighters with the bonus cast")
+	campaign.record_turn("cast", -2)
+	var resumed: RefCounted = campaign.open_bout(snapshot)
+	_check(resumed.fighters[0].casts == 1, "Replaying a saved death match should spend the recorded cast only once")
 
 func _check_saved_bout(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)

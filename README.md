@@ -29,7 +29,7 @@ The crests at each top corner show the fighter's current and maximum health, arm
 
 New bouts use a 30-space arena with a pit at each end. The camera follows the fight and pulls back when the fighters spread out. Steps, jumps, attack ranges, and knockback use the same distances at any window size. Saved bouts keep their original arena width.
 
-The **Pack** shows remaining spell casts and, in death matches, healing potions. Spells deal half their base damage in regular bouts and gain the full damage bonus from invested Magic points. The Magic shop lists base damage for both fight types. Fireball and Lightning Strike have two casts per bout. The heavier spells have one. A miss spends a cast, and sleeping only restores stamina. Bring a weapon to follow up after casting.
+The **Pack** shows remaining spell casts and, in death matches, healing potions. Spells deal half their base damage in regular bouts and gain the full damage bonus from invested Magic points. Fireball and Lightning Strike start with two casts. The heavier spells start with one. At 30 Magic, your equipped spell gets one extra cast per death match. The Magic shop lists base damage and cast counts for both fight types. A miss spends a cast, and sleeping only restores stamina.
 
 Choose **Scout rival** in the arena to reveal a randomly generated opponent near your level. Compare your stats, equipment, and reach before choosing **Fight**. You can go back to town or close the game and return to the same rival. A scouted tournament opponent stays in place while you fight regular bouts or buy gear. Your latest gear is used when you enter the ring.
 

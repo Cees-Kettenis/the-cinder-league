@@ -868,7 +868,8 @@ func _update_point_total() -> void:
 		roundi(Duel.hit_chance(rule, values, false) * 100), roundi(Duel.crit_chance(rule, values.Attack) * 100)]
 	stat_labels.Strength.tooltip_text = "%d weapon damage" % roundi(Duel.strike_damage(rule, projected, false))
 	stat_labels.Defence.tooltip_text = "%d%% block chance" % roundi(Duel.block_chance(rule, values.Defence) * 100)
-	stat_labels.Magic.tooltip_text = "+%d spell damage" % roundi(values.Magic * rule.damage_per_magic)
+	stat_labels.Magic.tooltip_text = "+%d spell damage\n%d Magic unlocks +1 cast in death matches" % [
+		roundi(values.Magic * rule.damage_per_magic), int(rule.death_match_extra_cast_magic)]
 	stat_labels.Vitality.tooltip_text = "Health and recovery"
 	stat_labels.Stamina.tooltip_text = "Energy for moves"
 	stat_labels.Charisma.tooltip_text = "Stronger taunts and more gold"
@@ -1105,7 +1106,8 @@ func _preview_item(id: String) -> void:
 			var action := "attack" if item.kind == "weapon" else "cast"
 			_shop_stat("stamina", "Stamina cost", "%d per %s" % [item.energy, action])
 			if item.kind == "spell":
-				_shop_stat("cast", "Uses per fight", str(int(item.uses)))
+				var casts: int = data.spell_casts(item, int(game.state.stats.Magic), true)
+				_shop_stat("cast", "Casts · Bout / Death match", "%d / %d" % [int(item.uses), casts])
 		"enchant":
 			var old := int(data.items.get(game.state.loadout.get("enchant", ""), {}).get("damage", 0))
 			_shop_stat("attack", "Extra weapon damage", "+%d → +%d" % [old, item.damage])
@@ -1214,7 +1216,7 @@ func _scout_bout(tournament: bool) -> void:
 
 func _show_faceoff(offer: Dictionary) -> void:
 	var rival: Dictionary = offer.rival
-	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout)
+	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout, "weapon", offer.tournament)
 	var heading := "First blood bout"
 	if offer.tournament:
 		heading = "Tournament · Round %d/%d" % [int(offer.round) + 1, int(offer.round_count)]
