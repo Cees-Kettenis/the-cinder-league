@@ -46,8 +46,16 @@ func _init(rules_data: RefCounted, left: Dictionary, right: Dictionary, fight_se
 func distance() -> int:
 	return positions[1] - positions[0]
 
+static func stamina_move_bonus(rule: Dictionary, stamina: int, leap: bool = false) -> int:
+	var threshold := "stamina_per_extra_leap_space" if leap else "stamina_per_extra_space"
+	return mini(int(rule.get("max_stamina_move_bonus", 0)), floori(stamina / float(rule.get(threshold, 1))))
+
+static func lunge_range(rule: Dictionary, stamina: int) -> int:
+	return int(rule.get("lunge_max_spaces", 2)) + stamina_move_bonus(rule, stamina)
+
 func travel(action: String) -> int:
 	var steps := int(distances["jump" if action == "jump_back" else action])
+	steps += stamina_move_bonus(rules, int(fighters[active].stats.Stamina), action in ["jump", "jump_back"])
 	if action in ["retreat", "jump_back"]:
 		var room := positions[0] if active == 0 else int(rules.arena_size) - positions[1]
 		return mini(steps, room)
@@ -128,8 +136,15 @@ func lunge_spaces(side: int = -1) -> int:
 	return maxi(0, distance() - int(fighter.weapon.reach))
 
 func in_lunge_range() -> bool:
-	return (fighters[active].weapon.reach >= 1 and not in_weapon_reach() and distance() < opening_distance
-		and lunge_spaces() <= int(rules.get("lunge_max_spaces", 2)))
+	if fighters[active].weapon.reach < 1 or in_weapon_reach():
+		return false
+	# Older snapshots required the gap itself to shrink before a lunge.
+	if not rules.has("stamina_per_extra_space") and distance() >= opening_distance:
+		return false
+	var opening_left := int((int(rules.arena_size) - opening_distance) * .5)
+	if positions[0] == opening_left and positions[1] == opening_left + opening_distance:
+		return false
+	return lunge_spaces() <= lunge_range(rules, int(fighters[active].stats.Stamina))
 
 func has_attack_styles() -> bool:
 	return rules.has("power_damage_multiplier")
@@ -156,7 +171,10 @@ func chance(action: String) -> float:
 	var target: Dictionary = fighters[1 - active]
 	var accuracy := hit_chance(rules, fighter.stats, action in SPELL_ACTIONS, target.exposed, threatens_cast(target))
 	match action:
-		"lunge": return maxf(0.0, accuracy - float(rules.get("lunge_hit_penalty", .20)))
+		"lunge":
+			var extra := maxi(0, lunge_spaces() - int(rules.get("lunge_max_spaces", 2)))
+			var penalty: float = rules.get("lunge_hit_penalty", .20) + extra * rules.get("lunge_hit_penalty_per_extra_space", 0.0)
+			return maxf(0.0, accuracy - penalty)
 		"rush": return maxf(0.0, accuracy - float(rules.get("lunge_hit_penalty", 0.0)))
 		"power": return maxf(0.0, accuracy - float(rules.get("power_hit_penalty", 0.0)))
 		"quick": return minf(1.0, accuracy + float(rules.get("quick_hit_bonus", 0.0)))
@@ -299,13 +317,14 @@ func act(action: String) -> Dictionary:
 			fighter.potions -= 1
 			event.message = "%s restores %d health." % [fighter.name, fighter.hp - before]
 		"quick", "attack", "power", "lunge", "rush", "cast", "cast_reserve":
+			var accuracy := chance(action)
 			if spell_action:
 				var charges := "reserve_casts" if action == "cast_reserve" else "casts"
 				fighter[charges] -= 1
 				event.spell_art = int(spell_for_action(fighter, action).get("art", 0))
 			elif action in ["lunge", "rush"]:
 				positions[side] += (1 if side == 0 else -1) * lunge_spaces()
-			_strike(action, fighter, enemy, event)
+			_strike(action, fighter, enemy, event, accuracy)
 			if action == "power" and not event.miss and not event.blocked and not _decisive_hit(enemy, event):
 				_knock_back(enemy, event)
 		"taunt":
@@ -347,8 +366,8 @@ func act(action: String) -> Dictionary:
 func _decisive_hit(enemy: Dictionary, event: Dictionary) -> bool:
 	return enemy.hp <= yield_health(enemy) or event.get("first_blood", false)
 
-func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dictionary) -> void:
-	if random.randf() >= chance(action):
+func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dictionary, accuracy: float) -> void:
+	if random.randf() >= accuracy:
 		event.miss = true
 		event.message = "%s misses with %s." % [fighter.name, event.title.to_lower()]
 		return

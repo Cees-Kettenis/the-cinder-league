@@ -876,7 +876,12 @@ func _update_point_total() -> void:
 		values.Magic * rule.damage_per_magic, Duel.spell_resistance(rule, values.Magic),
 		data.bonus_spell_casts(int(values.Magic)), int(rule.magic_per_extra_cast), int(rule.reserve_spell_magic)]
 	stat_labels.Vitality.tooltip_text = "Health and recovery"
-	stat_labels.Stamina.tooltip_text = "Energy for moves"
+	var stamina := int(values.Stamina)
+	var move_bonus := Duel.stamina_move_bonus(rule, stamina)
+	var leap_bonus := Duel.stamina_move_bonus(rule, stamina, true)
+	stat_labels.Stamina.tooltip_text = "%d max stamina · Sleep restores %d\nStep %d · Retreat %d · Leap %d spaces\nLunge up to %d spaces" % [
+		projected.max_energy, Duel.recovery(rule, stamina), int(data.distances.advance) + move_bonus,
+		int(data.distances.retreat) + move_bonus, int(data.distances.jump) + leap_bonus, Duel.lunge_range(rule, stamina)]
 	stat_labels.Charisma.tooltip_text = "Stronger taunts and more gold"
 	var before := {"level": previous_level, "stats": previous_stats}
 	var after := {"level": previous_level + int(level_mode), "stats": values}
@@ -1256,6 +1261,15 @@ func _show_faceoff(offer: Dictionary) -> void:
 	_compare_row(kit, "", "Your kit", "Rival kit", "")
 	for stat in Data.STATS:
 		_compare_row(stats, stat, player.stats[stat], rival.stats[stat], STAT_ICONS[stat])
+	var player_stamina := int(player.stats.Stamina)
+	var rival_stamina := int(rival.stats.Stamina)
+	var step := int(data.distances.advance)
+	var leap := int(data.distances.jump)
+	_compare_row(stats, "Step travel", step + Duel.stamina_move_bonus(data.rules, player_stamina),
+		step + Duel.stamina_move_bonus(data.rules, rival_stamina), "advance")
+	_compare_row(stats, "Leap travel", leap + Duel.stamina_move_bonus(data.rules, player_stamina, true),
+		leap + Duel.stamina_move_bonus(data.rules, rival_stamina, true), "jump")
+	_compare_row(stats, "Lunge travel", Duel.lunge_range(data.rules, player_stamina), Duel.lunge_range(data.rules, rival_stamina), "lunge")
 	_compare_row(kit, "Health", player.max_hp, rival.max_hp, "health")
 	_compare_row(kit, "Armor", player.max_armor, rival.max_armor, "armor")
 	_compare_row(kit, "Energy", player.max_energy, rival.max_energy, "stamina")

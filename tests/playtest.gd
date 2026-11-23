@@ -25,6 +25,7 @@ func _run() -> void:
 	_check_exhaustion(data)
 	_check_movement(data)
 	_check_lunge(data)
+	_check_stamina_mobility(data)
 	_check_legacy_lunge(data)
 	_check_attack_styles(data)
 	_check_first_blood(data)
@@ -175,6 +176,46 @@ func _check_lunge(data: RefCounted) -> void:
 	_check(rival_lunge.choose("weapon") == "lunge" and rival_lunge.act("lunge").valid and rival_lunge.distance() == 1,
 		"A rival can take a short lunge after the gap closes")
 
+func _check_stamina_mobility(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	stats.Stamina = 5
+	var runner: Dictionary = data.fighter("Runner", stats, {"weapon": "dagger"})
+	_check(runner.max_energy == 44 and Duel.recovery(data.rules, 5) == 24,
+		"Five Stamina points should improve the stamina pool and sleep recovery")
+	var chase := Duel.new(data, runner, runner, 42, 4)
+	_check(chase.travel("advance") == 2 and chase.travel("retreat") == 2 and chase.travel("jump_back") == 3,
+		"Five Stamina points should extend short moves in both directions")
+	_check(not chase.in_lunge_range(), "Stamina should never allow lunging from untouched opening positions")
+	chase.act("advance")
+	chase.act("retreat")
+	_check(chase.distance() == 4 and not chase.in_weapon_reach() and chase.in_lunge_range() and chase.cost("lunge") == 26,
+		"A moving rival can be three spaces outside weapon reach and still in range of a costly lunge")
+	var slower: Dictionary = data.fighter("Pursuer", data.stats_empty(), {"weapon": "dagger"})
+	var escape := Duel.new(data, runner, slower, 42, 2)
+	_check(escape.act("retreat").valid and escape.distance() == 4 and not escape.in_lunge_range(),
+		"A quick retreat should take a fighter outside the lunge range of a slower opponent")
+
+	stats.Stamina = 10
+	var sprinter: Dictionary = data.fighter("Sprinter", stats, {"weapon": "dagger"})
+	var duel := Duel.new(data, sprinter, sprinter, 42)
+	_check(duel.travel("jump") == 4 and duel.travel("jump_back") == 4,
+		"Ten Stamina points should extend leaps in both directions")
+	var odds := chase.chance("lunge")
+	var short_lunge_odds := chase.chance("attack") - float(data.rules.lunge_hit_penalty)
+	_check(is_equal_approx(short_lunge_odds - odds, .08) and Duel.lunge_range(data.rules, 100) == 3,
+		"The longest lunge should have capped travel and lower accuracy")
+	for seed_value in 100:
+		chase.random.seed = seed_value
+		var roll := chase.random.randf()
+		if roll < odds or roll >= short_lunge_odds:
+			continue
+		chase.random.seed = seed_value
+		var long_lunge := chase.act("lunge")
+		_check(long_lunge.valid and long_lunge.miss and chase.distance() == 1,
+			"A long lunge should use the previewed starting-distance odds and move even on a miss")
+		return
+	_check(false, "The long lunge test needs a roll between the two hit chances")
+
 func _check_legacy_lunge(data: RefCounted) -> void:
 	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "dagger"})
 	var legacy_rules: Dictionary = data.rules.duplicate()
@@ -190,6 +231,16 @@ func _check_legacy_lunge(data: RefCounted) -> void:
 	legacy_rules.erase("lunge_hit_penalty")
 	legacy_rules.erase("lunge_cost_per_space")
 	legacy_rules.erase("lunge_max_spaces")
+	legacy_rules.erase("stamina_per_extra_space")
+	legacy_rules.erase("stamina_per_extra_leap_space")
+	legacy_rules.erase("max_stamina_move_bonus")
+	legacy_rules.erase("lunge_hit_penalty_per_extra_space")
+	var veteran := fighter.duplicate(true)
+	veteran.stats.Stamina = 20
+	var saved_movement := Duel.new(data, veteran, fighter, 42, 5, {"rules": legacy_rules})
+	_check(saved_movement.restore_history(["advance", "guard", "jump_back"])
+		and saved_movement.distance() == 7 and Duel.lunge_range(legacy_rules, 20) == 2,
+		"Resuming a saved bout must retain its original movement even when the fighter has high Stamina")
 	var free_moves: Dictionary = data.moves.duplicate()
 	free_moves.jump = 0
 	var free_weapon := fighter.duplicate(true)
@@ -886,6 +937,15 @@ func _check_game_buttons() -> void:
 	_check(ui.battle_hud.pack.visible and ui.battle_hud.charges.cast.text == "2" and ui.battle_hud.charges.potion.text == "1",
 		"Equipped spells and potions should appear in the Pack with use counts")
 	var rival_start: int = ui.bout.positions[1]
+	var original_stamina := int(player.stats.Stamina)
+	player.stats.Stamina = 10
+	ui.bout.positions[1] = rival_start - 1
+	ui._refresh_battle()
+	_check(attack.accessibility_name == "Lunge" and not attack.disabled
+		and attack.accessibility_description.contains("26 stamina · Moves 3 spaces")
+		and ui.battle_hud.action_buttons.jump_back.accessibility_description.contains("4 spaces away"),
+		"The battle HUD should preview the longer lunge and leap at ten Stamina")
+	player.stats.Stamina = original_stamina
 	ui.bout.positions[1] = ui.bout.positions[0] + 2
 	ui._refresh_battle()
 	_check(attack.accessibility_name == "Lunge" and not attack.disabled and attack.accessibility_description.contains("16 stamina"),

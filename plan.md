@@ -70,7 +70,7 @@ Numbers marked **playtest values** are starting points. Draft gear names and lat
 | Defence | Improves the chance to block and qualifies the fighter to buy armor. Stronger pieces require more Defence. |
 | Magic | Improves spell hit chance and damage. Higher Magic qualifies the fighter to buy stronger spells at the magic shop. |
 | Vitality | Increases maximum health and health regenerated each turn. |
-| Stamina | Increases the energy pool for movement, jumps, and attacks, and increases stamina recovered by sleeping. |
+| Stamina | Increases maximum stamina and sleep recovery. Steps and lunges gain one space at 5 Stamina. Leaps gain one space at 10. Longer lunges spend more stamina and lose accuracy. |
 | Charisma | Increases gold earned from bouts and improves taunts. |
 
 Use the same starting point budget to sketch a weapon fighter, a defensive fighter, a spellcaster, a stamina-heavy duelist, a charisma fighter, and a hybrid. Also sketch an all-Attack build to see where its lack of protection will put it under pressure.
