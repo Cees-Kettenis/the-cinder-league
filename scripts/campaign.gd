@@ -165,6 +165,12 @@ func is_fallen() -> bool:
 func can_tournament() -> bool:
 	return not is_fallen() and state.level >= arena().cap and not state.pending and not state.complete
 
+func tournament_in_progress() -> bool:
+	if state.is_empty() or is_fallen() or state.complete:
+		return false
+	return int(state.tournament) > 0 or (has_active_bout() and state.snapshot.get("tournament", false)
+		and not state.active_bout.get("practice", false))
+
 func scouted_bout(tournament: bool = false) -> Dictionary:
 	var offer: Dictionary = state.get("scouted_tournament" if tournament else "scouted_bout", {})
 	if offer.is_empty() or offer.rival.spell.is_empty():
@@ -179,7 +185,8 @@ func scouted_bout(tournament: bool = false) -> Dictionary:
 	return updated
 
 func can_scout(tournament: bool) -> bool:
-	return not is_fallen() and not has_active_bout() and not state.pending and (not tournament or can_tournament())
+	return (not is_fallen() and not has_active_bout() and not state.pending
+		and (can_tournament() if tournament else not tournament_in_progress()))
 
 func win_gold(arena_number: int, tournament: bool = false) -> int:
 	var venue: Dictionary = data.arenas[arena_number]
@@ -199,6 +206,8 @@ func _xp_cap() -> int:
 func purchase(item: Dictionary) -> String:
 	if is_fallen():
 		return "This gladiator has fallen."
+	if tournament_in_progress():
+		return "Finish the tournament before shopping."
 	var reason: String = data.lock_reason(state, item)
 	if not reason.is_empty():
 		return reason
@@ -296,7 +305,7 @@ func has_active_bout() -> bool:
 	return not state.active_bout.is_empty()
 
 func retry_bout(practice: bool) -> bool:
-	if is_fallen() or state.pending or has_active_bout() or state.snapshot.is_empty() or state.outcome.is_empty():
+	if is_fallen() or state.pending or has_active_bout() or tournament_in_progress() or state.snapshot.is_empty() or state.outcome.is_empty():
 		return false
 	if practice != (state.outcome.winner == 0):
 		return false

@@ -37,6 +37,8 @@ func _run() -> void:
 	_check_save_replacement(data)
 	_check_saved_spell_faceoff(data)
 	_check_game_buttons()
+	_check_tournament_navigation()
+	_check_control_settings()
 	await process_frame
 	await process_frame
 	for failure in failures:
@@ -703,18 +705,107 @@ func _check_game_buttons() -> void:
 		"The results bar should show the required allocation")
 	_press_escape()
 	_check(ui.current_screen == "allocate", "Escape from results should respect a pending level-up")
-	ui._retry(true)
-	_check(ui.current_screen == "allocate", "A pending level-up should block practice")
+	ui._retry()
+	_check(ui.current_screen == "allocate", "A pending level-up should block retry")
 	ui.queue_free()
 
 func _press_escape() -> void:
+	_press_key(KEY_ESCAPE)
+
+func _press_key(key: Key) -> void:
 	var event := InputEventKey.new()
-	event.keycode = KEY_ESCAPE
+	event.keycode = key
 	event.pressed = true
 	root.push_input(event, true)
 	event = event.duplicate()
 	event.pressed = false
 	root.push_input(event, true)
+
+func _check_tournament_navigation() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.game.create(3, "Contender", 0, 0, ui.data.build_stats("weapon", 10))
+	ui.game.state.level = 4
+	ui.game.state.xp = ui.data.rules.xp_levels[3]
+	ui.show_arena()
+	_find_button(ui, "Scout tournament rival").pressed.emit()
+	_check(_find_button(ui, "Back") != null and not ui.game.tournament_in_progress(), "Scouting should leave the first tournament optional")
+	_find_button(ui, "Fight to the death").pressed.emit()
+	_check(ui.current_screen == "battle" and ui.game.tournament_in_progress(), "Entering the first round should lock the tournament")
+	ui.bout.winner = 0
+	ui.bout_result = ui.game.record_turn("attack", 0)
+	ui._finish_bout()
+	_check(_find_button(ui.battle_layer, "Next Match") != null and _find_button(ui.battle_layer, "Return to town") == null
+		and not ui.game.can_scout(false), "Between rounds the only destination should be the next tournament match")
+	_press_key(KEY_T)
+	_press_escape()
+	_check(ui.current_screen == "result", "Town and Back shortcuts should respect the tournament lock")
+	_press_key(KEY_N)
+	_check(ui.current_screen == "scout" and _find_button(ui, "Back") == null and _find_button(ui, "Title screen") == null,
+		"Next Match should open a locked face-off")
+	var next_offer: Dictionary = ui.game.scouted_bout(true)
+	ui._resume(3)
+	var restored_offer: Dictionary = ui.game.scouted_bout(true)
+	_check(ui.current_screen == "scout" and not restored_offer.is_empty()
+		and restored_offer.opponent_seed == next_offer.opponent_seed and restored_offer.rival.name == next_offer.rival.name,
+		"Reloading between rounds should return to the same face-off")
+	_press_escape()
+	_check(ui.current_screen == "scout", "Back must keep the player in the tournament face-off")
+	_find_button(ui, "Fight to the death").pressed.emit()
+	ui.bout.winner = 0
+	ui.bout_result = ui.game.record_turn("attack", 0)
+	ui._finish_bout()
+	_check(not ui.game.tournament_in_progress() and _find_button(ui.battle_layer, "Spend level-up points") != null,
+		"Beating the champion should release the lock and offer the required level-up")
+	ui.free()
+
+func _check_control_settings() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.game.create(0, "Controls test", 0, 0, ui.data.build_stats("weapon", 10))
+	ui.show_town()
+	ui._show_settings()
+	_find_button(ui.settings_popup, "Controls").pressed.emit()
+	var choices := {"Back": KEY_B, "Return to town": KEY_J, "Next bout or match": KEY_M}
+	for caption in choices:
+		_find_button(ui.settings_popup, "Rebind " + caption).pressed.emit()
+		_press_key(choices[caption])
+	_press_key(KEY_B)
+	_check(ui.settings_popup == null, "The new Back key should close the settings popup")
+	ui.show_arena()
+	_press_escape()
+	_check(ui.current_screen == "arena", "The old Back key should stop navigating after a rebind")
+	_press_key(KEY_B)
+	_check(ui.current_screen == "town", "The new Back key should navigate to town")
+	var snapshot: Dictionary = ui.game.start_bout(false, 42)
+	ui._open_bout(snapshot, false)
+	ui.bout.winner = 0
+	ui.bout_result = ui.game.record_turn("attack", 0)
+	ui._finish_bout()
+	_check(_find_button(ui.battle_layer, "Next Bout") != null and _find_button(ui, "Practice last bout") == null,
+		"Regular victories should offer the next bout without a practice button")
+	_press_key(KEY_N)
+	_check(ui.current_screen == "result", "The old Next key should stop navigating after a rebind")
+	_press_key(KEY_M)
+	_check(ui.current_screen == "scout" and not ui.game.scouted_bout().is_empty(), "The new Next key should scout the regular rival")
+	ui.game.state.xp = 0
+	_find_button(ui, "Fight").pressed.emit()
+	ui.bout.winner = 0
+	ui.bout_result = ui.game.record_turn("attack", 0)
+	ui._finish_bout()
+	_press_key(KEY_T)
+	_check(ui.current_screen == "result", "The old Town key should stop navigating after a rebind")
+	_press_key(KEY_J)
+	_check(ui.current_screen == "town", "The new Town key should leave a regular result for town")
+	ui.free()
+	var reloaded = Game.instantiate()
+	root.add_child(reloaded)
+	_check(reloaded.key_bindings == {"back": KEY_B, "town": KEY_J, "next": KEY_M}, "All three bindings should survive restarting the game")
+	reloaded._show_settings()
+	_find_button(reloaded.settings_popup, "Controls").pressed.emit()
+	_find_button(reloaded.settings_popup, "Reset defaults").pressed.emit()
+	_check(reloaded.key_bindings == reloaded.DEFAULT_KEYS, "Reset should restore all three shortcut defaults")
+	reloaded.free()
 
 func _find_button(node: Node, caption: String) -> Button:
 	if node is Button and (node.text == caption or node.accessibility_name == caption):

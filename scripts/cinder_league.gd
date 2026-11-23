@@ -33,6 +33,8 @@ const STAT_ICONS := {"Attack": "attack", "Strength": "strength", "Defence": "arm
 	"Vitality": "health", "Stamina": "stamina", "Charisma": "taunt"}
 const USER_BALANCE := "user://balance.override.json"
 const USER_SETTINGS := "user://settings.cfg"
+const DEFAULT_KEYS := {"back": KEY_ESCAPE, "town": KEY_T, "next": KEY_N}
+const CONTROL_NAMES := {"back": "Back", "town": "Return to town", "next": "Next bout or match"}
 
 enum DisplayMode { WINDOWED, FIGHTS, FULLSCREEN }
 
@@ -80,6 +82,12 @@ var battle_hud: Control
 var display_mode: int = DisplayMode.FIGHTS
 var window_mode_before_fullscreen := Window.MODE_WINDOWED
 var settings_popup: PopupPanel
+var key_bindings := DEFAULT_KEYS.duplicate()
+var binding_buttons: Dictionary = {}
+var binding_action := ""
+var binding_notice: Label
+var result_town_button: Button
+var result_next_button: Button
 var character_name: Label
 var fight_locked := false
 var fight_generation := 0
@@ -106,6 +114,8 @@ func _ready() -> void:
 	music_enabled = bool(settings.get_value("audio", "title_music", sound.enabled))
 	town_music_enabled = bool(settings.get_value("audio", "town_music", sound.enabled))
 	venue_music_enabled = bool(settings.get_value("audio", "venue_music", town_music_enabled))
+	_load_key_bindings(settings)
+	_apply_back_binding()
 	add_child(music_player)
 	add_child(fading_music)
 	if get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]:
@@ -141,19 +151,36 @@ func _ready() -> void:
 	simulations = Simulator.new(data)
 	show_menu()
 
-func _unhandled_input(event: InputEvent) -> void:
-	if not event.is_action_pressed("ui_cancel"):
-		return
+func _input(event: InputEvent) -> void:
 	if is_instance_valid(settings_popup):
-		settings_popup.hide()
-	else:
-		match current_screen:
-			"menu", "town": _show_pause()
-			"slots", "hall": show_menu()
-			"create": _show_title(true)
-			"shop", "arena", "scout", "result": show_town()
-			_: return
+		return
+	if current_screen == "result" and _plain_key_press(event):
+		if event.keycode == key_bindings.town and is_instance_valid(result_town_button):
+			get_viewport().set_input_as_handled()
+			result_town_button.pressed.emit()
+			return
+		if event.keycode == key_bindings.next and is_instance_valid(result_next_button):
+			get_viewport().set_input_as_handled()
+			result_next_button.pressed.emit()
+			return
+	if not event.is_action_pressed("ui_cancel", false, true):
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	if event is InputEventKey and event.keycode != KEY_ESCAPE and (focused is LineEdit or focused is TextEdit):
+		return
+	match current_screen:
+		"menu", "town": _show_pause()
+		"slots", "hall": show_menu()
+		"create": _show_title(true)
+		"shop", "arena", "scout", "result":
+			if not game.tournament_in_progress():
+				show_town()
+		_: return
 	get_viewport().set_input_as_handled()
+
+func _plain_key_press(event: InputEvent) -> bool:
+	return (event is InputEventKey and event.pressed and not event.echo and not event.ctrl_pressed
+		and not event.meta_pressed and not event.alt_pressed and not event.shift_pressed)
 
 func _make_theme() -> void:
 	serif = SystemFont.new()
@@ -293,6 +320,8 @@ func _remove_battle() -> void:
 		remove_child(battle_layer)
 		battle_layer.queue_free()
 		battle_layer = null
+	result_town_button = null
+	result_next_button = null
 
 func _page(key: String, heading: String) -> void:
 	_remove_battle()
@@ -313,7 +342,7 @@ func _page(key: String, heading: String) -> void:
 		_icon_button(nav, "settings", "Pause menu", _show_pause)
 	else:
 		_icon_button(nav, "settings", "Settings", _show_settings)
-	if key not in ["menu", "allocate"]:
+	if key not in ["menu", "allocate"] and not game.tournament_in_progress():
 		_icon_button(nav, "home", "Title screen", show_menu)
 	if not page_notice.is_empty():
 		_wrapped(shell, page_notice, 14, SAND)
@@ -330,6 +359,8 @@ func _show_settings() -> void:
 	_show_popup("Settings")
 
 func _show_popup(section: String, back: String = "") -> void:
+	binding_action = ""
+	binding_buttons.clear()
 	if is_instance_valid(settings_popup):
 		_clear(settings_popup)
 	else:
@@ -338,13 +369,12 @@ func _show_popup(section: String, back: String = "") -> void:
 		settings_popup.transient = true
 		settings_popup.exclusive = true
 		add_child(settings_popup)
-		settings_popup.window_input.connect(func(event: InputEvent) -> void:
-			if event.is_action_pressed("ui_cancel"):
-				settings_popup.set_input_as_handled()
-				settings_popup.hide())
+		settings_popup.window_input.connect(_popup_input)
 		settings_popup.popup_hide.connect(func() -> void:
 			settings_popup.queue_free()
 			settings_popup = null
+			binding_action = ""
+			binding_buttons.clear()
 			_offer_auto_sleep())
 	var menu := _card(settings_popup, 12)
 	var panel: Control = menu.get_parent()
@@ -359,6 +389,7 @@ func _show_popup(section: String, back: String = "") -> void:
 			_button(menu, "Quit", _quit_game)
 		"Settings":
 			_display_settings(menu)
+			_button(menu, "Controls", _show_popup.bind("Controls", section))
 			if back.is_empty():
 				_button(menu, "Audio", _show_popup.bind("Audio", section))
 			if current_screen in ["menu", "slots"]:
@@ -370,10 +401,74 @@ func _show_popup(section: String, back: String = "") -> void:
 					show_balance())
 		"Audio":
 			_audio_settings(menu)
+		"Controls":
+			_control_settings(menu)
 	if primary == null:
 		primary = _button(menu, "Done" if back.is_empty() else "Back", settings_popup.hide if back.is_empty() else _show_popup.bind(back), true)
 	settings_popup.popup_centered(Vector2i(360, ceili(panel.get_combined_minimum_size().y)))
 	primary.grab_focus()
+
+func _popup_input(event: InputEvent) -> void:
+	if not binding_action.is_empty() and event is InputEventKey and event.pressed:
+		settings_popup.set_input_as_handled()
+		if _plain_key_press(event) and event.keycode not in [KEY_NONE, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_META]:
+			var other = key_bindings.find_key(event.keycode)
+			if other != null:
+				key_bindings[other] = key_bindings[binding_action]
+			key_bindings[binding_action] = event.keycode
+			binding_action = ""
+			_apply_back_binding()
+			_refresh_control_settings()
+			binding_notice.visible = not _save_settings()
+		return
+	if event.is_action_pressed("ui_cancel", false, true):
+		settings_popup.set_input_as_handled()
+		settings_popup.hide()
+
+func _control_settings(menu: VBoxContainer) -> void:
+	for action in CONTROL_NAMES:
+		var row := _row(menu, 12)
+		_label(row, CONTROL_NAMES[action]).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_space(row)
+		var button := _button(row, "", func() -> void:
+			binding_action = "" if binding_action == action else action
+			_refresh_control_settings())
+		button.custom_minimum_size.x = 132
+		button.accessibility_name = "Rebind " + CONTROL_NAMES[action]
+		binding_buttons[action] = button
+	_button(menu, "Reset defaults", func() -> void:
+		key_bindings = DEFAULT_KEYS.duplicate()
+		binding_action = ""
+		_apply_back_binding()
+		_refresh_control_settings()
+		binding_notice.visible = not _save_settings())
+	binding_notice = _settings_notice(menu)
+	_refresh_control_settings()
+
+func _refresh_control_settings() -> void:
+	for action in binding_buttons:
+		binding_buttons[action].text = "Press a key…" if binding_action == action else OS.get_keycode_string(key_bindings[action])
+	if is_instance_valid(result_town_button):
+		result_town_button.tooltip_text = "Shortcut · " + OS.get_keycode_string(key_bindings.town)
+	if is_instance_valid(result_next_button):
+		result_next_button.tooltip_text = "Shortcut · " + OS.get_keycode_string(key_bindings.next)
+
+func _load_key_bindings(settings: ConfigFile) -> void:
+	var choices := {}
+	for action in DEFAULT_KEYS:
+		var code = settings.get_value("controls", action, DEFAULT_KEYS[action])
+		if not code is int or code == KEY_NONE or OS.get_keycode_string(code).is_empty() or code in choices.values():
+			return
+		choices[action] = code
+	key_bindings = choices
+
+func _apply_back_binding() -> void:
+	for input in InputMap.action_get_events("ui_cancel"):
+		if input is InputEventKey:
+			InputMap.action_erase_event("ui_cancel", input)
+	var key := InputEventKey.new()
+	key.keycode = key_bindings.back
+	InputMap.action_add_event("ui_cancel", key)
 
 func _settings_notice(menu: VBoxContainer) -> Label:
 	var notice := _wrapped(menu, "Settings could not be saved.", 15, RED)
@@ -506,6 +601,8 @@ func _save_settings() -> bool:
 	settings.set_value("audio", "town_music", town_music_enabled)
 	settings.set_value("audio", "venue_music", venue_music_enabled)
 	settings.set_value("display", "mode", display_mode)
+	for action in key_bindings:
+		settings.set_value("controls", action, key_bindings[action])
 	return settings.save(USER_SETTINGS) == OK
 
 func _show_progress(parent: Node) -> void:
@@ -654,6 +751,8 @@ func _resume(number: int) -> void:
 		_allocate_level()
 	elif game.has_active_bout():
 		_open_bout(game.state.snapshot, game.state.active_bout.practice)
+	elif game.tournament_in_progress():
+		_scout_bout(true)
 	else:
 		show_town()
 
@@ -817,6 +916,9 @@ func show_town() -> void:
 		return
 	if game.state.pending:
 		_allocate_level()
+		return
+	if game.tournament_in_progress():
+		show_arena()
 		return
 	_page("town", "Town square")
 	_show_progress(content)
@@ -1042,6 +1144,10 @@ func show_arena() -> void:
 	if game.state.pending:
 		_allocate_level()
 		return
+	if game.tournament_in_progress():
+		if not game.has_active_bout():
+			_scout_bout(true)
+		return
 	var arena: Dictionary = game.arena()
 	_page("arena", arena.name)
 	_show_progress(content)
@@ -1079,7 +1185,7 @@ func show_arena() -> void:
 	tournament_button.disabled = not game.can_scout(true)
 	var nav := _row(content)
 	_button(nav, "Town square", show_town)
-	_last_bout_button(nav, true)
+	_retry_button(nav, "Retry last bout")
 
 func _show_rival(stage: Control, fighter: Dictionary) -> void:
 	stage.right_loadout = fighter.loadout
@@ -1088,11 +1194,16 @@ func _show_rival(stage: Control, fighter: Dictionary) -> void:
 	stage.rival_look = fighter.get("look", Data.rival_look(str(fighter.name).hash()))
 
 func _scout_bout(tournament: bool) -> void:
+	if game.has_active_bout():
+		return
 	var offer: Dictionary = game.scout_bout(tournament, randi())
-	if offer.is_empty():
-		show_arena()
-	else:
+	if not offer.is_empty():
 		_show_faceoff(offer)
+	elif game.tournament_in_progress():
+		_page("tournament", "Tournament")
+		_button(content, "Next Match", _scout_bout.bind(true), true)
+	else:
+		show_arena()
 
 func _show_faceoff(offer: Dictionary) -> void:
 	var rival: Dictionary = offer.rival
@@ -1129,7 +1240,8 @@ func _show_faceoff(offer: Dictionary) -> void:
 	_compare_row(kit, "Spell casts", player.casts, rival.casts, "cast")
 	_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
 	var actions := _row(content, 10)
-	_button(actions, "Back", show_arena)
+	if not game.tournament_in_progress():
+		_button(actions, "Back", show_arena)
 	_space(actions)
 	var loss_fee := mini(int(game.state.gold), int(data.rules.loss_gold))
 	if not offer.tournament and loss_fee > 0:
@@ -1167,11 +1279,11 @@ func _new_bout(tournament: bool) -> void:
 	elif not game.scouted_bout(tournament).is_empty():
 		_show_faceoff(game.scouted_bout(tournament))
 
-func _retry(practice: bool) -> void:
+func _retry() -> void:
 	if game.state.pending:
 		_allocate_level()
-	elif game.retry_bout(practice):
-		_open_bout(game.state.snapshot, practice)
+	elif game.retry_bout(false):
+		_open_bout(game.state.snapshot, false)
 
 func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	if game.state.pending:
@@ -1318,9 +1430,13 @@ func _finish_bout() -> void:
 	elif game.state.pending:
 		_button(controls, "Spend level-up points", _allocate_level, true)
 	else:
-		_button(controls, "Return to town", show_town, true)
-		_last_bout_button(controls, false)
-		_button(controls, "Arena", show_arena)
+		var tournament_locked: bool = game.tournament_in_progress()
+		if not tournament_locked:
+			result_town_button = _button(controls, "Return to town", show_town)
+			_retry_button(controls, "Retry bout")
+		result_next_button = _button(controls, "Next Match" if tournament_locked else "Next Bout",
+			_scout_bout.bind(tournament_locked), true)
+		_refresh_control_settings()
 	var height := panel.get_combined_minimum_size().y
 	panel.offset_top = 8
 	panel.offset_bottom = height + 8
@@ -1367,13 +1483,9 @@ func _show_bout_rewards(parent: HBoxContainer, outcome: Dictionary, motion: Twee
 		motion.tween_method(func(value: float) -> void: gold_total.text = str(roundi(value)),
 			float(gold - gained_gold), float(gold), .72).set_delay(.33)
 
-func _last_bout_button(parent: Control, in_arena: bool) -> void:
-	if game.state.outcome.is_empty():
-		return
-	if game.state.outcome.winner == 0:
-		_button(parent, "Practice last bout", _retry.bind(true))
-	elif not game.state.snapshot.tournament and game.scouted_bout().is_empty():
-		_button(parent, "Retry last bout" if in_arena else "Retry bout", _retry.bind(false))
+func _retry_button(parent: Control, caption: String) -> void:
+	if game.state.outcome.get("winner", 0) != 0 and not game.state.snapshot.tournament and game.scouted_bout().is_empty():
+		_button(parent, caption, _retry)
 
 func _number(parent: Node, caption: String, minimum: int, maximum: int, initial: int) -> SpinBox:
 	_label(parent, caption, 13, MUTED)
