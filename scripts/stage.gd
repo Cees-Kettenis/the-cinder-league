@@ -27,17 +27,19 @@ const RIVAL_CHESTS := [
 ]
 const RIVAL_PALETTES := [Color.WHITE, Color("#aabdf0"), Color("#d9a4a1"), Color("#b6e0cb"), Color("#e6c38a")]
 const WEAPON_SPRITES := {
-	"dagger": [0, Vector2(171, 350), .37],
-	"sword": [1, Vector2(137, 372), .51],
-	"mace": [2, Vector2(164, 361), .53],
-	"smith_sword": [3, Vector2(126, 378), .58],
-	"court_mace": [4, Vector2(169, 341), .62],
-	"warden_sword": [5, Vector2(123, 380), .70],
+	"dagger": [0, Vector2(171, 350), .37, Vector2(441, 73)],
+	"sword": [1, Vector2(137, 372), .51, Vector2(463, 35)],
+	"mace": [2, Vector2(164, 361), .53, Vector2(447, 39)],
+	"smith_sword": [3, Vector2(126, 378), .58, Vector2(466, 36)],
+	"court_mace": [4, Vector2(169, 341), .62, Vector2(449, 37)],
+	"warden_sword": [5, Vector2(123, 380), .70, Vector2(487, 23)],
 }
 const SPELL_CONTACT := .60
 const SPELL_COLORS := [Color("#ffc378"), Color("#cf9eff"), Color("#ffb66e"), Color("#7cdfff")]
 const STRIKE_COLORS := {"quick": Color("#7ee8ff"), "attack": Color("#ffca6e"),
 	"power": Color("#ff9156"), "lunge": Color("#a5eaff")}
+const STRIKE_RELEASE := {"quick": .57, "attack": .73, "power": .83, "lunge": .76}
+const SWING_TRACE_TIME := .10
 const SPACE_PER_FIGHTER_HEIGHT := .37
 const ARENA_MARGIN := 2.1
 const KIT_SIZE := Vector2(768, 1024)
@@ -46,6 +48,7 @@ const SHIELD_CENTER := SHIELD_ORIGIN + Vector2(.199, .507) * KIT_SIZE
 
 class FighterPoints:
 	var hand := Vector2.ZERO
+	var weapon_tip := Vector2.ZERO
 	var chest := Vector2.ZERO
 	var shield := Vector2.ZERO
 	var has_shield := false
@@ -115,6 +118,7 @@ var contact_hold_elapsed := 0.0
 var impact_anchor_set := false
 var impact_anchor := Vector2.ZERO
 var wound_anchor := Vector2.ZERO
+var swing_trace: Array[Vector3] = []
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -139,7 +143,7 @@ func _process(delta: float) -> void:
 				impact_played = true
 				if _landed_strike():
 					elapsed = impact_time
-					contact_hold_left = .075 if event.blocked or event.critical or event.action == "power" else .045
+					contact_hold_left = .095 if event.action == "power" and not event.blocked else (.065 if event.blocked or event.critical else .040)
 				impact_reached.emit()
 			if elapsed >= action_time:
 				turn_animation_finished.emit()
@@ -154,6 +158,7 @@ func animate(change: Dictionary) -> void:
 	contact_hold_left = 0.0
 	contact_hold_elapsed = 0.0
 	impact_anchor_set = false
+	swing_trace.clear()
 	match event.action:
 		"attack":
 			impact_time = .35
@@ -248,7 +253,7 @@ func _item(id: String) -> Dictionary:
 	return catalog.get(id, {})
 
 func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0,
-		pose: Rig.Pose = null, look: Dictionary = {}, root_tilt: float = 0.0, trail: float = 0.0) -> FighterPoints:
+		pose: Rig.Pose = null, look: Dictionary = {}, root_tilt: float = 0.0, firm_weapon_arm: bool = false) -> FighterPoints:
 	if height <= 0:
 		return null
 	var scale_value := height / 1024.0
@@ -256,13 +261,14 @@ func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, 
 	var body := Transform2D(-root_tilt if facing_left else root_tilt, feet).scaled_local(Vector2(-width if facing_left else width, scale_value))
 	var bones := Rig.transforms(Rig.Pose.new() if pose == null else pose)
 	var hand := body * bones[Rig.WEAPON_WRIST]
-	_draw_weapon(gear, hand, Rig.local(Rig.GRIP), trail)
+	var tip := _draw_weapon(gear, hand.translated_local(Rig.local(Rig.GRIP)))
 	draw_set_transform_matrix(body)
-	Rig.draw_skin(self, bones, skin_index, hair_index)
+	Rig.draw_skin(self, bones, skin_index, hair_index, firm_weapon_arm)
 	_draw_armor(gear.get("armor", {}), look, body, bones)
 	draw_set_transform(Vector2.ZERO)
 	var points := FighterPoints.new()
 	points.hand = hand * Rig.local(Rig.GRIP)
+	points.weapon_tip = tip
 	points.chest = body * bones[Rig.SPINE] * Rig.local(Vector2(577, 606))
 	points.shield = body * bones[Rig.OFF_WRIST] * SHIELD_CENTER
 	points.has_shield = not str(gear.get("armor", {}).get("shield", "")).is_empty()
@@ -313,25 +319,18 @@ func _draw_mail_piece(slot: String, bones: Array[Transform2D]) -> void:
 			_mesh(MAIL, MAIL_BOOTS[0], Vector2.ONE, Vector2(-307, -699), Vector2(.92, .70), bones, 0)
 			_mesh(MAIL, MAIL_BOOTS[1], Vector2.ONE, Vector2(-280, -686), Vector2(.90, .70), bones, 1)
 
-func _draw_weapon(gear: Dictionary, hand: Transform2D, grip: Vector2, trail: float) -> void:
+func _draw_weapon(gear: Dictionary, hand: Transform2D) -> Vector2:
 	var weapon := _item(gear.get("weapon", ""))
 	if weapon.is_empty():
-		return
+		return hand.origin
 	var sprite: Array = WEAPON_SPRITES.get(weapon.id, WEAPON_SPRITES.mace if int(weapon.art) == 1 else WEAPON_SPRITES.sword)
 	var source := _cell(WEAPONS, 3, 2, int(sprite[0]))
 	var scale_value: float = sprite[2]
-	draw_set_transform_matrix(hand.translated_local(grip))
-	if trail > 0.0:
-		var tip: Vector2 = (Vector2(source.size.x - 43, 38) - sprite[1]) * scale_value
-		var tint: Color = STRIKE_COLORS.get(event.action, STRIKE_COLORS.attack)
-		var mace := int(weapon.art) == 1
-		if event.action in ["lunge", "quick"] and not mace:
-			_draw_thrust_trail(tip, tint, trail)
-		else:
-			_draw_weapon_trail(tip, tint, trail, mace)
+	draw_set_transform_matrix(hand)
 	draw_texture_rect_region(WEAPONS, Rect2(-sprite[1] * scale_value, source.size * scale_value), source)
 	if not str(gear.get("enchant", "")).is_empty():
 		_weapon_glow(Vector2(.54, -.57) * source.size * scale_value, 46.0, .6 + sin(elapsed * 4.0) * .12)
+	return hand * ((sprite[3] - sprite[1]) * scale_value)
 
 static func weapon_icon(item: Dictionary) -> AtlasTexture:
 	var sprite: Array = WEAPON_SPRITES.get(item.id, WEAPON_SPRITES.mace if int(item.art) == 1 else WEAPON_SPRITES.sword)
@@ -403,7 +402,11 @@ func _draw_battle() -> void:
 	if animating and previous_positions.size() == 2:
 		pushed = action == "power" and positions[1 - side] != previous_positions[1 - side]
 		for index in 2:
-			var travel := smoothstep(.01, .65, recovery) if pushed and index != side else shift
+			var travel := shift
+			if pushed and index != side:
+				var push_time := .32 if event.get("ring_out", false) else .20
+				var push_progress := clampf((elapsed - impact_time) / push_time, 0.0, 1.0)
+				travel = 1.0 - pow(1.0 - push_progress, 3.0)
 			visible_positions[index] = lerpf(float(previous_positions[index]), visible_positions[index], travel)
 	var view := _battle_view(visible_positions)
 	var height := _fighter_height(view)
@@ -420,6 +423,11 @@ func _draw_battle() -> void:
 		var center := (size.x * .5 - view.origin.x) / view.x.x
 		pan = clampf(center / arena_width, 0.0, 1.0)
 	_draw_arena_backdrop(pan)
+	if animating and action == "power":
+		# A brief shade over the arena holds the eye on the raised weapon and leaves the HUD alone.
+		var strike_age := elapsed - impact_time + contact_hold_elapsed
+		var focus := smoothstep(.36, .73, approach) * (1.0 - smoothstep(.06, .25, strike_age))
+		draw_rect(Rect2(Vector2.ZERO, size), Color("#24182f", .38 * focus))
 	if full_arena and has_pits:
 		_draw_pit(view * Vector2(-1, 0), height)
 		_draw_pit(view * Vector2(arena_width + 1, 0), height)
@@ -463,6 +471,8 @@ func _draw_battle() -> void:
 	for index in draw_order:
 		var loadout := left_loadout if index == 0 else right_loadout
 		points[index] = _draw_fighter(feet[index], height, loadout, index, gap, approach, recovery, phase, stagger)
+	if animating and action in Duel.WEAPON_ACTIONS and approach >= float(STRIKE_RELEASE[action]) - .035:
+		_draw_swing_trace(points[side], view, height, action)
 	if action == "cast" and animating:
 		var kit := left_loadout if side == 0 else right_loadout
 		var attack_art := int(_item(kit.get("spell", "")).get("art", 0))
@@ -486,20 +496,21 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 	var direction := -1.0 if facing_left else 1.0
 	var pose := Rig.Pose.new()
 	var root_tilt := 0.0
-	var trail := 0.0
 	var pulse := sin(phase * PI)
 	var shielded := not str(loadout.get("armor", {}).get("shield", "")).is_empty()
+	var striking := actor == index and phase < 1.0 and action in Duel.WEAPON_ACTIONS
 	if full_arena:
 		var breath := sin(idle_time * 2.8 + index * 2.2)
 		pose.spine = .017 * breath
 		pose.head = -.018 * breath
-		pose.weapon_arm.y = .025 * breath
+		if not striking:
+			pose.weapon_arm.y = .025 * breath
 		pose.off_arm.x = -.024 * breath
 	if actor == index and phase < 1:
 		match action:
 			"lunge":
 				var coil := smoothstep(.0, .22, approach) * (1.0 - smoothstep(.37, .66, approach))
-				var release := smoothstep(.76, 1.0, approach)
+				var release := smoothstep(STRIKE_RELEASE.lunge, 1.0, approach)
 				var plant := smoothstep(.45, .93, approach) * (1.0 - smoothstep(.22, .92, recovery))
 				var stride := sin(TAU * clampf((approach - .22) / .66, 0.0, 1.0)) * (1.0 - plant)
 				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
@@ -512,17 +523,17 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				pose.rear_leg += Vector3(.39, -.23, -.16) * stride
 				pose.lead_leg = Vector3(-.37, .36, -.03) * plant + Vector3(-.23, .32, -.09) * coil
 				pose.lead_leg += Vector3(-.38, .27, .11) * stride
-				var ready_arm := Vector3(-1.02, -.58, .76) if mace else Vector3(.43, -.86, .35)
-				var hit_arm := Vector3(-.84, .44, 1.31) if mace else Vector3(-.83, .44, .94)
-				var follow_arm := Vector3(-.38, .19, 1.46) if mace else Vector3(-.64, .40, .68)
-				pose.weapon_arm += _swing_arm(ready_arm, hit_arm, follow_arm, smoothstep(.03, .32, approach), release, recovery)
+				var ready_arm := Vector3(783, 369, -.81) if mace else Vector3(767, 568, .27)
+				var hit_arm := Vector3(885, 575, 1.02) if mace else Vector3(907, 570, .72)
+				var follow_arm := Vector3(830, 671, 1.40) if mace else Vector3(868, 606, .63)
+				var swing_arc := Vector3(49, -55, 0) if mace else Vector3.ZERO
+				pose.weapon_arm = _swing_arm(ready_arm, hit_arm, follow_arm, swing_arc,
+					smoothstep(.03, .32, approach), release, recovery)
 				pose.off_arm += Vector3(-.20, -.32, .16) * coil + Vector3(.33, -.26, .19) * plant
-				trail = smoothstep(.12, .74, release) * (1.0 - smoothstep(.03, .27, recovery))
 			"attack", "quick", "power":
 				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
 				var motion := _close_strike(pose, action, approach, recovery, gap / height, mace)
 				feet += Vector2(motion.x * direction, motion.y) * height
-				trail = motion.z
 			"advance", "retreat":
 				var forward := action == "advance"
 				var stride := float(1 if forward else -1)
@@ -624,53 +635,62 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			pose.head -= .10 * dodge
 			pose.rear_leg += Vector3(.19, -.39, .12) * dodge
 			pose.lead_leg += Vector3(-.20, .42, -.18) * dodge
-	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {}, root_tilt, trail)
+	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {},
+		root_tilt, striking)
 
-func _close_strike(pose: Rig.Pose, action: String, approach: float, recovery: float, gap: float, mace: bool) -> Vector3:
-	var ready_arm := Vector3(.32, -1.17, -.89)
-	var hit_arm := Vector3(-.71, .52, 1.11)
-	var follow_arm := Vector3(-.38, .32, 1.59)
+func _close_strike(pose: Rig.Pose, action: String, approach: float, recovery: float, gap: float, mace: bool) -> Vector2:
+	var ready_arm := Vector3(752, 516, -1.31)
+	var hit_arm := Vector3(891, 568, .94)
+	var follow_arm := Vector3(825, 672, 1.48)
+	var swing_arc := Vector3(63, -61, 0)
 	var guard_windup := Vector3(-.15, -.43, .26)
 	var weight := 1.0
-	var release_start := .73
+	var release_start: float = STRIKE_RELEASE[action]
 	match action:
 		"quick":
 			weight = .53
-			release_start = .57
-			ready_arm = Vector3(.37, -.77, .17)
-			hit_arm = Vector3(-.65, .34, 1.17) if mace else Vector3(-.72, .40, .99)
-			follow_arm = Vector3(-.40, .20, .94) if mace else Vector3(-.45, .31, .65)
+			ready_arm = Vector3(773, 562, -.39) if mace else Vector3(774, 588, .20)
+			hit_arm = Vector3(876, 579, .98) if mace else Vector3(906, 581, .75)
+			follow_arm = Vector3(837, 640, .89) if mace else Vector3(865, 615, .51)
+			swing_arc = Vector3(39, -33, 0) if mace else Vector3.ZERO
 		"power":
-			weight = 1.56
-			release_start = .83
-			ready_arm = Vector3(-1.80, -.50, 1.38)
-			hit_arm = Vector3(-.77, .69, 1.02)
-			follow_arm = Vector3(-.48, .59, 1.60)
+			weight = 1.42
+			ready_arm = Vector3(808, 281, -.83)
+			hit_arm = Vector3(886, 584, 1.04)
+			follow_arm = Vector3(827, 700, 1.59)
+			swing_arc = Vector3(105, -37, 0)
 			guard_windup = Vector3(.39, -.59, .18)
 	# Finish the windup early so the raised weapon has a readable pose before it snaps forward.
 	var windup := smoothstep(.01, release_start - .15, approach)
 	var release := smoothstep(release_start, 1.0, approach)
-	var backswing := windup * (1.0 - release)
-	var drive := release * (1.0 - smoothstep(.24, .94, recovery))
+	# The planted body starts the turn, then the forearm and weapon come through.
+	var turn := smoothstep(release_start - .13, release_start + .09, approach)
+	var backswing := windup * (1.0 - turn)
+	var drive := turn * (1.0 - smoothstep(.16, .85, recovery))
 	var reach := clampf(gap - SPACE_PER_FIGHTER_HEIGHT, 0.0, .32)
 	var stride := reach * drive * (.75 if event.miss else 1.0)
 	var shift := stride + (.045 * drive - .065 * backswing) * weight
-	var sink := (.050 * backswing + .050 * drive) * weight
-	pose.spine += (.10 * drive - .125 * backswing) * weight
+	var sink := (.048 * backswing + .034 * drive) * weight
+	pose.spine += (.10 * drive - .10 * backswing) * weight
 	pose.neck += (.07 * backswing - .06 * drive) * weight
 	pose.head += (.15 * backswing - .11 * drive) * weight
-	pose.weapon_arm += _swing_arm(ready_arm, hit_arm, follow_arm, windup, release, recovery)
+	pose.weapon_arm = _swing_arm(ready_arm, hit_arm, follow_arm, swing_arc, windup, release, recovery)
 	pose.off_arm += guard_windup * backswing + Vector3(.39, -.35, .26) * drive
 	# Hold the boots on the floor as the torso loads backwards and drives forward.
 	pose.rear_leg = Rig.walk_leg(0, Vector2(-shift, -sink) * 1536.0, 0.0)
 	pose.lead_leg = Rig.walk_leg(1, Vector2(stride - shift, -sink) * 1536.0, 0.0)
-	var trail := smoothstep(.12, .82, release) * (1.0 - smoothstep(.03, .28, recovery))
-	return Vector3(shift, sink, trail)
+	return Vector2(shift, sink)
 
-func _swing_arm(ready_arm: Vector3, hit_arm: Vector3, follow_arm: Vector3, windup: float, release: float, recovery: float) -> Vector3:
-	var arm := (ready_arm * windup).lerp(hit_arm, release)
-	arm = arm.lerp(follow_arm, smoothstep(.03, .35, recovery))
-	return arm * (1.0 - smoothstep(.38, .97, recovery))
+func _swing_arm(ready_arm: Vector3, hit_arm: Vector3, follow_arm: Vector3, swing_arc: Vector3,
+		windup: float, release: float, recovery: float) -> Vector3:
+	var wrist: Vector2 = Rig.PIVOTS[Rig.WEAPON_WRIST]
+	var rest := Vector3(wrist.x, wrist.y, 0.0)
+	var launch := rest.lerp(ready_arm, windup)
+	var curve := (launch + hit_arm) * .5 + swing_arc
+	var hand_pose := launch.lerp(curve, release).lerp(curve.lerp(hit_arm, release), release)
+	hand_pose = hand_pose.lerp(follow_arm, smoothstep(.03, .35, recovery))
+	hand_pose = hand_pose.lerp(rest, smoothstep(.38, .97, recovery))
+	return Rig.aim_weapon_arm(Vector2(hand_pose.x, hand_pose.y), hand_pose.z)
 
 func _brace(pose: Rig.Pose, amount: float, shielded: bool) -> void:
 	pose.spine += .10 * amount
@@ -715,19 +735,10 @@ func _draw_pit(at: Vector2, height: float) -> void:
 
 func _draw_lunge_lines(feet: Vector2, height: float, direction: float, approach: float) -> void:
 	var strength := smoothstep(.22, .49, approach) * (1.0 - smoothstep(.70, .97, approach))
-	for index in 5:
-		var tip := feet + Vector2(-direction * height * (.12 + (index % 3) * .075), -height * (.16 + index * .13))
-		var trail := Vector2(direction * height * (.28 + (index % 3) * .095) * strength, 0)
-		_draw_streak(tip, trail, height * .022 * strength, STRIKE_COLORS.lunge, strength * .86)
-
-func _draw_thrust_trail(tip: Vector2, tint: Color, pulse: float) -> void:
-	var along := tip.normalized()
-	var across := along.orthogonal()
 	for index in 3:
-		var offset := across * (float(index) - 1.0) * 43.0
-		var end := tip * (1.25 + .10 * (1 - index)) + offset
-		var travel := along * tip.length() * (.85 + .18 * index) * pulse
-		_draw_streak(end, travel, (17.0 - 3.0 * index) * pulse, tint, pulse * .94)
+		var tip := feet + Vector2(-direction * height * (.13 + index * .078), -height * (.14 + index * .14))
+		var trail := Vector2(direction * height * (.27 + index * .085) * strength, 0)
+		_draw_streak(tip, trail, height * .014 * strength, STRIKE_COLORS.lunge, strength * .68)
 
 func _draw_streak(tip: Vector2, travel: Vector2, width: float, tint: Color, opacity: float) -> void:
 	if opacity < .03:
@@ -737,27 +748,37 @@ func _draw_streak(tip: Vector2, travel: Vector2, width: float, tint: Color, opac
 	draw_polygon(streak, PackedColorArray([Color(tint, opacity), Color(tint, opacity), Color(tint, 0.0), Color(tint, opacity)]))
 	draw_line(tip - travel * .62, tip - travel * .08, Color(tint.lightened(.65), opacity), width * .62, true)
 
-func _draw_weapon_trail(tip: Vector2, tint: Color, pulse: float, mace: bool) -> void:
-	if pulse < .035:
+func _draw_swing_trace(fighter: FighterPoints, view: Transform2D, height: float, action: String) -> void:
+	if fighter == null or fighter.weapon_tip.is_equal_approx(fighter.hand):
 		return
-	var vertices := PackedVector2Array()
-	var colors := PackedColorArray()
-	var outer_edge := PackedVector2Array()
-	var spread := (2.43 if event.action == "power" else (1.53 if mace else 1.86)) * sqrt(pulse)
-	for edge in 2:
-		for index in 18:
-			var progress := float(index if edge == 0 else 17 - index) / 17.0
-			var width := sin(progress * PI) * (.30 if mace else .24)
-			var radius := 1.08 + width if edge == 0 else .98 - width * .67
-			var point := tip.rotated(-spread * progress) * radius
-			vertices.append(point)
-			var shade := tint.lightened(.55) if edge == 0 else tint.darkened(.19)
-			colors.append(Color(shade, pulse * (1.0 - progress * .98)))
-			if edge == 0 and progress <= .72:
-				outer_edge.append(point)
-	draw_polygon(vertices, colors)
-	draw_polyline(outer_edge, Color("#4b2425", pulse * .70), 12.0, true)
-	draw_polyline(outer_edge, Color(tint.lightened(.65), pulse * .95), 5.0, true)
+	var clock := elapsed + contact_hold_elapsed
+	# Keep the mark in arena coordinates so it doesn't move with the weapon or the camera.
+	var units := Vector2(1.0, height)
+	var tip := fighter.hand.lerp(fighter.weapon_tip, 1.12)
+	var anchor := (view.affine_inverse() * tip) / units
+	if elapsed < impact_time + .078 and (swing_trace.is_empty()
+			or anchor.distance_squared_to(Vector2(swing_trace.back().x, swing_trace.back().y)) > .0001):
+		swing_trace.append(Vector3(anchor.x, anchor.y, clock))
+	while swing_trace.size() > 1 and clock - swing_trace[0].z > SWING_TRACE_TIME:
+		swing_trace.pop_front()
+	var tint: Color = STRIKE_COLORS[action]
+	var thickness := height * (.059 if action == "power" else .031)
+	for index in range(1, swing_trace.size()):
+		var past := swing_trace[index - 1]
+		var sample := swing_trace[index]
+		var start := view * (Vector2(past.x, past.y) * units)
+		var end := view * (Vector2(sample.x, sample.y) * units)
+		var travel := end - start
+		if travel.length_squared() < 4.0:
+			continue
+		var tail := clampf(1.0 - (clock - past.z) / SWING_TRACE_TIME, 0.0, 1.0)
+		var head := clampf(1.0 - (clock - sample.z) / SWING_TRACE_TIME, 0.0, 1.0)
+		var normal := travel.normalized().orthogonal() * thickness
+		var corners := PackedVector2Array([start - normal * tail * .5, end - normal * head * .5,
+			end + normal * head * .5, start + normal * tail * .5])
+		var colors := PackedColorArray([Color(tint, tail * .82), Color(tint.lightened(.48), head),
+			Color(tint, head * .84), Color(tint, tail * .64)])
+		draw_primitive(corners, colors, PackedVector2Array())
 
 func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, side: int, recovery: float,
 		contact_offset: float, view: Transform2D) -> void:
@@ -787,19 +808,19 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 			var kit := left_loadout if side == 0 else right_loadout
 			var art := clampi(int(_item(kit.get("spell", "")).get("art", 0)), 0, SPELL_COLORS.size() - 1)
 			tint = SPELL_COLORS[art]
-		if metal or spell or event.critical:
+		if spell or (not weapon and metal):
 			_draw_sparks(contact, height * (.48 if event.critical else .36), tint, particle_phase)
 		if weapon:
-			var radius := .22
+			var radius := .16
 			match event.action:
-				"quick": radius = .16
-				"power": radius = .30
-				"lunge": radius = .24
+				"quick": radius = .12
+				"power": radius = .26
+				"lunge": radius = .18
 			if event.critical:
 				radius *= 1.12
 			var burst_tint: Color = Color("#a5e4ff") if event.blocked else STRIKE_COLORS.get(event.action, STRIKE_COLORS.attack)
 			var heavy: bool = event.action == "power" or event.critical or event.blocked
-			_draw_impact_burst(contact, height * radius, burst_tint, particle_phase, heavy)
+			_draw_impact_burst(contact, height * radius, burst_tint, particle_phase, direction, heavy)
 		if event.armor_hit > 0:
 			var armor_after: Array = event.get("armor", [])
 			var broken: bool = armor_after.size() == 2 and armor_after[1 - side] == 0
@@ -810,7 +831,7 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 		symbol = "miss"
 	elif event.blocked or event.armor_hit > 0 and event.damage == 0:
 		symbol = "armor"
-	elif event.damage > 0:
+	elif event.damage > 0 and (not weapon or event.critical):
 		symbol = "critical" if event.critical else "attack"
 	elif event.action in ["potion", "sleep", "guard"]:
 		symbol = event.action
@@ -818,6 +839,8 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 	elif event.action == "taunt":
 		symbol = "taunt"
 	if symbol.is_empty() or (_knockout() and recovery > .55):
+		return
+	if weapon and not event.miss and elapsed - impact_time + contact_hold_elapsed < .12:
 		return
 	var extent := lerpf(42.0, 28.0, recovery)
 	var center := Vector2(at.x, maxf(36.0, at.y - height * .94 - recovery * 30.0))
@@ -833,30 +856,23 @@ func _draw_fall_ground(feet: Vector2, height: float, direction: float, recovery:
 		draw_circle(Vector2.ZERO, spread, Color("#92283c"), true, -1, true)
 		draw_set_transform(Vector2.ZERO)
 
-func _draw_impact_burst(at: Vector2, radius: float, tint: Color, recovery: float, heavy: bool) -> void:
-	var fade := 1.0 - smoothstep(.09, .43, recovery)
-	if fade <= 0.0:
-		return
+func _draw_impact_burst(at: Vector2, radius: float, tint: Color, recovery: float, direction: float, heavy: bool) -> void:
+	var fade := 1.0 - smoothstep(.035, .20, recovery)
+	if fade > .0:
+		var slash := Vector2(direction * .68, .73) * radius
+		var arm := slash.orthogonal() * .48
+		var flash := PackedVector2Array([at - slash, at - slash * .19 - arm * .19, at - arm, at + slash * .08 - arm * .25,
+			at + slash, at + slash * .13 + arm * .19, at + arm, at - slash * .17 + arm * .22])
+		draw_colored_polygon(flash, Color(tint.lightened(.75), fade))
+		flash.append(flash[0])
+		draw_polyline(flash, Color(tint.darkened(.22), fade), 2.5 if heavy else 1.6, true)
 	if heavy:
-		var ring_radius := radius * lerpf(.69, 1.52, smoothstep(.0, .43, recovery))
-		var ring_fade := fade * smoothstep(.0, .10, recovery)
-		if ring_fade > .01:
-			for section in 3:
-				var angle := .27 + section * TAU / 3.0
-				draw_arc(at, ring_radius, angle, angle + 1.49, 20, Color("#512928", ring_fade * .86), 5.0, true)
-				draw_arc(at, ring_radius, angle, angle + 1.49, 20, Color(tint.lightened(.41), ring_fade), 2.3, true)
-	var burst_radius := radius * lerpf(.65, 1.0, smoothstep(.0, .16, recovery))
-	var outline := PackedVector2Array()
-	var core := PackedVector2Array()
-	for index in 12:
-		var ray := Vector2.from_angle(index * TAU / 12.0 + .24)
-		var spike := ray * burst_radius * (1.0 if index % 2 == 0 else .37)
-		outline.append(at + spike)
-		core.append(at + spike * .62)
-	draw_colored_polygon(outline, Color(tint, fade))
-	draw_colored_polygon(core, Color(tint.lightened(.74), fade))
-	outline.append(outline[0])
-	draw_polyline(outline, Color("#492128", fade), 3.8 if heavy else 2.6, true)
+		var spread := smoothstep(.03, .42, recovery)
+		var spark_fade := smoothstep(.03, .10, recovery) * (1.0 - smoothstep(.18, .42, recovery))
+		for index in 3:
+			var ray := Vector2(direction, -.66 + index * .44).normalized()
+			var tip := at + ray * radius * lerpf(.44, 1.5, spread)
+			_draw_streak(tip, ray * radius * (.55 - .16 * spread), radius * .044, tint, spark_fade)
 
 func _draw_armor_chips(at: Vector2, height: float, direction: float, recovery: float, broken: bool) -> void:
 	var flight := clampf(recovery / .82, 0, 1)

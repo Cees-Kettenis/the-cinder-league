@@ -296,6 +296,14 @@ func _check_fighter_rig() -> void:
 		"The weapon wrist should turn the grip without moving either elbow or the off hand")
 	_check(posed[Rig.HEAD] != rest[Rig.HEAD] and posed[Rig.SPINE] == rest[Rig.SPINE],
 		"The head should move independently of the spine")
+	var strike_wrist := Vector2(882, 564)
+	pose.spine = .14
+	pose.weapon_arm = Rig.aim_weapon_arm(strike_wrist, .92)
+	posed = Rig.transforms(pose)
+	_check((posed[Rig.WEAPON_WRIST] * Rig.local(Rig.PIVOTS[Rig.WEAPON_WRIST])).is_equal_approx(
+		posed[Rig.SPINE] * Rig.local(strike_wrist)) and is_equal_approx(posed[Rig.WEAPON_WRIST].get_rotation(), 1.06),
+		"A strike should reach its authored wrist pose as the torso turns")
+	pose.spine = 0.0
 	var lift := Vector2(42, -92)
 	pose.rear_leg = Rig.walk_leg(0, lift, .16)
 	pose.lead_leg = Rig.walk_leg(1, -lift * Vector2(.5, -.8), -.12)

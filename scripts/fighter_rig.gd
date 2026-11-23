@@ -68,28 +68,49 @@ static func transforms(pose: Pose) -> Array[Transform2D]:
 static func walk_leg(side: int, offset: Vector2, foot_angle: float) -> Vector3:
 	var thigh: Vector2 = KNEES[side] - HIPS[side]
 	var calf: Vector2 = ANKLES[side] - KNEES[side]
-	var length_a := thigh.length()
-	var length_b := calf.length()
 	var target: Vector2 = ANKLES[side] - HIPS[side] + offset
-	var longest := length_a + length_b - 1.0
+	var longest := thigh.length() + calf.length() - 1.0
 	# Shorten an overlong stride horizontally so the planted foot stays at floor level.
 	var horizontal_room := sqrt(maxf(0.0, longest * longest - target.y * target.y))
 	target.x = clampf(target.x, -horizontal_room, horizontal_room)
-	var reach := clampf(target.length(), absf(length_a - length_b) + 1.0, longest)
-	var bend := signf(thigh.angle_to(calf))
-	var hip := target.angle() - bend * acos(clampf(
-		(length_a * length_a + reach * reach - length_b * length_b) / (2.0 * length_a * reach), -1.0, 1.0)) - thigh.angle()
-	var knee := bend * acos(clampf(
-		(reach * reach - length_a * length_a - length_b * length_b) / (2.0 * length_a * length_b), -1.0, 1.0)) - thigh.angle_to(calf)
-	return Vector3(hip, knee, foot_angle - hip - knee)
+	return _solve_chain(thigh, calf, target, foot_angle)
 
-static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, hair: int) -> void:
+static func aim_weapon_arm(wrist: Vector2, weapon_angle: float) -> Vector3:
+	var shoulder: Vector2 = PIVOTS[WEAPON_SHOULDER]
+	var elbow: Vector2 = PIVOTS[WEAPON_ELBOW]
+	return _solve_chain(elbow - shoulder, PIVOTS[WEAPON_WRIST] - elbow, wrist - shoulder, weapon_angle)
+
+static func _solve_chain(upper: Vector2, lower: Vector2, target: Vector2, end_angle: float) -> Vector3:
+	var length_a := upper.length()
+	var length_b := lower.length()
+	var reach := clampf(target.length(), absf(length_a - length_b) + 1.0, length_a + length_b - 1.0)
+	var bend := signf(upper.angle_to(lower))
+	var first := target.angle() - bend * acos(clampf(
+		(length_a * length_a + reach * reach - length_b * length_b) / (2.0 * length_a * reach), -1.0, 1.0)) - upper.angle()
+	var second := bend * acos(clampf(
+		(reach * reach - length_a * length_a - length_b * length_b) / (2.0 * length_a * length_b), -1.0, 1.0)) - upper.angle_to(lower)
+	return Vector3(first, second, end_angle - first - second)
+
+static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, hair: int, firm_weapon_arm: bool = false) -> void:
 	if _points.is_empty():
 		_build_mesh()
 	var vertices := PackedVector2Array()
 	vertices.resize(_points.size())
+	var weapon_turns := PackedFloat32Array()
+	if firm_weapon_arm:
+		for bone in [WEAPON_SHOULDER, WEAPON_ELBOW, WEAPON_WRIST]:
+			weapon_turns.append(angle_difference(bones[PARENTS[bone]].get_rotation(), bones[bone].get_rotation()))
 	for index in _points.size():
-		vertices[index] = _deform(_points[index], _bindings[index], bones)
+		var point := _points[index]
+		var binding := _bindings[index]
+		var joint := int(binding.y)
+		if firm_weapon_arm and binding.z > 0.0 and binding.z < 1.0 and joint >= WEAPON_SHOULDER and joint <= WEAPON_WRIST:
+			# Rotate blended vertices around the hinge so the bend doesn't pinch the painted arm.
+			var pivot := local(PIVOTS[joint])
+			point = pivot + (point - pivot).rotated(weapon_turns[joint - WEAPON_SHOULDER] * binding.z)
+			vertices[index] = bones[int(binding.x)] * point
+		else:
+			vertices[index] = _deform(point, binding, bones)
 	RenderingServer.canvas_item_add_triangle_array(canvas.get_canvas_item(), _indices, vertices, _colors(skin, hair), _uv,
 		PackedInt32Array(), PackedFloat32Array(), SPRITE.get_rid())
 
