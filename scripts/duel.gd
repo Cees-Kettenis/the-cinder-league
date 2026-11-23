@@ -73,9 +73,8 @@ static func crit_chance(rule: Dictionary, attack: float) -> float:
 static func crit_multiplier(rule: Dictionary, attack: float) -> float:
 	return minf(rule.crit_power_cap, rule.crit_power + attack * rule.crit_power_per_attack)
 
-static func spell_base_damage(rule: Dictionary, spell: Dictionary, is_bout: bool) -> float:
-	var scale := float(rule.get("bout_spell_base_multiplier", 1.0)) if is_bout else 1.0
-	return spell.damage * scale
+static func spell_resistance(rule: Dictionary, magic: float) -> float:
+	return magic * float(rule.get("spell_resistance_per_magic", 0.0))
 
 static func spell_for_action(fighter: Dictionary, action: String) -> Dictionary:
 	return fighter.get("reserve_spell" if action == "cast_reserve" else "spell", {})
@@ -85,7 +84,9 @@ static func spell_charges(fighter: Dictionary, action: String) -> int:
 
 static func strike_damage(rule: Dictionary, fighter: Dictionary, spell: bool, is_bout: bool = false, action: String = "cast") -> float:
 	if spell:
-		return spell_base_damage(rule, spell_for_action(fighter, action), is_bout) + fighter.stats.Magic * rule.damage_per_magic
+		# Old fight snapshots retain their original bout-only base damage.
+		var scale := float(rule.get("bout_spell_base_multiplier", 1.0)) if is_bout else 1.0
+		return spell_for_action(fighter, action).damage * scale + fighter.stats.Magic * rule.damage_per_magic
 	return fighter.weapon.damage + fighter.stats.Strength * rule.damage_per_strength + fighter.get("enchant_damage", 0)
 
 static func recovery(rule: Dictionary, stamina: float) -> int:
@@ -352,7 +353,7 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 		event.message = "%s misses with %s." % [fighter.name, event.title.to_lower()]
 		return
 	var spell := action in SPELL_ACTIONS
-	var damage := action_damage(action, fighter)
+	var damage := action_damage(action, fighter, enemy)
 	if not spell and random.randf() < crit_chance(rules, fighter.stats.Attack):
 		event.critical = true
 		damage *= crit_multiplier(rules, fighter.stats.Attack)
@@ -365,8 +366,11 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 		marker += " Blocked in part."
 	event.message = "%s uses %s.%s %s" % [fighter.name, event.title.to_lower(), marker, _impact(event)]
 
-func action_damage(action: String, fighter: Dictionary) -> float:
-	var damage := strike_damage(rules, fighter, action in SPELL_ACTIONS, regular_bout, action)
+func action_damage(action: String, fighter: Dictionary, target: Dictionary = {}) -> float:
+	var spell := action in SPELL_ACTIONS
+	var damage := strike_damage(rules, fighter, spell, regular_bout, action)
+	if spell and not target.is_empty():
+		return maxf(1.0, damage - spell_resistance(rules, target.stats.Magic))
 	match action:
 		"power": return damage * rules.power_damage_multiplier
 		"quick": return damage * rules.quick_damage_multiplier
@@ -469,7 +473,7 @@ func _preferred_cast(fighter: Dictionary, target: Dictionary) -> String:
 func _can_guard_against_cast(fighter: Dictionary, enemy: Dictionary, cast: String) -> bool:
 	if cast.is_empty() or spell_armor_only(fighter) or block_chance(rules, fighter.stats.Defence, true) <= 0.0:
 		return false
-	var damage := action_damage(cast, enemy)
+	var damage := action_damage(cast, enemy, fighter)
 	return (health_hit_wins(fighter, health_damage(cast, roundi(damage), fighter))
 		and not health_hit_wins(fighter, health_damage(cast, maxi(1, roundi(damage * rules.guard_damage_factor)), fighter)))
 
@@ -480,7 +484,7 @@ func _should_close(fighter: Dictionary, enemy: Dictionary, cast: String, enemy_c
 
 func _expected_strike(fighter: Dictionary, enemy: Dictionary, action: String) -> float:
 	var spell := action in SPELL_ACTIONS
-	var damage := action_damage(action, fighter)
+	var damage := action_damage(action, fighter, enemy)
 	if spell:
 		if spell_armor_only(enemy):
 			damage = minf(damage, float(enemy.armor))

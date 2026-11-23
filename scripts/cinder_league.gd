@@ -872,8 +872,9 @@ func _update_point_total() -> void:
 		roundi(Duel.hit_chance(rule, values, false) * 100), roundi(Duel.crit_chance(rule, values.Attack) * 100)]
 	stat_labels.Strength.tooltip_text = "%d weapon damage" % roundi(Duel.strike_damage(rule, projected, false))
 	stat_labels.Defence.tooltip_text = "%d%% block chance" % roundi(Duel.block_chance(rule, values.Defence) * 100)
-	stat_labels.Magic.tooltip_text = "+%d spell damage\n%d Magic unlocks a reserve spell or +1 main cast in death matches" % [
-		roundi(values.Magic * rule.damage_per_magic), int(rule.death_match_extra_cast_magic)]
+	stat_labels.Magic.tooltip_text = "+%.1f spell damage · %.1f spell resistance\n+%d casts · One more every %d Magic\nReserve spell at %d Magic" % [
+		values.Magic * rule.damage_per_magic, Duel.spell_resistance(rule, values.Magic),
+		data.bonus_spell_casts(int(values.Magic)), int(rule.magic_per_extra_cast), int(rule.reserve_spell_magic)]
 	stat_labels.Vitality.tooltip_text = "Health and recovery"
 	stat_labels.Stamina.tooltip_text = "Energy for moves"
 	stat_labels.Charisma.tooltip_text = "Stronger taunts and more gold"
@@ -1115,31 +1116,23 @@ func _preview_item(id: String) -> void:
 			_shop_stat("armor", "Armor points", "%d → %d" % [points, new_points])
 		"weapon", "spell":
 			var current: Dictionary = data.items.get(game.state.loadout.get(item.kind, ""), {})
-			var damage := _shop_base_damage(item)
+			var damage := String.num(item.damage, 2).trim_suffix(".0")
 			if not current.is_empty() and current.damage != item.damage:
-				damage = _shop_base_damage(current) + " → " + damage
-			var caption := "Base damage · Bout / Death match" if item.kind == "spell" else "Base damage"
-			_shop_stat("attack", caption, damage)
+				damage = String.num(current.damage, 2).trim_suffix(".0") + " → " + damage
+			_shop_stat("attack", "Base damage", damage)
 			_shop_stat("advance", "Reach", "1 space" if item.reach == 1 else "%d spaces" % item.reach)
 			var action := "attack" if item.kind == "weapon" else "cast"
 			_shop_stat("stamina", "Stamina cost", "%d per %s" % [item.energy, action])
 			if item.kind == "spell":
 				var magic := int(game.state.stats.Magic)
-				var bout_casts: int = data.spell_casts(item, magic)
-				var death_casts: int = data.spell_casts(item, magic, true, not reserve_id.is_empty())
-				_shop_stat("cast", "Main casts · Bout / Death match", "%d / %d" % [bout_casts, death_casts])
+				var casts: int = data.spell_casts(item, magic, not reserve_id.is_empty())
+				_shop_stat("cast", "Main casts", str(casts))
 		"enchant":
 			var old := int(data.items.get(game.state.loadout.get("enchant", ""), {}).get("damage", 0))
 			_shop_stat("attack", "Extra weapon damage", "+%d → +%d" % [old, item.damage])
 		"potion":
 			_shop_stat("health", "Health restored", "+%d" % data.rules.heal)
 			_shop_stat("potion", "Uses per death match", str(int(data.rules.potion_uses)))
-
-func _shop_base_damage(item: Dictionary) -> String:
-	if item.kind == "spell":
-		var regular := Duel.spell_base_damage(data.rules, item, true)
-		return "%s / %s" % [String.num(regular, 2).trim_suffix(".0"), String.num(item.damage, 2).trim_suffix(".0")]
-	return str(int(item.damage))
 
 func _shop_stat(symbol: String, caption: String, value: String) -> void:
 	var stat := _column(shop_stats, 3)
@@ -1240,7 +1233,7 @@ func _scout_bout(tournament: bool) -> void:
 
 func _show_faceoff(offer: Dictionary) -> void:
 	var rival: Dictionary = offer.rival
-	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout, "weapon", offer.tournament)
+	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout)
 	var heading := "Bout · Yield below %d%% HP" % int(data.rules.bout_yield_health_percent)
 	if offer.tournament:
 		heading = "Tournament · Round %d/%d" % [int(offer.round) + 1, int(offer.round_count)]
@@ -1271,11 +1264,11 @@ func _show_faceoff(offer: Dictionary) -> void:
 	_compare_row(kit, "Spell", player.spell.get("name", "None"), rival.spell.get("name", "None"), "cast")
 	_compare_row(kit, "Spell reach", player.spell.get("reach", "–"), rival.spell.get("reach", "–"), "advance")
 	_compare_row(kit, "Spell casts", player.casts, rival.casts, "cast")
+	var player_reserve: Dictionary = player.get("reserve_spell", {})
+	var rival_reserve: Dictionary = rival.get("reserve_spell", {})
+	if not player_reserve.is_empty() or not rival_reserve.is_empty():
+		_compare_row(kit, "Reserve · 1 cast", player_reserve.get("name", "–"), rival_reserve.get("name", "–"), "cast")
 	if offer.tournament:
-		var player_reserve: Dictionary = player.get("reserve_spell", {})
-		var rival_reserve: Dictionary = rival.get("reserve_spell", {})
-		if not player_reserve.is_empty() or not rival_reserve.is_empty():
-			_compare_row(kit, "Reserve · 1 cast", player_reserve.get("name", "–"), rival_reserve.get("name", "–"), "cast")
 		_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
 	var actions := _row(content, 10)
 	if not game.tournament_in_progress():

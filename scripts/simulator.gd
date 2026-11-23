@@ -18,8 +18,8 @@ func batch(left: String, right: String, level: int, start_seed: int, count: int,
 	var left_items: Dictionary = options.get("left_loadout", data.eligible_loadout(level, left_stats, left))
 	var right_items: Dictionary = options.get("right_loadout", data.eligible_loadout(level, right_stats, right))
 	var regular_bout: bool = not options.get("death_match", false)
-	var left_fighter: Dictionary = data.fighter(left.capitalize(), left_stats, left_items, left, not regular_bout)
-	var right_fighter: Dictionary = data.fighter(right.capitalize(), right_stats, right_items, right, not regular_bout)
+	var left_fighter: Dictionary = data.fighter(left.capitalize(), left_stats, left_items, left)
+	var right_fighter: Dictionary = data.fighter(right.capitalize(), right_stats, right_items, right)
 	var summary := {"mode": "duel", "left": left, "right": right, "seed": str(start_seed), "level": level,
 		"bouts": count, "left_wins": 0, "right_wins": 0, "draws": 0, "turns": 0, "damage": 0, "blocks": 0, "misses": 0,
 		"left_stats": left_stats, "right_stats": right_stats, "left_loadout": left_items, "right_loadout": right_items,

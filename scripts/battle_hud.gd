@@ -276,7 +276,7 @@ func _describe_action(bout: RefCounted, action: String, title: String, button: A
 			if button.summary != null:
 				button.summary.text = "Out of reach"
 			return "%s\n%s away · %s" % [reason, _spaces(bout.distance()), cost]
-		var damage := maxi(1, roundi(bout.action_damage(action, player)))
+		var damage := maxi(1, roundi(bout.action_damage(action, player, bout.fighters[1])))
 		var accuracy := roundi(100.0 * bout.chance(action))
 		if button.summary != null:
 			button.summary.text = "%d dmg · %d%% hit" % [damage, accuracy]

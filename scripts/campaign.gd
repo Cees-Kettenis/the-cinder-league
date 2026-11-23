@@ -176,7 +176,8 @@ func scouted_bout(tournament: bool = false) -> Dictionary:
 	if offer.is_empty() or offer.rival.spell.is_empty():
 		return offer
 	var spell: Dictionary = data.items.get(offer.rival.spell.id, offer.rival.spell)
-	var casts: int = data.spell_casts(spell, int(offer.rival.stats.Magic), tournament)
+	var has_reserve: bool = not offer.rival.get("reserve_spell", {}).is_empty()
+	var casts: int = data.spell_casts(spell, int(offer.rival.stats.Magic), has_reserve)
 	if spell == offer.rival.spell and casts == int(offer.rival.casts):
 		return offer
 	# A scout locks the opponent and gear. Only an entered bout locks their spell stats.
@@ -277,7 +278,7 @@ func start_bout(tournament: bool, fight_seed: int) -> Dictionary:
 	var previous_snapshot: Dictionary = state.snapshot
 	var previous_outcome: Dictionary = state.outcome
 	var scout_key := "scouted_tournament" if tournament else "scouted_bout"
-	var left: Dictionary = data.fighter(state.name, state.stats, state.loadout, "weapon", tournament)
+	var left: Dictionary = data.fighter(state.name, state.stats, state.loadout)
 	var right: Dictionary = offer.rival
 	state.snapshot = {"fighters": [left, right], "seed": offer.seed, "opponent_seed": offer.opponent_seed,
 		"arena": arena_index(), "tournament": tournament, "opponent": right.name}

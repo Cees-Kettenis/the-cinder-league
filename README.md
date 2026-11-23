@@ -29,7 +29,7 @@ The crests at each top corner show the fighter's current and maximum health, arm
 
 New bouts use a 30-space arena with a pit at each end. The camera follows the fight and pulls back when the fighters spread out. Steps, jumps, attack ranges, and knockback use the same distances at any window size. Saved bouts keep their original arena width.
 
-The **Pack** shows remaining spell casts and, in death matches, healing potions. Spells deal half their base damage in regular bouts and gain the full damage bonus from invested Magic points. Spells can damage health and finish bouts from range. Outside weapon reach, a hit against a full-health fighter leaves them with at least 20% health. Regular bouts give every spell at least two casts. In death matches, Fireball and Lightning Strike start with two casts and heavier spells start with one. At 30 Magic, use **Equip as reserve** in the Magic shop to bring a different spell for one cast per death match. An empty reserve slot gives the extra cast to your main spell. A miss spends a cast, and sleeping only restores stamina.
+The **Pack** shows remaining spell casts and, in death matches, healing potions. Every point of Magic adds 0.8 spell damage and reduces incoming spell damage by 0.35 before armor. Each spell starts with two casts, and every 10 Magic adds one cast. Each cast still costs the stamina shown in the Magic shop. At 30 Magic, use **Equip as reserve** to spend one of your bonus casts on a different spell. These rules apply to regular bouts and death matches. Spells can finish bouts from range, and a ranged hit against a full-health fighter in a regular bout leaves them with at least 20% health. A miss spends a cast, and sleeping only restores stamina.
 
 Choose **Scout rival** in the arena to reveal a randomly generated opponent near your level. Compare your stats, equipment, and reach before choosing **Fight**. You can go back to town or close the game and return to the same rival. A scouted tournament opponent stays in place while you fight regular bouts or buy gear. Your latest gear is used when you enter the ring.
 
@@ -56,7 +56,7 @@ godot --headless --path . --script scripts/simulate.gd -- --campaign --left=weap
 
 Preset names are `weapon`, `guard`, `mage`, `skirmish`, `charisma`, `hybrid`, `all_attack`, and `brute`. The terminal outputs JSON after Godot's startup banner.
 
-Pass `--scenario=/absolute/path/scenario.json` to supply either side's full stat spread, a loadout, an opening distance, or a sequence of moves. A loadout uses the IDs in the balance file. A qualifying death match loadout can set `reserve_spell` to a spell distinct from its main `spell` and use `cast_reserve` in the script. Once scripted moves finish, the chosen AI presets continue the bout.
+Pass `--scenario=/absolute/path/scenario.json` to supply either side's full stat spread, a loadout, an opening distance, or a sequence of moves. A loadout uses the IDs in the balance file. A qualifying loadout can set `reserve_spell` to a spell distinct from its main `spell` and use `cast_reserve` in the script. Once scripted moves finish, the chosen AI presets continue the bout.
 
 ```json
 {

@@ -32,10 +32,10 @@ func _run() -> void:
 	_check_fighter_rig()
 	_check_hit_feedback()
 	_check_fatality_variants(data)
-	_check_bout_spell_damage(data)
+	_check_spell_damage(data)
 	_check_yield_bout(data)
 	_check_spell_charges(data)
-	_check_death_match_spell_bonus(data)
+	_check_spell_cast_progression(data)
 	_check_reserve_spell(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
@@ -468,35 +468,43 @@ func _check_fatality_variants(data: RefCounted) -> void:
 	_check(stage.finisher == "heart", "Blunt weapons should retain their existing finisher")
 	stage.free()
 
-func _check_bout_spell_damage(data: RefCounted) -> void:
+func _check_spell_damage(data: RefCounted) -> void:
 	var mage: Dictionary = data.fighter("Mage", data.build_stats("mage", 40), {"spell": "storm"})
 	var rival: Dictionary = data.fighter("Rival", data.stats_empty(), {})
-	rival.armor = 28
+	rival.stats.Magic = 10
+	rival.armor = 4
 	var rules: Dictionary = data.rules.duplicate()
 	rules.minimum_hit = 1.0
 	rules.maximum_hit = 1.0
 	rules.block_cap = 0.0
 	var regular := Duel.new(data, mage, rival, 42, 5, {"rules": rules, "regular_bout": true})
 	var lethal := Duel.new(data, mage, rival, 42, 5, {"rules": rules})
-	var full_damage := roundi(lethal.action_damage("cast", mage))
-	var bout_damage := roundi(regular.action_damage("cast", mage))
-	var armour_hit := regular.act("cast")
-	_check(bout_damage < 28 and armour_hit.armor_hit == bout_damage and armour_hit.damage == 0 and regular.winner == -2,
-		"An opening Forked Lightning cast should chip a rival's 28 armor without damaging health")
-	_check(lethal.act("cast").damage == full_damage - 28 and full_damage > bout_damage,
-		"Death matches should apply the full spell damage and agree with the preview")
+	var raw := regular.action_damage("cast", mage)
+	var resisted := regular.action_damage("cast", mage, rival)
+	var combat_damage := roundi(resisted) - int(rival.armor)
+	_check(is_equal_approx(raw - resisted, 10 * float(rules.spell_resistance_per_magic)),
+		"Defender Magic should subtract damage before armor")
+	_check(regular.act("cast").damage == combat_damage and lethal.act("cast").damage == combat_damage,
+		"Both fight types should use the same spell damage and agree with the preview")
+	_check(is_equal_approx(regular.action_damage("attack", mage), regular.action_damage("attack", mage, rival)),
+		"Magic resistance should only affect spells")
 
 	var veteran := mage.duplicate(true)
-	veteran.stats.Magic += 4
-	var bonus := regular.action_damage("cast", veteran) - regular.action_damage("cast", mage)
-	_check(is_equal_approx(bonus, 4 * float(rules.damage_per_magic)), "Magic points should contribute their full bonus in regular bouts")
+	veteran.stats.Magic += 1
+	var bonus := regular.action_damage("cast", veteran, rival) - resisted
+	_check(is_equal_approx(bonus, float(rules.damage_per_magic)), "One Magic point should increase spell damage by the configured amount")
+	_check(regular.cost("cast", 0) == int(mage.spell.energy) and lethal.cost("cast", 0) == int(mage.spell.energy),
+		"Spell stamina cost should be the same in both fight types")
 
 	var previous_rules := rules.duplicate()
-	previous_rules.erase("bout_spell_base_multiplier")
-	previous_rules.erase("bout_ranged_spells_armor_only")
-	var saved := Duel.new(data, mage, rival, 42, 5, {"rules": previous_rules, "first_blood": true})
-	_check(saved.act("cast").damage == full_damage - 28 and saved.winner == 0,
-		"A regular bout saved before the spell adjustment should replay with its original damage")
+	previous_rules.bout_spell_base_multiplier = 0.5
+	previous_rules.damage_per_magic = 0.72
+	previous_rules.erase("spell_resistance_per_magic")
+	var legacy_mage := mage.duplicate(true)
+	legacy_mage.spell.damage = 29
+	var saved := Duel.new(data, legacy_mage, rival, 42, 5, {"rules": previous_rules, "first_blood": true})
+	_check(saved.act("cast").damage == roundi(14.5 + mage.stats.Magic * 0.72) - 4 and saved.winner == 0,
+		"An old bout should retain its half base damage and ignore the new resistance")
 	rival.armor = 2
 	var legacy_rules := rules.duplicate()
 	legacy_rules.bout_ranged_spells_armor_only = true
@@ -549,8 +557,8 @@ func _check_spell_charges(data: RefCounted) -> void:
 	rules.minimum_hit = 0.0
 	rules.spell_hit = 0.0
 	var duel := Duel.new(data, caster, enemy, 42, 4, {"rules": rules})
-	_check(caster.casts == 2 and data.items.lightning.uses == 2 and data.items.arc.uses == 1,
-		"Starter spells should have two casts, and heavy spells should have one")
+	_check(caster.casts == 2 and data.items.lightning.uses == 2 and data.items.arc.uses == 2,
+		"Starter and heavy spells should both have two base casts")
 	for remaining in [1, 0]:
 		var event := duel.act("cast")
 		_check(event.get("miss", false) and duel.fighters[0].casts == remaining, "A cast should spend a charge even if it misses")
@@ -576,41 +584,41 @@ func _check_spell_charges(data: RefCounted) -> void:
 	snapshot.fighters[1].casts = 5
 	_check(campaign.open_bout(snapshot).fighters[1].casts == 5, "A saved fight should preserve its original spell charges")
 
-func _check_death_match_spell_bonus(data: RefCounted) -> void:
-	var threshold := int(data.rules.death_match_extra_cast_magic)
+func _check_spell_cast_progression(data: RefCounted) -> void:
+	var step := int(data.rules.magic_per_extra_cast)
 	var storm: Dictionary = data.items.storm
-	_check(data.spell_casts(storm, threshold - 1, true) == 1 and data.spell_casts(storm, threshold, true) == 2,
-		"An extra death match cast should require the full Magic threshold")
-	_check(data.spell_casts(storm, threshold - 1) == 2 and data.spell_casts(storm, threshold) == 2
-		and data.spell_casts({}, threshold, true) == 0, "Regular bout charges should come from the spell and bout rules, with no Magic bonus")
+	_check(data.spell_casts(storm, step - 1) == 2 and data.spell_casts(storm, step) == 3
+		and data.spell_casts(storm, step * 2 - 1) == 3 and data.spell_casts(storm, step * 2) == 4,
+		"Every ten Magic should award one more cast")
+	_check(data.spell_casts({}, step * 3) == 0, "Magic should not grant casts without an equipped spell")
 	var campaign := Campaign.new(data)
 	var stats: Dictionary = data.stats_empty()
-	stats.Magic = threshold
+	stats.Magic = step * 3
 	campaign.create(0, "Mage", 0, 0, stats)
 	campaign.state.level = int(data.rules.arena_caps.front())
 	campaign.state.loadout.spell = "storm"
 	var regular := campaign.start_bout(false, 42)
-	_check(regular.fighters[0].casts == 2, "Heavy spells should start a regular bout with at least two casts")
+	_check(regular.fighters[0].casts == 5, "A 30 Magic caster should get three bonus casts in regular bouts")
 	campaign.settle(0)
 	campaign.scout_bout(true, 42)
 	var rival: Dictionary = campaign.state.scouted_tournament.rival
-	rival.stats.Magic = threshold
+	rival.stats.Magic = step * 3
 	rival.loadout.spell = "storm"
 	rival.spell = storm
 	rival.casts = 1
-	_check(campaign.scouted_bout(true).rival.casts == 2, "A qualifying rival's face-off should include their bonus cast")
+	_check(campaign.scouted_bout(true).rival.casts == 5, "A scouted rival should gain the same bonus casts")
 	var snapshot := campaign.start_bout(true, 42)
 	var tournament: RefCounted = campaign.open_bout(snapshot)
-	_check(tournament.fighters[0].casts == 2 and tournament.fighters[1].casts == 2,
-		"The death match should start both qualifying fighters with the bonus cast")
+	_check(tournament.fighters[0].casts == 5 and tournament.fighters[1].casts == 5,
+		"Death matches should start with the same bonus casts as regular bouts")
 	campaign.record_turn("cast", -2)
 	var resumed: RefCounted = campaign.open_bout(snapshot)
-	_check(resumed.fighters[0].casts == 1, "Replaying a saved death match should spend the recorded cast only once")
+	_check(resumed.fighters[0].casts == 4, "Replaying a saved death match should spend the recorded cast only once")
 
 func _check_reserve_spell(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)
 	var stats: Dictionary = data.stats_empty()
-	var threshold := int(data.rules.death_match_extra_cast_magic)
+	var threshold := int(data.rules.reserve_spell_magic)
 	stats.Magic = threshold - 1
 	campaign.create(0, "Spell specialist", 0, 0, stats)
 	campaign.state.level = int(data.rules.arena_caps.front())
@@ -621,19 +629,19 @@ func _check_reserve_spell(data: RefCounted) -> void:
 	_check(not campaign.purchase(data.items.fireball, true).is_empty(), "The same spell should not occupy both slots")
 	_check(campaign.purchase(data.items.storm, true).is_empty(), "A specialist should be able to buy a distinct reserve spell")
 	var regular := campaign.start_bout(false, 42)
-	_check(regular.fighters[0].reserve_spell.is_empty() and regular.fighters[0].casts == 2,
-		"Regular bouts should use the main spell only")
+	_check(regular.fighters[0].reserve_casts == 1 and regular.fighters[0].casts == 4,
+		"Regular bouts should transfer one bonus cast to the reserve spell")
 	campaign.settle(0)
 	var snapshot := campaign.start_bout(true, 42)
 	var duel: RefCounted = campaign.open_bout(snapshot)
-	_check(duel.fighters[0].casts == 2 and duel.fighters[0].reserve_casts == 1
-		and snapshot.equipment.has("storm"), "The bonus cast should transfer to the reserve spell")
+	_check(duel.fighters[0].casts == 4 and duel.fighters[0].reserve_casts == 1
+		and snapshot.equipment.has("storm"), "A reserve spell should have the same one cast in death matches")
 	var cast: Dictionary = duel.act("cast_reserve")
 	_check(cast.get("title") == data.items.storm.name and cast.get("spell_art") == int(data.items.storm.art)
 		and cast.get("energy_cost") == int(data.items.storm.energy), "The reserve spell should use its own effect and cost")
 	campaign.record_turn("cast_reserve", -2)
 	var resumed: RefCounted = campaign.open_bout(snapshot)
-	_check(resumed.fighters[0].reserve_casts == 0 and resumed.fighters[0].casts == 2,
+	_check(resumed.fighters[0].reserve_casts == 0 and resumed.fighters[0].casts == 4,
 		"Resuming a saved reserve cast should preserve the main spell's charges")
 
 func _check_saved_bout(data: RefCounted) -> void:

@@ -36,11 +36,21 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	for section in ["rules", "moves", "distances", "items", "arenas"]:
 		if not profile.has(section) or typeof(profile[section]) != typeof(bundled[section]):
 			return "Missing or invalid balance section: " + section
+	var legacy_magic: bool = (profile.rules.has("bout_spell_base_multiplier")
+		or profile.rules.has("bout_min_spell_casts") or profile.rules.has("death_match_extra_cast_magic"))
+	var old_bout_scale := clampf(float(profile.rules.get("bout_spell_base_multiplier", 0.5)), 0.0, 1.0)
+	var old_bout_casts := maxi(1, int(profile.rules.get("bout_min_spell_casts", 2)))
+	if profile.rules.has("death_match_extra_cast_magic") and not profile.rules.has("reserve_spell_magic"):
+		profile.rules.reserve_spell_magic = profile.rules.death_match_extra_cast_magic
+	profile.rules.erase("bout_spell_base_multiplier")
+	profile.rules.erase("bout_min_spell_casts")
+	profile.rules.erase("death_match_extra_cast_magic")
+	profile.rules.erase("bout_ranged_spells_armor_only")
 	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier",
 			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier",
-			"bout_spell_base_multiplier", "bout_min_spell_casts", "bout_yield_health_percent", "death_match_extra_cast_magic"]:
+			"bout_yield_health_percent", "spell_resistance_per_magic", "magic_per_extra_cast", "reserve_spell_magic"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -78,15 +88,12 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Opponent point variance must be 0.25 or less."
 	if rules.capped_gold_multiplier > 1:
 		return "Capped bout gold must be between 0 and 1 times the usual reward."
-	if rules.bout_spell_base_multiplier > 1:
-		return "Bout spell base damage must be between 0 and 1 times the death match base damage."
-	if rules.bout_min_spell_casts < 1 or rules.bout_min_spell_casts != floor(rules.bout_min_spell_casts):
-		return "Minimum spell casts in a regular bout must be a positive whole number."
 	if (rules.bout_yield_health_percent < 1 or rules.bout_yield_health_percent >= 100
 			or rules.bout_yield_health_percent != floor(rules.bout_yield_health_percent)):
 		return "Bout yield health must be a whole percent between 1 and 99."
-	if rules.death_match_extra_cast_magic < 1 or rules.death_match_extra_cast_magic != floor(rules.death_match_extra_cast_magic):
-		return "The Magic requirement for an extra death match cast must be a positive whole number."
+	for key in ["magic_per_extra_cast", "reserve_spell_magic"]:
+		if rules[key] < 1 or rules[key] != floor(rules[key]):
+			return "Magic requirements must be positive whole numbers: " + key
 	for move in ["advance", "retreat", "jump"]:
 		if distances[move] < 1 or distances[move] != floor(distances[move]):
 			return "Movement distances must be positive whole numbers."
@@ -110,6 +117,10 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			return "Invalid enchantment damage: " + item.id
 		if item.kind == "spell" and item.uses < 1:
 			return "A spell needs at least one use: " + item.id
+		if legacy_magic and item.kind == "spell":
+			# Start existing profiles from their previous regular-bout spell values.
+			item.damage = maxf(1.0, roundf(item.damage * old_bout_scale))
+			item.uses = maxf(item.uses, old_bout_casts)
 		items[item.id] = item
 	for reference_item in bundled.items:
 		if reference_item.id == "dagger" and not items.has("dagger"):
@@ -171,21 +182,22 @@ func lock_reason(player: Dictionary, item: Dictionary) -> String:
 func item_name(id: String) -> String:
 	return items.get(id, {}).get("name", "None")
 
-func spell_casts(spell: Dictionary, magic: int, death_match: bool = false, reserve_equipped: bool = false) -> int:
+func bonus_spell_casts(magic: int) -> int:
+	return floori(float(magic) / float(rules.magic_per_extra_cast))
+
+func spell_casts(spell: Dictionary, magic: int, reserve_equipped: bool = false) -> int:
 	if spell.is_empty():
 		return 0
-	if death_match:
-		return int(spell.uses) + int(not reserve_equipped and has_reserve_slot(magic))
-	return maxi(int(spell.uses), int(rules.bout_min_spell_casts))
+	return int(spell.uses) + bonus_spell_casts(magic) - int(reserve_equipped and has_reserve_slot(magic))
 
 func has_reserve_slot(magic: int) -> bool:
-	return magic >= int(rules.death_match_extra_cast_magic)
+	return magic >= int(rules.reserve_spell_magic) and bonus_spell_casts(magic) > 0
 
-func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String = "weapon", death_match: bool = false) -> Dictionary:
+func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String = "weapon") -> Dictionary:
 	var weapon: Dictionary = items.get(loadout.get("weapon", ""), items[rules.starter_weapon])
 	var spell: Dictionary = items.get(loadout.get("spell", ""), {})
 	var reserve: Dictionary = {}
-	if death_match and has_reserve_slot(int(stats.Magic)) and not spell.is_empty() and loadout.get("reserve_spell", "") != spell.id:
+	if has_reserve_slot(int(stats.Magic)) and not spell.is_empty() and loadout.get("reserve_spell", "") != spell.id:
 		reserve = items.get(loadout.get("reserve_spell", ""), {})
 	var protection := 0
 	for id in loadout.get("armor", {}).values():
@@ -196,7 +208,7 @@ func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String
 		"name": name, "stats": stats.duplicate(), "loadout": loadout.duplicate(true), "style": style,
 		"hp": health, "max_hp": health, "armor": protection, "max_armor": protection,
 		"energy": energy, "max_energy": energy, "weapon": weapon, "spell": spell,
-		"casts": spell_casts(spell, int(stats.Magic), death_match, not reserve.is_empty()),
+		"casts": spell_casts(spell, int(stats.Magic), not reserve.is_empty()),
 		"reserve_spell": reserve, "reserve_casts": int(not reserve.is_empty()),
 		"enchant_damage": int(items.get(loadout.get("enchant", ""), {}).get("damage", 0)),
 		"potions": int(rules.potion_uses) if loadout.get("potion", false) else 0,
