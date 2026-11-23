@@ -41,7 +41,7 @@ Use **Replace save** on an occupied slot to start a new gladiator. The game arch
 
 Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. Press **Esc** to return to town from shops, the arena, and the pre-fight or results screens. On the title screen or in town, **Esc** opens the pause menu. **Settings** controls the display mode. Each shop has its own music, and the pre-fight screen, Amber Ring, and Iron Court each have a theme. **Audio** has separate switches for title music, Town Square music, shop and arena music, and game sounds such as the shop bell and the crowd during fights.
 
-Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. A fight ends in victory or defeat. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying a regular bout restores its saved starting conditions. Practice replays carry no fees or risk to the gladiator and leave campaign progress intact.
+Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. The winner celebrates in the arena while the bottom bar shows the result and animates any XP and gold changes. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying a regular bout restores its saved starting conditions. Practice replays carry no fees or risk to the gladiator and leave campaign progress intact.
 
 ## Simulate
 

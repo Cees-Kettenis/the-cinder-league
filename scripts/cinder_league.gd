@@ -288,12 +288,15 @@ func _clear(node: Node) -> void:
 		node.remove_child(child)
 		child.queue_free()
 
-func _page(key: String, heading: String) -> void:
+func _remove_battle() -> void:
 	if is_instance_valid(battle_layer):
 		remove_child(battle_layer)
 		battle_layer.queue_free()
 		battle_layer = null
-		shell.show()
+
+func _page(key: String, heading: String) -> void:
+	_remove_battle()
+	shell.show()
 	current_screen = key
 	title_art.visible = key in ["menu", "slots"]
 	_sync_audio.call_deferred()
@@ -303,7 +306,7 @@ func _page(key: String, heading: String) -> void:
 	if not heading.is_empty():
 		_title(nav, heading, 32)
 	_space(nav)
-	if not game.state.is_empty() and key in ["town", "arena", "scout", "shop", "result"]:
+	if not game.state.is_empty() and key in ["town", "arena", "scout", "shop"]:
 		var gold := str(int(game.state.gold))
 		_token(nav, "coin", gold + " gold" if key == "shop" else gold, "Gold")
 	if key in ["menu", "town"]:
@@ -434,7 +437,7 @@ func _audio_settings(menu: VBoxContainer) -> void:
 func _sync_audio() -> void:
 	if quitting or is_queued_for_deletion() or DisplayServer.get_name() == "headless":
 		return
-	sound.set_crowd(current_screen == "battle")
+	sound.set_crowd(current_screen in ["battle", "result"])
 	var wanted: AudioStream
 	if town_music_enabled and current_screen in ["town", "allocate"]:
 		wanted = TOWN_THEME
@@ -443,9 +446,9 @@ func _sync_audio() -> void:
 	elif venue_music_enabled:
 		match current_screen:
 			"shop": wanted = SHOP_THEMES.get(shop_type)
-			"arena", "result": wanted = ARENA_LOBBY_THEME
+			"arena": wanted = ARENA_LOBBY_THEME
 			"scout": wanted = PRE_FIGHT_THEME
-			"battle": wanted = FIGHT_THEMES[clampi(int(battle_stage.arena), 0, FIGHT_THEMES.size() - 1)]
+			"battle", "result": wanted = FIGHT_THEMES[clampi(int(battle_stage.arena), 0, FIGHT_THEMES.size() - 1)]
 	if music_player.stream == wanted:
 		return
 	if music_transition != null:
@@ -488,7 +491,7 @@ func _apply_display_mode() -> void:
 		return
 	var window := get_window()
 	var is_fullscreen := window.mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
-	var wants_fullscreen := display_mode == DisplayMode.FULLSCREEN or (display_mode == DisplayMode.FIGHTS and current_screen == "battle")
+	var wants_fullscreen := display_mode == DisplayMode.FULLSCREEN or (display_mode == DisplayMode.FIGHTS and current_screen in ["battle", "result"])
 	if wants_fullscreen and not is_fullscreen:
 		window_mode_before_fullscreen = window.mode
 		window.mode = Window.MODE_FULLSCREEN
@@ -1183,6 +1186,7 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	bout_result = {}
 	fight_locked = bout.active != 0
 	fight_generation += 1
+	_remove_battle()
 	current_screen = "battle"
 	title_art.hide()
 	shell.hide()
@@ -1272,6 +1276,8 @@ func _animate_turn(event: Dictionary, generation: int) -> void:
 	await battle_stage.turn_animation_finished
 
 func _finish_bout() -> void:
+	if current_screen != "battle":
+		return
 	var outcome := bout_result
 	var title := "Victory" if bout.winner == 0 else "Defeat"
 	sound.play("victory" if bout.winner == 0 else "defeat")
@@ -1281,27 +1287,85 @@ func _finish_bout() -> void:
 		title = "%s has fallen" % game.state.name
 	elif not bout.history.is_empty() and bout.history.back().get("ring_out", false):
 		title = "Ring-out victory" if bout.winner == 0 else "Ring-out defeat"
-	_page("result", "Practice " + title.to_lower() if practicing else title)
-	_stage(content, "avatar", 290)
+	current_screen = "result"
+	fight_locked = true
+	_refresh_battle()
+	battle_hud.show_save_error("")
+	battle_stage.celebrate(bout.winner)
+	var result := _card(battle_layer, 10)
+	var panel: PanelContainer = result.get_parent()
+	panel.name = "BoutResults"
+	panel.add_theme_stylebox_override("panel", _style(Color("#2d2329f8"), Color("#bd895c"), 15))
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	panel.offset_left = -484
+	panel.offset_right = 484
+	var summary := _row(result, 22)
+	var heading := _title(summary, "Practice " + title.to_lower() if practicing else title, 30)
+	heading.add_theme_color_override("font_color", SAND if bout.winner == 0 else TEXT)
+	heading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var motion := panel.create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if not practicing and not outcome.get("fallen", false):
+		_show_bout_rewards(summary, outcome, motion)
+	if not game.save_error.is_empty():
+		_wrapped(result, game.save_error, 15, RED)
+	var controls := _row(result, 8)
+	var unlocked: bool = outcome.get("unlocked", false)
+	if unlocked:
+		_token(controls, "trophy", game.arena().name + " unlocked", "New arena")
+	_space(controls)
 	if outcome.get("fallen", false):
-		_button(content, "Title screen", show_menu, true)
-		return
-	if not practicing:
-		var rewards := _row(content, 16)
-		_token(rewards, "coin", "%+d" % outcome.gold, "Gold")
-		if int(outcome.xp) > 0:
-			_token(rewards, "xp", "+%d" % outcome.xp, "Experience")
-		if outcome.get("unlocked", false):
-			_token(rewards, "trophy", game.arena().name, "New arena")
-		if not game.state.complete:
-			_show_progress(content)
-	var controls := _row(content)
-	if game.state.pending:
+		_button(controls, "Title screen", show_menu, true)
+	elif game.state.pending:
 		_button(controls, "Spend level-up points", _allocate_level, true)
 	else:
 		_button(controls, "Return to town", show_town, true)
 		_last_bout_button(controls, false)
 		_button(controls, "Arena", show_arena)
+	var height := panel.get_combined_minimum_size().y
+	panel.offset_top = 8
+	panel.offset_bottom = height + 8
+	motion.tween_property(panel, "offset_top", -height - 20, .32)
+	motion.tween_property(panel, "offset_bottom", -20.0, .32)
+
+func _show_bout_rewards(parent: HBoxContainer, outcome: Dictionary, motion: Tween) -> void:
+	var levels: Array = data.rules.xp_levels
+	var level := int(game.state.level)
+	var capped: bool = level >= int(game.arena().cap)
+	var floor_index := maxi(0, level - (2 if capped else 1))
+	var ceiling_index := mini(level - (1 if capped else 0), levels.size() - 1)
+	var xp := int(game.state.xp)
+	var gained_xp := int(outcome.xp)
+	var progress := _column(parent, 5)
+	_fill(progress)
+	var stat := _row(progress, 6)
+	_token(stat, "xp", "+%d XP" % gained_xp if gained_xp > 0 else "XP", "Experience")
+	_space(stat)
+	if capped and not game.state.complete:
+		_label(stat, "Tournament ready", 14, MUTED)
+	var bar := ProgressBar.new()
+	bar.max_value = maxi(int(levels[ceiling_index]), int(levels[floor_index]) + 1)
+	bar.min_value = int(levels[floor_index])
+	bar.value = xp - gained_xp
+	bar.show_percentage = false
+	bar.accessibility_name = "Experience"
+	bar.custom_minimum_size.y = 12
+	bar.add_theme_stylebox_override("background", _style(Color("#18151b"), Color("#604a48"), 2))
+	bar.add_theme_stylebox_override("fill", _style(SAND, SAND.lightened(.15), 2))
+	progress.add_child(bar)
+	if gained_xp > 0:
+		motion.tween_property(bar, "value", minf(xp, bar.max_value), .86).set_delay(.22)
+	var wallet := _column(parent, 1)
+	wallet.custom_minimum_size.x = 90
+	var gold := int(game.state.gold)
+	var gained_gold := int(outcome.gold)
+	var gold_row := _row(wallet, 6)
+	gold_row.add_child(Symbol.make("coin", 23))
+	var gold_total := _label(gold_row, str(gold - gained_gold), 19, SAND)
+	gold_total.accessibility_name = "Total gold"
+	_label(wallet, "%+d gold" % gained_gold if gained_gold != 0 else "Gold", 14, RED if gained_gold < 0 else MUTED)
+	if gained_gold != 0:
+		motion.tween_method(func(value: float) -> void: gold_total.text = str(roundi(value)),
+			float(gold - gained_gold), float(gold), .72).set_delay(.33)
 
 func _last_bout_button(parent: Control, in_arena: bool) -> void:
 	if game.state.outcome.is_empty():

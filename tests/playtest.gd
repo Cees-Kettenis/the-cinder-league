@@ -692,8 +692,15 @@ func _check_game_buttons() -> void:
 		ui.settings_popup.hide()
 	ui.bout.winner = 0
 	ui.bout_result = ui.game.record_turn("attack", 0)
+	var arena_layer: Control = ui.battle_layer
+	var arena_stage: Control = ui.battle_stage
 	ui._finish_bout()
-	_check(ui.current_screen == "result" and _find_button(ui, "Spend level-up points") != null, "Finishing a bout should show the required allocation")
+	_check(ui.current_screen == "result" and ui.battle_layer == arena_layer and ui.battle_stage == arena_stage
+		and not ui.shell.visible and arena_stage.result_winner == 0 and not ui.battle_hud.action_layer.visible,
+		"The result should celebrate the winner in the original arena and hide the combat controls")
+	var result_panel := arena_layer.get_node_or_null("BoutResults")
+	_check(result_panel != null and _find_button(result_panel, "Spend level-up points") != null,
+		"The results bar should show the required allocation")
 	_press_escape()
 	_check(ui.current_screen == "allocate", "Escape from results should respect a pending level-up")
 	ui._retry(true)

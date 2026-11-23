@@ -119,6 +119,8 @@ var impact_anchor_set := false
 var impact_anchor := Vector2.ZERO
 var wound_anchor := Vector2.ZERO
 var swing_trace: Array[Vector3] = []
+var result_winner := -2
+var celebration_time := 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -134,6 +136,8 @@ func _process(delta: float) -> void:
 		queue_redraw()
 	elif full_arena:
 		idle_time += delta
+		if result_winner >= 0:
+			celebration_time = minf(celebration_time + delta, 1.35)
 		if not event.is_empty() and elapsed < action_time:
 			var hold := minf(delta, contact_hold_left)
 			contact_hold_left -= hold
@@ -150,6 +154,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 func animate(change: Dictionary) -> void:
+	result_winner = -2
 	previous_positions = positions.duplicate()
 	positions = change.positions.duplicate()
 	event = change
@@ -190,6 +195,11 @@ func animate(change: Dictionary) -> void:
 		action_time += .55
 	elif _knockout():
 		action_time += .78
+	queue_redraw()
+
+func celebrate(winner: int) -> void:
+	result_winner = winner
+	celebration_time = 0.0
 	queue_redraw()
 
 func _knockout() -> bool:
@@ -412,7 +422,7 @@ func _draw_battle() -> void:
 	var height := _fighter_height(view)
 	if height <= 0.0:
 		return
-	var knocked_out := animating and _knockout()
+	var knocked_out := (animating or result_winner != -2) and _knockout()
 	var topple := smoothstep(.32, .76, recovery) if knocked_out else 0.0
 	if topple > 0.0:
 		var target_x := (view * Vector2(visible_positions[1 - side], 0)).x
@@ -455,7 +465,7 @@ func _draw_battle() -> void:
 		_draw_lunge_lines(feet[side], height, 1.0 if side == 0 else -1.0, approach)
 	if knocked_out and recovery > .70:
 		_draw_fall_ground(feet[1 - side], height, 1.0 if side == 0 else -1.0, recovery)
-	if full_arena and not animating:
+	if full_arena and not animating and result_winner == -2:
 		var marker := feet[0] + Vector2(0, 7)
 		draw_set_transform(marker, 0.0, Vector2(1, .24))
 		draw_arc(Vector2.ZERO, height * .24, 0, TAU, 40, Color(1.0, .75, .42, .8), 2.5, true)
@@ -506,7 +516,9 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		if not striking:
 			pose.weapon_arm.y = .025 * breath
 		pose.off_arm.x = -.024 * breath
-	if actor == index and phase < 1:
+	if result_winner == index:
+		_victory_pose(pose)
+	elif actor == index and phase < 1:
 		match action:
 			"lunge":
 				var coil := smoothstep(.0, .22, approach) * (1.0 - smoothstep(.37, .66, approach))
@@ -592,7 +604,7 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				pose.off_arm += Vector3(-.32, -.56, .14) * pulse
 				pose.rear_leg = Vector3(.08, -.14, .06) * pulse
 				pose.lead_leg = Vector3(-.07, .15, -.08) * pulse
-	elif actor >= 0 and elapsed >= impact_time:
+	elif actor >= 0 and index != actor and elapsed >= impact_time:
 		# Tip the fighter as a unit on contact. A deep bend in several joints made the silhouette pulse.
 		root_tilt = -.14 * recoil
 		pose.weapon_arm += Vector3(.09, .07, -.15) * recoil
@@ -622,6 +634,11 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			pose.weapon_arm += Vector3(.17, -.16, .08) * buckle + Vector3(.26, .51, -.48) * topple
 			pose.weapon_arm.z += 1.15 * smoothstep(.74, .98, recovery)
 			pose.off_arm += Vector3(-.16, -.35, .19) * buckle + Vector3(.34, .33, -.40) * topple
+	if result_winner >= 0 and result_winner != index and not _knockout():
+		var dejection := smoothstep(.05, .50, celebration_time)
+		pose.spine += .11 * dejection
+		pose.head += .22 * dejection
+		pose.weapon_arm += Vector3(.20, .06, .31) * dejection
 	if actor >= 0 and index != actor and phase < 1.0:
 		if event.blocked:
 			var catch_blow := smoothstep(.28, .92, approach) * (1.0 - smoothstep(.06, .41, recovery))
@@ -636,7 +653,17 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			pose.rear_leg += Vector3(.19, -.39, .12) * dodge
 			pose.lead_leg += Vector3(-.20, .42, -.18) * dodge
 	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {},
-		root_tilt, striking)
+		root_tilt, striking or result_winner == index)
+
+func _victory_pose(pose: Rig.Pose) -> void:
+	var raise_weapon := smoothstep(.02, .40, celebration_time)
+	var cheer := sin(PI * clampf((celebration_time - .36) / .38, 0.0, 1.0))
+	var wrist: Vector2 = Rig.PIVOTS[Rig.WEAPON_WRIST]
+	var salute := Vector2(799 - cheer * 13.0, 304 - cheer * 28.0)
+	pose.weapon_arm = Rig.aim_weapon_arm(wrist.lerp(salute, raise_weapon), (-.74 - .14 * cheer) * raise_weapon)
+	pose.off_arm = Vector3(.22, .09, -.12) * raise_weapon
+	pose.spine += -.055 * raise_weapon
+	pose.head -= (.14 + .07 * cheer) * raise_weapon
 
 func _close_strike(pose: Rig.Pose, action: String, approach: float, recovery: float, gap: float, mace: bool) -> Vector2:
 	var ready_arm := Vector3(752, 516, -1.31)
