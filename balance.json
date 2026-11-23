@@ -142,7 +142,7 @@
       "name": "Forged short sword",
       "kind": "weapon",
       "level": 5,
-      "price": 72,
+      "price": 50,
       "minimum": 6,
       "damage": 19,
       "reach": 1,
@@ -155,7 +155,7 @@
       "name": "Court mace",
       "kind": "weapon",
       "level": 7,
-      "price": 109,
+      "price": 64,
       "minimum": 9,
       "damage": 24,
       "reach": 2,
@@ -168,7 +168,7 @@
       "name": "Warden blade",
       "kind": "weapon",
       "level": 8,
-      "price": 146,
+      "price": 84,
       "minimum": 11,
       "damage": 28,
       "reach": 2,
@@ -246,7 +246,7 @@
       "id": "mail_chest",
       "name": "Chainmail chest plate",
       "kind": "armor",
-      "level": 5,
+      "level": 4,
       "price": 47,
       "minimum": 5,
       "slot": "chest",
@@ -378,7 +378,7 @@
       "id": "mail_shield",
       "name": "Iron-rimmed shield",
       "kind": "armor",
-      "level": 5,
+      "level": 4,
       "price": 43,
       "minimum": 5,
       "slot": "shield",
@@ -453,10 +453,10 @@
       "name": "Forked Lightning",
       "kind": "spell",
       "level": 4,
-      "price": 65,
+      "price": 57,
       "minimum": 7,
-      "damage": 15,
-      "reach": 8,
+      "damage": 14,
+      "reach": 7,
       "energy": 9,
       "uses": 2,
       "art": 1
@@ -466,7 +466,7 @@
       "name": "Falling Ember",
       "kind": "spell",
       "level": 6,
-      "price": 90,
+      "price": 66,
       "minimum": 9,
       "damage": 18,
       "reach": 8,
@@ -535,7 +535,7 @@
       "descriptor": "The city's senior tournament",
       "cap": 8,
       "opponent_gear_level": 1,
-      "gold": 36,
+      "gold": 52,
       "xp": 39,
       "opponents": [
         {
@@ -554,18 +554,19 @@
       "tournament": [
         {
           "name": "Tavin Cress",
-          "style": "mage"
+          "style": "mage",
+          "point_multiplier": 1.24
         },
         {
           "name": "Bren Holt",
           "style": "skirmish",
-          "point_multiplier": 1.08
+          "point_multiplier": 1.04
         },
         {
           "name": "Oren Voss",
           "style": "weapon",
           "boss": true,
-          "point_multiplier": 0.85,
+          "point_multiplier": 0.80,
           "armor_level": 5
         }
       ]
