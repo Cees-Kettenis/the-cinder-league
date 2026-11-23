@@ -221,10 +221,10 @@ func _check_attack_styles(data: RefCounted) -> void:
 	var damage: Array[int] = []
 	for action in ["quick", "attack", "power"]:
 		var duel := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
-		var before := duel.positions.duplicate()
+		var opening_positions := duel.positions.duplicate()
 		var event := duel.act(action)
 		damage.append(event.get("damage", 0))
-		_check(duel.positions[1] == before[1] + (1 if action == "power" else 0),
+		_check(duel.positions[1] == opening_positions[1] + (1 if action == "power" else 0),
 			"Only a Power hit should move a surviving defender")
 	_check(damage[0] > 0 and damage[0] < damage[1] and damage[1] < damage[2],
 		"Quick, Normal, and Power should deal increasing damage")
@@ -487,8 +487,8 @@ func _check_scouting(data: RefCounted) -> void:
 	var round_count: int = data.arenas[1].tournament.size()
 	_check(round_count == int(data.arenas[0].tournament.size()) + 1, "Iron Court should add a preliminary fight")
 	for round_index in round_count:
-		var round := campaign.start_bout(true, 20 + round_index)
-		_check(not round.is_empty(), "Each tournament round should be available in order")
+		var round_snapshot := campaign.start_bout(true, 20 + round_index)
+		_check(not round_snapshot.is_empty(), "Each tournament round should be available in order")
 		campaign.settle(0)
 		_check(campaign.state.complete == (round_index == round_count - 1), "Only the champion should finish the tournament")
 	var champion: Dictionary = data.generate_opponent(8, 1, 20, round_count - 1)
@@ -611,14 +611,14 @@ func _check_game_buttons() -> void:
 	var attack: Button = ui.battle_hud.action_buttons.attack
 	_check(not ui.battle_hud.pack.visible, "A starter fight should only show Pack when something is equipped")
 	_check(not ui.battle_hud.action_buttons.has("lunge") and attack.disabled
-		and attack.tooltip_text.contains("Move closer"), "The HUD should require movement from the starting gap")
+		and attack.accessibility_description.contains("Out of weapon reach"), "The HUD should require movement from the starting gap")
 	attack.pressed.emit()
 	_check(ui.bout.turn == 0, "Pressing Attack out of range must not spend a turn")
 	_check(not ui.battle_hud.action_buttons.quick.visible and not ui.battle_hud.action_buttons.power.visible,
 		"Quick and Power should be hidden outside weapon reach")
-	_check(ui.battle_hud.action_buttons.jump.tooltip_text.contains("3 spaces") and not ui.battle_hud.action_buttons.jump.disabled,
+	_check(ui.battle_hud.action_buttons.jump.accessibility_description.contains("3 spaces toward") and not ui.battle_hud.action_buttons.jump.disabled,
 		"The leap button should show the available movement distance")
-	_check(ui.battle_hud.action_buttons.jump_back.tooltip_text.contains("3 spaces") and not ui.battle_hud.action_buttons.jump_back.disabled,
+	_check(ui.battle_hud.action_buttons.jump_back.accessibility_description.contains("3 spaces away") and not ui.battle_hud.action_buttons.jump_back.disabled,
 		"The backward leap should be available at the starting position")
 	var player: Dictionary = ui.bout.fighters[0]
 	player.spell = ui.data.items.fireball
@@ -631,27 +631,40 @@ func _check_game_buttons() -> void:
 	var rival_start: int = ui.bout.positions[1]
 	ui.bout.positions[1] = ui.bout.positions[0] + 2
 	ui._refresh_battle()
-	_check(attack.accessibility_name == "Lunge" and not attack.disabled and attack.tooltip_text.contains("16 stamina"),
+	_check(attack.accessibility_name == "Lunge" and not attack.disabled and attack.accessibility_description.contains("16 stamina"),
 		"The sword button should become Lunge in short range and show the stamina cost")
 	ui.bout.positions[1] = ui.bout.positions[0] + 1
 	ui._refresh_battle()
 	_check(ui.battle_hud.action_buttons.quick.visible and ui.battle_hud.action_buttons.power.visible
 		and not attack.disabled and attack.accessibility_name == "Normal attack", "Close range should expose all three attack styles")
+	var rival: Dictionary = ui.bout.fighters[1]
+	rival.armor = 2
+	rival.max_armor = 6
+	rival.guarding = true
+	ui._refresh_battle()
+	var power = ui.battle_hud.action_buttons.power
+	var hit := roundi(ui.bout.chance("power") * 100.0)
+	var block := roundi(Duel.block_chance(ui.bout.rules, rival.stats.Defence, true) * 100.0)
+	_check(power.summary.text.contains("%d%% hit" % hit) and power.accessibility_description.contains("%d%% block" % block)
+		and power.accessibility_description.contains("2 armor and"), "Power should show its live hit chance, block chance, and armor absorption")
+	rival.exposed = true
+	ui._refresh_battle()
+	_check(power.accessibility_description.contains("0% block"), "An exposed rival cannot block")
 	var starting_stamina: int = ui.bout.fighters[0].energy
 	ui.bout.fighters[0].energy = 0
 	ui._refresh_battle()
-	_check(attack.disabled and attack.tooltip_text.contains("Not enough stamina"), "The HUD should explain why an exhausted attack is disabled")
+	_check(attack.disabled and attack.accessibility_description.contains("Requires 4 stamina"), "The HUD should explain why an exhausted attack is disabled")
+	_check(ui.battle_hud.fighter_cards[0].bars[2].readout.text == "0/%d" % player.max_energy,
+		"Depleted stamina should show zero and the full capacity")
+	_check(ui.battle_hud.fighter_cards[1].bars[1].readout.text == "2/6", "Armor readouts should show the rival's current and maximum points")
 	attack.pressed.emit()
 	_check(ui.bout.turn == 0, "The fight must reject an exhausted attack even if the button signal fires")
 	ui.bout.fighters[0].energy = starting_stamina
 	ui.bout.positions[1] = rival_start
 	ui._refresh_battle()
-	for action_button: Button in ui.battle_hud.action_buttons.values():
-		_check(action_button.text.is_empty() and not action_button.accessibility_name.is_empty(),
-			"Combat actions should use icons and accessible names")
-	for fighter in ui.battle_hud.fighter_cards:
-		for bar: ProgressBar in fighter.bars:
-			_check(not bar.show_percentage and bar.max_value == 1.0, "Combat bars should only display fill")
+	for action_button in ui.battle_hud.action_buttons.values():
+		_check(not action_button.caption.text.is_empty() and not action_button.accessibility_name.is_empty(),
+			"Combat actions should have visible captions and accessible names")
 	ui.battle_hud.settings_button.pressed.emit()
 	if _check(is_instance_valid(ui.settings_popup), "Settings should open from combat"):
 		_check(_find_button(ui.settings_popup, "Simulator") == null, "Combat settings should keep the player in the bout")

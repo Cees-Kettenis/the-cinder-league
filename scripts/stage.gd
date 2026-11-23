@@ -218,8 +218,8 @@ func _draw() -> void:
 
 func town_art_rect() -> Rect2:
 	# Keep all four storefronts inside the visible band even on ultrawide screens.
-	var scale := minf(size.x / TOWN.get_width(), size.y * 1.5 / TOWN.get_height())
-	var extent := TOWN.get_size() * scale
+	var art_scale := minf(size.x / TOWN.get_width(), size.y * 1.5 / TOWN.get_height())
+	var extent := TOWN.get_size() * art_scale
 	return Rect2((size - extent) * .5, extent)
 
 func _draw_arena_backdrop(pan: float) -> void:
@@ -717,14 +717,14 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 	var weapon: bool = event.action in Duel.WEAPON_ACTIONS
 	if defender != null and event.damage + event.armor_hit > 0:
 		if not impact_anchor_set:
-			var chest := defender.chest + Vector2(contact_offset, 0)
-			var struck := chest
+			var chest_at_impact := defender.chest + Vector2(contact_offset, 0)
+			var struck := chest_at_impact
 			if event.blocked:
 				struck = defender.shield if defender.has_shield else defender.hand
 				struck += Vector2(-direction * .085, -.015) * height
 			var inverse := view.affine_inverse()
 			impact_anchor = inverse * struck / Vector2(1.0, height)
-			wound_anchor = inverse * chest / Vector2(1.0, height)
+			wound_anchor = inverse * chest_at_impact / Vector2(1.0, height)
 			impact_anchor_set = true
 		# Let the debris stay at the impact as the defender recoils and the camera pans.
 		var contact := view * (impact_anchor * Vector2(1.0, height))

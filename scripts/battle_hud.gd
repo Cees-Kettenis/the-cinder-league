@@ -8,7 +8,13 @@ const Symbol = preload("res://scripts/ui_symbol.gd")
 const SAND := Color("#f4c68c")
 const IVORY := Color("#f8eddb")
 const EDGE := Color("#ae784d")
-const BUTTON_SIZE := Vector2(60, 60)
+const BUTTON_SIZE := Vector2(88, 60)
+const STRIKE_SIZE := Vector2(118, 72)
+const BUTTON_LABELS := {
+	"advance": "Step in", "retreat": "Step back", "jump": "Leap in", "jump_back": "Leap back",
+	"attack": "Attack", "quick": "Quick", "power": "Power", "lunge": "Lunge",
+	"guard": "Guard", "sleep": "Sleep", "taunt": "Taunt", "cast": "Spell", "potion": "Potion",
+}
 const METERS := [
 	["hp", "max_hp", "health", Color("#e25855")],
 	["armor", "max_armor", "armor", Color("#559bd4")],
@@ -26,33 +32,43 @@ class CrestMeter extends ProgressBar:
 	var crest: int
 	var icon: String
 	var tint: Color
+	var readout: Label
 
 	func _draw() -> void:
-		if size.x <= 0.0 or size.y <= 0.0:
+		var crest_size := size - Vector2(0, 22)
+		if crest_size.x <= 0.0 or crest_size.y <= 0.0:
 			return
 		var frame := PackedVector2Array()
 		var well := PackedVector2Array()
 		for corner: Vector2 in SHAPES[crest]:
-			frame.append(corner * size)
-			well.append((Vector2.ONE * .09 + corner * .82) * size)
+			frame.append(corner * crest_size)
+			well.append((Vector2.ONE * .09 + corner * .82) * crest_size)
 		draw_colored_polygon(frame, Color("#ac7846"))
 		draw_colored_polygon(well, Color("#27222b"))
 		if value > .002:
-			var top := lerpf(size.y * .90, size.y * .10, value)
-			var fill := PackedVector2Array([Vector2(0, top), Vector2(size.x, top), size, Vector2(0, size.y)])
+			var top := lerpf(crest_size.y * .90, crest_size.y * .10, value)
+			var fill := PackedVector2Array([Vector2(0, top), Vector2(crest_size.x, top), crest_size, Vector2(0, crest_size.y)])
 			for section in Geometry2D.intersect_polygons(well, fill):
 				var colors := PackedColorArray()
 				for point in section:
-					colors.append(tint.lightened(.18).lerp(tint.darkened(.24), inverse_lerp(top, size.y, point.y)))
+					colors.append(tint.lightened(.18).lerp(tint.darkened(.24), inverse_lerp(top, crest_size.y, point.y)))
 				draw_polygon(section, colors)
 		frame.append(frame[0])
 		draw_polyline(frame, Color("#f2c485"), 1.5, true)
-		draw_circle(size * .5, 15, Color("#251b26"), true, -1, true)
-		Symbol.paint(self, icon, size * .5 - Vector2.ONE * 11, 22)
+		draw_circle(crest_size * .5, 14, Color("#251b26"), true, -1, true)
+		Symbol.paint(self, icon, crest_size * .5 - Vector2.ONE * 11, 22)
+
+
+class ActionButton extends Button:
+	var glyph: Control
+	var caption: Label
+	var summary: Label
 
 
 var action_buttons: Dictionary = {}
 var action_layer := Control.new()
+var action_preview: Label
+var gap_text := ""
 var fighter_cards: Array[Dictionary] = []
 var save_notice: Label
 var settings_button: Button
@@ -65,10 +81,15 @@ var weapon_action := "attack"
 func build(arena_name: String, title_font: Font) -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
 	var banner := _card(self)
-	_dock(banner.get_parent(), Vector2(.5, 0), Rect2(-175, 21, 350, 0))
-	var arena_label := _label(banner, arena_name, 30, IVORY)
+	_dock(banner.get_parent(), Vector2(.5, 0), Rect2(-265, 21, 530, 0))
+	var arena_label := _label(banner, arena_name, 25, IVORY)
 	arena_label.add_theme_font_override("font", title_font)
 	arena_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_preview = _label(banner, "", 16, SAND)
+	action_preview.custom_minimum_size.y = 50
+	action_preview.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	action_preview.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_preview.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_make_fighter_card(false, title_font)
 	_make_fighter_card(true, title_font)
 
@@ -77,8 +98,7 @@ func build(arena_name: String, title_font: Font) -> void:
 	action_layer.mouse_filter = MOUSE_FILTER_IGNORE
 	var supplies := _card(action_layer)
 	pack = supplies.get_parent()
-	_dock(pack, Vector2.ONE, Rect2(-258, -114, 159, 98))
-	_label(supplies, "Pack", 14, SAND)
+	_dock(pack, Vector2.ONE, Rect2(-306, -100, 208, 78))
 	var items := HBoxContainer.new()
 	items.add_theme_constant_override("separation", 7)
 	supplies.add_child(items)
@@ -86,30 +106,43 @@ func build(arena_name: String, title_font: Font) -> void:
 	for action in Duel.ACTIONS:
 		if action == "lunge":
 			continue
-		var button := _button(items if action in ["cast", "potion"] else action_layer, "")
+		var button := ActionButton.new()
+		var parent: Control = items if action in ["cast", "potion"] else action_layer
+		parent.add_child(button)
 		button.pressed.connect(func() -> void: action_selected.emit(weapon_action if action == "attack" else action))
-		button.custom_minimum_size = BUTTON_SIZE
-		Symbol.on_button(button, action, 36, Duel.LABELS[action])
-		var fill := Color("#45312b")
-		match action:
-			"attack": fill = Color("#924a3d")
-			"power": fill = Color("#a3592c")
-			"quick": fill = Color("#526878")
-			"cast": fill = Color("#634f90")
-			"guard": fill = Color("#36566b")
-			"sleep", "potion": fill = Color("#365447")
-		button.add_theme_stylebox_override("normal", _plate(fill, EDGE, 0, 22))
-		button.add_theme_stylebox_override("hover", _plate(fill.lightened(.18), SAND, 0, 22))
-		button.add_theme_stylebox_override("disabled", _plate(Color("#332a2d"), Color("#675560"), 0, 22))
+		var strike := action in Duel.WEAPON_ACTIONS
+		button.custom_minimum_size = STRIKE_SIZE if strike else BUTTON_SIZE
+		var content := VBoxContainer.new()
+		button.add_child(content)
+		content.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+		content.mouse_filter = MOUSE_FILTER_IGNORE
+		content.alignment = BoxContainer.ALIGNMENT_CENTER
+		content.add_theme_constant_override("separation", 0)
+		var icon := Symbol.make(action, 26)
+		icon.size_flags_horizontal = SIZE_SHRINK_CENTER
+		content.add_child(icon)
+		button.glyph = icon
+		button.caption = _action_caption(content, BUTTON_LABELS[action], 15, IVORY)
+		if strike:
+			button.summary = _action_caption(content, "", 13, SAND)
+		button.add_theme_stylebox_override("normal", _plate(Color("#3b2c2b"), EDGE, 0, 13))
+		button.add_theme_stylebox_override("hover", _plate(Color("#594236"), SAND, 0, 13))
+		button.add_theme_stylebox_override("disabled", _plate(Color("#332a2d"), Color("#675560"), 0, 13))
+		button.mouse_entered.connect(_update_action_preview, CONNECT_DEFERRED)
+		button.mouse_exited.connect(_update_action_preview, CONNECT_DEFERRED)
+		button.focus_entered.connect(_update_action_preview, CONNECT_DEFERRED)
+		button.focus_exited.connect(_update_action_preview, CONNECT_DEFERRED)
 		button.visible = action not in ["quick", "power"]
+		button.accessibility_name = Duel.LABELS[action]
 		action_buttons[action] = button
+	action_layer.visibility_changed.connect(_update_action_preview)
 	for action in ["cast", "potion"]:
 		var count := _label(action_buttons[action], "", 14, IVORY)
 		count.mouse_filter = MOUSE_FILTER_IGNORE
 		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		count.add_theme_color_override("font_outline_color", Color("#261c24"))
 		count.add_theme_constant_override("outline_size", 4)
-		_dock(count, Vector2.ONE, Rect2(-36, -21, 29, 20))
+		_dock(count, Vector2(1, 0), Rect2(-32, 4, 24, 20))
 		charges[action] = count
 
 	var notice := _card(self)
@@ -155,7 +188,7 @@ func _make_fighter_card(opponent: bool, title_font: Font) -> void:
 		bar.crest = index
 		bar.icon = meter[2]
 		bar.tint = meter[3]
-		bar.custom_minimum_size = Vector2(61, 64)
+		bar.custom_minimum_size = Vector2(61, 78)
 		bar.show_percentage = false
 		bar.max_value = 1.0
 		bar.step = 0.0
@@ -165,6 +198,8 @@ func _make_fighter_card(opponent: bool, title_font: Font) -> void:
 		bar.add_theme_stylebox_override("fill", StyleBoxEmpty.new())
 		bar.value_changed.connect(func(_value: float) -> void: bar.queue_redraw())
 		row.add_child(bar)
+		bar.readout = _action_caption(bar, "", 17, IVORY)
+		_dock(bar.readout, Vector2(.5, 1), Rect2(-32, -22, 64, 22))
 		if opponent:
 			row.move_child(bar, 0)
 		bars.append(bar)
@@ -177,10 +212,17 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		card.name.text = fighter.name
 		for row in METERS.size():
 			var meter: Array = METERS[row]
-			card.bars[row].value = float(fighter[meter[0]]) / maxf(1.0, fighter[meter[1]])
+			var bar: CrestMeter = card.bars[row]
+			var current := int(fighter[meter[0]])
+			var capacity := int(fighter[meter[1]])
+			bar.value = float(current) / maxf(1.0, capacity)
+			bar.readout.text = "%d/%d" % [current, capacity]
+			bar.accessibility_description = "%d out of %d" % [current, capacity]
+	gap_text = _spaces(bout.distance()) + " apart"
 	action_layer.visible = not locked and bout.active == 0 and bout.winner == -2
 	show_auto_sleep(action_layer.visible and bout.must_sleep())
 	if not action_layer.visible:
+		_update_action_preview()
 		return
 	var player: Dictionary = bout.fighters[0]
 	var has_spell: bool = not player.spell.is_empty()
@@ -192,71 +234,128 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 	charges.potion.text = str(int(player.potions))
 	weapon_action = "lunge" if bout.in_lunge_range() else "attack"
 	split_attacks = bout.in_weapon_reach() and bout.has_attack_styles()
+	if weapon_action == "attack" and not bout.in_weapon_reach():
+		gap_text += " · Move closer to attack"
 	action_buttons.quick.visible = split_attacks
 	action_buttons.power.visible = split_attacks
 	for key in action_buttons:
 		var action: String = weapon_action if key == "attack" else key
-		var button: Button = action_buttons[key]
+		var button: ActionButton = action_buttons[key]
 		var reason: String = bout.reason(action)
 		button.disabled = not reason.is_empty()
-		var icon: Control = button.get_child(0)
-		icon.modulate = Color("#afa4a7") if button.disabled else Color.WHITE
-		if icon.symbol != action:
-			icon.symbol = action
-			icon.queue_redraw()
+		button.glyph.modulate = Color("#afa4a7") if button.disabled else Color.WHITE
+		if button.glyph.symbol != action:
+			button.glyph.symbol = action
+			button.glyph.queue_redraw()
 		if reason.begins_with("Needs"):
-			reason = "Not enough stamina"
-		elif reason == "Out of weapon reach" and action == "attack":
-			reason = "Out of weapon reach. Move closer."
+			reason = reason.replace("Needs", "Requires")
 		var title: String = Duel.LABELS[action]
-		if action == "attack" and split_attacks:
-			title = "Normal attack"
+		button.caption.text = BUTTON_LABELS[action]
+		if action == "attack":
+			button.caption.text = "Normal" if split_attacks else "Attack"
+			if split_attacks:
+				title = "Normal attack"
 		if action == "cast" and has_spell:
-			title = "%s · %d %s left" % [player.spell.name, player.casts, "cast" if player.casts == 1 else "casts"]
+			title = player.spell.name
 		button.accessibility_name = title
-		match action:
-			"lunge":
-				var spaces: int = bout.lunge_spaces()
-				title += " · %d %s · %d stamina · Lower accuracy" % [spaces, "space" if spaces == 1 else "spaces", bout.cost(action)]
-			"advance", "retreat", "jump", "jump_back":
-				var spaces: int = bout.travel(action)
-				if spaces > 0:
-					title += " · %d %s · %d stamina" % [spaces, "space" if spaces == 1 else "spaces", bout.cost(action)]
-			"power":
-				if split_attacks:
-					title += " · %d stamina · More damage · Lower accuracy · Push %d" % [bout.cost(action), bout.power_push()]
-			"quick": title += " · %d stamina · Less damage · Higher accuracy" % bout.cost(action)
-			"attack", "guard", "cast", "taunt": title += " · %d stamina" % bout.cost(action)
-		button.tooltip_text = title if reason.is_empty() else "%s · %s" % [title, reason]
+		if not button.visible:
+			continue
+		var detail := _describe_action(bout, action, title, button, reason)
+		button.accessibility_description = detail
+	_update_action_preview()
+
+func _describe_action(bout: RefCounted, action: String, title: String, button: ActionButton, reason: String) -> String:
+	var player: Dictionary = bout.fighters[0]
+	var cost := "%d stamina" % bout.cost(action)
+	if action in Duel.WEAPON_ACTIONS or action == "cast":
+		if reason in ["Out of weapon reach", "Out of spell range"]:
+			if button.summary != null:
+				button.summary.text = "Out of reach"
+			return "%s · %s · %s" % [title, cost, reason]
+		var damage := maxi(1, roundi(bout.action_damage(action, player)))
+		var accuracy := roundi(100.0 * bout.chance(action))
+		if button.summary != null:
+			button.summary.text = "%d dmg · %d%% hit" % [damage, accuracy]
+		return _strike_preview(bout, action, title, cost, damage, accuracy, reason)
+	if not reason.is_empty():
+		return "%s · %s" % [title, reason]
+	match action:
+		"advance", "jump": return "%s · Move %s toward the rival · %s" % [title, _spaces(bout.travel(action)), cost]
+		"retreat", "jump_back": return "%s · Move %s away from the rival · %s" % [title, _spaces(bout.travel(action)), cost]
+		"guard":
+			var block := roundi(100.0 * Duel.block_chance(bout.rules, player.stats.Defence, true))
+			return "Guard · %d%% chance to reduce damage from a hit · %s" % [block, cost]
+		"sleep":
+			var restored := mini(player.max_energy - player.energy, Duel.recovery(bout.rules, player.stats.Stamina))
+			return "Sleep · Recover %d stamina · Easier to hit and cannot block" % restored
+		"taunt":
+			var provoke := roundi(100.0 * Duel.taunt_chance(bout.rules, player.stats.Charisma))
+			return "Taunt · %d%% chance to provoke, otherwise %d damage · %s" % [provoke, Duel.taunt_damage(bout.rules, player.stats.Charisma), cost]
+		"potion": return "Drink potion · Restore %d health" % mini(player.max_hp - player.hp, bout.rules.heal)
+	return title
+
+func _strike_preview(bout: RefCounted, action: String, title: String, cost: String, damage: int, accuracy: int, reason: String) -> String:
+	var rival: Dictionary = bout.fighters[1]
+	var block := 0 if rival.exposed else roundi(100.0 * Duel.block_chance(bout.rules, rival.stats.Defence, rival.guarding))
+	var headline := "%s · %d%% hit · %d%% block if hit · %s" % [title, accuracy, block, cost]
+	if not reason.is_empty():
+		return headline + "\n" + reason
+	var armor := mini(damage, rival.armor)
+	var health := mini(damage - armor, rival.hp)
+	var losses := "%d HP" % health if armor == 0 else "%d armor" % armor
+	if armor > 0 and health > 0:
+		losses += " and %d HP" % health
+	var impact := "Clean hit takes " + losses
+	if action == "power" and health < rival.hp:
+		impact += " · Pushes " + _spaces(bout.power_push())
+	elif action == "lunge":
+		impact = "Moves " + _spaces(bout.lunge_spaces()) + " · " + impact
+	return headline + "\n" + impact
+
+func _spaces(count: int) -> String:
+	return "%d %s" % [count, "space" if count == 1 else "spaces"]
+
+func _update_action_preview() -> void:
+	action_preview.text = gap_text
+	if not action_layer.visible:
+		return
+	var hovered := get_viewport().gui_get_hovered_control()
+	var focused := get_viewport().gui_get_focus_owner()
+	for button: ActionButton in action_buttons.values():
+		if button.is_visible_in_tree() and button == hovered:
+			action_preview.text = button.accessibility_description
+			return
+	if focused in action_buttons.values() and focused.is_visible_in_tree():
+		action_preview.text = focused.accessibility_description
 
 func place_actions(feet: Vector2, fighter_height: float) -> void:
-	var top := maxf(183, feet.y - maxf(118, fighter_height + 26))
+	var top := maxf(183, feet.y - maxf(118, fighter_height + 38))
 	if split_attacks:
-		var attack_center := clampf(feet.x, 107, size.x - 107)
-		_place("quick", Vector2(attack_center - 72, top))
+		var attack_center := clampf(feet.x, 200, size.x - 200)
+		_place("quick", Vector2(attack_center - 126, top))
 		_place("attack", Vector2(attack_center, top))
-		_place("power", Vector2(attack_center + 72, top))
+		_place("power", Vector2(attack_center + 126, top))
 	else:
 		_place("attack", Vector2(feet.x, top))
-	var movement_offset := clampf(fighter_height * .42, 101, 155)
-	var movement_left := feet.x - movement_offset - 68
-	if feet.x < 145:
+	var movement_offset := clampf(fighter_height * .49, 109, 155)
+	var movement_left := feet.x - movement_offset - 96
+	if movement_left < 59:
 		movement_left = feet.x + movement_offset
-	movement_left = clampf(movement_left, 45, size.x - 113)
+	movement_left = clampf(movement_left, 59, size.x - 155)
 	var movement_top := feet.y - clampf(fighter_height * .69, 108, 180)
 	_place("retreat", Vector2(movement_left, movement_top))
-	_place("advance", Vector2(movement_left + 68, movement_top))
-	_place("jump_back", Vector2(movement_left, movement_top + 71))
-	_place("jump", Vector2(movement_left + 68, movement_top + 71))
-	var center := clampf(feet.x, 117, size.x - 117)
-	_place("guard", Vector2(center - 72, feet.y + 52))
-	_place("sleep", Vector2(center, feet.y + 66))
-	_place("taunt", Vector2(center + 72, feet.y + 52))
+	_place("advance", Vector2(movement_left + 96, movement_top))
+	_place("jump_back", Vector2(movement_left, movement_top + 68))
+	_place("jump", Vector2(movement_left + 96, movement_top + 68))
+	var center := clampf(feet.x, 155, size.x - 155)
+	_place("guard", Vector2(center - 96, feet.y + 56))
+	_place("sleep", Vector2(center, feet.y + 56))
+	_place("taunt", Vector2(center + 96, feet.y + 56))
 
 func _place(action: String, center: Vector2) -> void:
 	var button: Button = action_buttons[action]
-	button.size = BUTTON_SIZE
-	button.position = Vector2(clampf(center.x - BUTTON_SIZE.x * .5, 15, size.x - BUTTON_SIZE.x - 15), center.y - BUTTON_SIZE.y * .5)
+	button.size = button.custom_minimum_size
+	button.position = Vector2(clampf(center.x - button.size.x * .5, 15, size.x - button.size.x - 15), center.y - button.size.y * .5)
 
 func _card(parent: Control) -> VBoxContainer:
 	var panel := PanelContainer.new()
@@ -273,6 +372,12 @@ func _label(parent: Control, value: String, font_size: int, color: Color) -> Lab
 	label.add_theme_font_size_override("font_size", font_size)
 	label.add_theme_color_override("font_color", color)
 	parent.add_child(label)
+	return label
+
+func _action_caption(parent: Control, value: String, font_size: int, color: Color) -> Label:
+	var label := _label(parent, value, font_size, color)
+	label.mouse_filter = MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return label
 
 func _button(parent: Control, value: String) -> Button:

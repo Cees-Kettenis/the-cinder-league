@@ -106,7 +106,7 @@ static func _deform(point: Vector2, binding: Vector3, bones: Array[Transform2D])
 static func _build_mesh() -> void:
 	var extent := SPRITE.get_size()
 	var image := SPRITE.get_image()
-	var rows := int(extent.y) / ROW_HEIGHT + 1
+	var rows := floori(extent.y / ROW_HEIGHT) + 1
 	for strip in 3:
 		var columns: int = [12, 19, 12][strip]
 		var first_vertex := _points.size()

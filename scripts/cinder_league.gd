@@ -48,9 +48,10 @@ var music_transition: Tween
 var music_enabled := true
 var town_music_enabled := true
 var venue_music_enabled := true
+var quitting := false
 var serif: SystemFont
 var current_screen := ""
-var notification := ""
+var page_notice := ""
 var selected_slot := 0
 var replace_revision := ""
 var draft: Dictionary
@@ -92,6 +93,8 @@ var spell_preview_button: Button
 
 func _ready() -> void:
 	_make_theme()
+	get_tree().auto_accept_quit = false
+	get_window().close_requested.connect(_quit_game)
 	add_child(sound)
 	var settings := ConfigFile.new()
 	if settings.load(USER_SETTINGS) == OK:
@@ -133,7 +136,7 @@ func _ready() -> void:
 		if not default_error.is_empty():
 			_label(shell, default_error, 20, RED)
 			return
-		notification = "Custom balance couldn't load. %s" % err
+		page_notice = "Custom balance couldn't load. %s" % err
 	game = Campaign.new(data)
 	simulations = Simulator.new(data)
 	show_menu()
@@ -220,25 +223,25 @@ func _title(parent: Node, value: String, font_size: int = 31) -> Label:
 	label.add_theme_font_override("font", serif)
 	return label
 
-func _button(parent: Node, caption: String, call: Callable = Callable(), accent: bool = false) -> Button:
+func _button(parent: Node, caption: String, on_pressed: Callable = Callable(), accent: bool = false) -> Button:
 	var result := Button.new()
 	result.text = caption
 	parent.add_child(result)
-	if call.is_valid():
-		result.pressed.connect(call)
+	if on_pressed.is_valid():
+		result.pressed.connect(on_pressed)
 	if accent:
 		result.add_theme_stylebox_override("normal", _style(Color("#3a2c20"), Color("#986d45"), 9))
 		result.add_theme_color_override("font_color", SAND)
 	return result
 
-func _icon_button(parent: Node, symbol: String, caption: String, call: Callable, accent: bool = false) -> Button:
-	var button := _button(parent, "", call, accent)
+func _icon_button(parent: Node, symbol: String, caption: String, on_pressed: Callable, accent: bool = false) -> Button:
+	var button := _button(parent, "", on_pressed, accent)
 	button.custom_minimum_size = Vector2(45, 42)
 	Symbol.on_button(button, symbol, 26, caption)
 	return button
 
-func _town_destination(stage: Control, building: Rect2, symbol: String, caption: String, call: Callable) -> void:
-	var button := _button(stage, "", call)
+func _town_destination(stage: Control, building: Rect2, symbol: String, caption: String, on_pressed: Callable) -> void:
+	var button := _button(stage, "", on_pressed)
 	button.accessibility_name = caption
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
@@ -261,9 +264,9 @@ func _town_destination(stage: Control, building: Rect2, symbol: String, caption:
 	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var place := func() -> void:
 		var art: Rect2 = stage.town_art_rect()
-		var scale := art.size / Stage.TOWN.get_size()
-		button.position = art.position + building.position * scale
-		button.size = building.size * scale
+		var art_scale := art.size / Stage.TOWN.get_size()
+		button.position = art.position + building.position * art_scale
+		button.size = building.size * art_scale
 	stage.resized.connect(place)
 	place.call()
 
@@ -309,9 +312,9 @@ func _page(key: String, heading: String) -> void:
 		_icon_button(nav, "settings", "Settings", _show_settings)
 	if key not in ["menu", "allocate"]:
 		_icon_button(nav, "home", "Title screen", show_menu)
-	if not notification.is_empty():
-		_wrapped(shell, notification, 14, SAND)
-		notification = ""
+	if not page_notice.is_empty():
+		_wrapped(shell, page_notice, 14, SAND)
+		page_notice = ""
 	if not game.save_error.is_empty():
 		_wrapped(shell, game.save_error, 14, RED)
 	content = _column(shell, 10)
@@ -429,7 +432,7 @@ func _audio_settings(menu: VBoxContainer) -> void:
 		save_notice.visible = not _save_settings())
 
 func _sync_audio() -> void:
-	if is_queued_for_deletion():
+	if quitting or is_queued_for_deletion() or DisplayServer.get_name() == "headless":
 		return
 	sound.set_crowd(current_screen == "battle")
 	var wanted: AudioStream
@@ -468,6 +471,9 @@ func _sync_audio() -> void:
 		outgoing.stream = null)
 
 func _quit_game() -> void:
+	if quitting:
+		return
+	quitting = true
 	if music_transition != null:
 		music_transition.kill()
 	music_player.stop()
@@ -636,7 +642,7 @@ func _confirm_replace(number: int) -> void:
 
 func _resume(number: int) -> void:
 	if not game.resume(number):
-		notification = "That save could not be opened."
+		page_notice = "That save could not be opened."
 		show_menu()
 		return
 	if game.is_fallen():
@@ -689,8 +695,8 @@ func _character_form() -> void:
 		_label(looks, "Skin")
 		var skin_choice := OptionButton.new()
 		looks.add_child(skin_choice)
-		for name in ["Warm", "Light", "Brown", "Deep"]:
-			skin_choice.add_item(name)
+		for tone in ["Warm", "Light", "Brown", "Deep"]:
+			skin_choice.add_item(tone)
 		skin_choice.item_selected.connect(func(index: int) -> void:
 			draft_skin = index
 			creation_stage.skin = index
@@ -698,8 +704,8 @@ func _character_form() -> void:
 		_label(looks, "Hair tone")
 		var hair_choice := OptionButton.new()
 		looks.add_child(hair_choice)
-		for name in ["Dark", "Copper", "Ash"]:
-			hair_choice.add_item(name)
+		for tone in ["Dark", "Copper", "Ash"]:
+			hair_choice.add_item(tone)
 		hair_choice.item_selected.connect(func(index: int) -> void:
 			draft_hair = index
 			creation_stage.hair = index
@@ -1023,7 +1029,7 @@ func _buy_item() -> void:
 		var paid := gold_before - int(game.state.gold)
 		sound.play("buy" if paid > 0 else "equip")
 	else:
-		notification = err
+		page_notice = err
 	show_shop()
 
 func show_arena() -> void:
@@ -1170,7 +1176,7 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 		return
 	bout = game.open_bout(snapshot)
 	if bout == null:
-		notification = "The saved bout could not be resumed."
+		page_notice = "The saved bout could not be resumed."
 		show_menu()
 		return
 	practicing = practice

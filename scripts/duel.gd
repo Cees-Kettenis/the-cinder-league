@@ -287,7 +287,7 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 		event.message = "%s misses with %s." % [fighter.name, event.title.to_lower()]
 		return
 	var spell := action == "cast"
-	var damage := _action_damage(action, fighter)
+	var damage := action_damage(action, fighter)
 	if not spell and random.randf() < crit_chance(rules, fighter.stats.Attack):
 		event.critical = true
 		damage *= crit_multiplier(rules, fighter.stats.Attack)
@@ -300,7 +300,7 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 		marker += " Blocked in part."
 	event.message = "%s uses %s.%s %s" % [fighter.name, event.title.to_lower(), marker, _impact(event)]
 
-func _action_damage(action: String, fighter: Dictionary) -> float:
+func action_damage(action: String, fighter: Dictionary) -> float:
 	var damage := strike_damage(rules, fighter, action == "cast")
 	match action:
 		"power": return damage * rules.power_damage_multiplier
@@ -343,7 +343,7 @@ func choose(profile: String) -> String:
 	if "power" in legal and not enemy.guarding:
 		var edge_distance := int(rules.arena_size) - positions[1] if active == 0 else positions[0]
 		var protection: float = enemy.hp + enemy.armor
-		var finish := _action_damage("attack", fighter) < protection and _action_damage("power", fighter) >= protection
+		var finish := action_damage("attack", fighter) < protection and action_damage("power", fighter) >= protection
 		if power_push() > edge_distance or (finish and chance("power") >= .50):
 			return "power"
 	if "attack" in legal:
@@ -356,7 +356,7 @@ func choose(profile: String) -> String:
 		strategy_random.seed = seed_value ^ ((turn + 1) * 0x9e3779b9)
 		if profile == "guard" and "guard" in legal and not enemy.exposed and strategy_random.randf() < .10:
 			return "guard"
-		if "quick" in legal and _action_damage("quick", fighter) >= enemy.hp + enemy.armor:
+		if "quick" in legal and action_damage("quick", fighter) >= enemy.hp + enemy.armor:
 			return "quick"
 		return "attack"
 	if "cast" in legal and not _should_close(fighter, enemy):

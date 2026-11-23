@@ -32,27 +32,27 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	if not json.data is Dictionary:
 		return "Balance must be a JSON object."
 	profile = json.data
-	var reference: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(DEFAULT_FILE))
+	var bundled: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(DEFAULT_FILE))
 	for section in ["rules", "moves", "distances", "items", "arenas"]:
-		if not profile.has(section) or typeof(profile[section]) != typeof(reference[section]):
+		if not profile.has(section) or typeof(profile[section]) != typeof(bundled[section]):
 			return "Missing or invalid balance section: " + section
 	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier",
 			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier"]:
 		if not profile.rules.has(key):
-			profile.rules[key] = reference.rules[key]
+			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
-		for key in reference[section]:
-			if not profile[section].has(key) or typeof(profile[section][key]) != typeof(reference[section][key]):
+		for key in bundled[section]:
+			if not profile[section].has(key) or typeof(profile[section][key]) != typeof(bundled[section][key]):
 				return "Missing or invalid balance field: %s.%s" % [section, key]
 			if profile[section][key] is float and profile[section][key] < 0:
 				return "Balance values must be non-negative: %s.%s" % [section, key]
 	rules = profile.rules
 	moves = profile.moves
 	distances = profile.distances
-	if rules.arena_caps != reference.rules.arena_caps or profile.arenas.size() != reference.arenas.size() or rules.xp_levels.size() != max_level():
-		return "Keep the bundled arena gates and provide an XP threshold for each level through %d." % int(reference.rules.arena_caps.back())
+	if rules.arena_caps != bundled.rules.arena_caps or profile.arenas.size() != bundled.arenas.size() or rules.xp_levels.size() != max_level():
+		return "Keep the bundled arena gates and provide an XP threshold for each level through %d." % int(bundled.rules.arena_caps.back())
 	var previous_xp := -1
 	for xp in rules.xp_levels:
 		if not xp is float or xp <= previous_xp:
@@ -81,7 +81,7 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		if distances[move] < 1 or distances[move] != floor(distances[move]):
 			return "Movement distances must be positive whole numbers."
 	var item_types := {}
-	for item in reference.items:
+	for item in bundled.items:
 		item_types[item.kind] = item
 	items.clear()
 	for item in profile.items:
@@ -101,7 +101,7 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		if item.kind == "spell" and item.uses < 1:
 			return "A spell needs at least one use: " + item.id
 		items[item.id] = item
-	for reference_item in reference.items:
+	for reference_item in bundled.items:
 		if reference_item.id == "dagger" and not items.has("dagger"):
 			var dagger: Dictionary = reference_item.duplicate()
 			items.dagger = dagger
@@ -120,19 +120,19 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		if not arena is Dictionary:
 			return "Arena must be an object."
 		if not arena.has("opponent_gear_level"):
-			arena.opponent_gear_level = reference.arenas[index].opponent_gear_level
-		for field in reference.arenas[index]:
-			if not arena.has(field) or typeof(arena[field]) != typeof(reference.arenas[index][field]):
+			arena.opponent_gear_level = bundled.arenas[index].opponent_gear_level
+		for field in bundled.arenas[index]:
+			if not arena.has(field) or typeof(arena[field]) != typeof(bundled.arenas[index][field]):
 				return "Missing or invalid arena field: " + field
 		for field in ["opponents", "tournament"]:
 			if arena[field].is_empty():
 				return "Every arena needs regular and tournament opponents."
-			for fighter in arena[field]:
-				if not fighter is Dictionary or not fighter.get("name") is String or not fighter.get("style") is String:
+			for entry in arena[field]:
+				if not entry is Dictionary or not entry.get("name") is String or not entry.get("style") is String:
 					return "Every opponent needs a name and style."
-				if fighter.has("armor_level") and (not fighter.armor_level is float or fighter.armor_level < 1 or fighter.armor_level != floor(fighter.armor_level)):
+				if entry.has("armor_level") and (not entry.armor_level is float or entry.armor_level < 1 or entry.armor_level != floor(entry.armor_level)):
 					return "Opponent armor level must be a positive whole number."
-				if fighter.has("point_multiplier") and (not fighter.point_multiplier is float or fighter.point_multiplier <= 0):
+				if entry.has("point_multiplier") and (not entry.point_multiplier is float or entry.point_multiplier <= 0):
 					return "Opponent point multiplier must be positive."
 		if arena.cap != rules.arena_caps[index] or arena.xp <= 0 or arena.gold < 0 or arena.opponent_gear_level < 1:
 			return "An arena has invalid progression or rewards."

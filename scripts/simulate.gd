@@ -7,8 +7,10 @@ func _initialize() -> void:
 	var args := {}
 	for argument in OS.get_cmdline_user_args():
 		var pair := argument.trim_prefix("--").split("=", false, 1)
-		if not pair.is_empty():
-			args[pair[0]] = pair[1] if pair.size() == 2 else true
+		if pair.size() == 2:
+			args[pair[0]] = pair[1]
+		elif pair.size() == 1:
+			args[pair[0]] = true
 	if args.has("help"):
 		print("Use --campaign or --left=weapon --right=mage. Extra options: --level=4 --seed=42 --bouts=10 --balance=/path/balance.json --scenario=/path/fighters.json")
 		quit()
