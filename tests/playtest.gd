@@ -29,6 +29,7 @@ func _run() -> void:
 	_check_attack_styles(data)
 	_check_arena_view(data)
 	_check_fighter_rig()
+	_check_hit_feedback()
 	_check_spell_charges(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
@@ -292,6 +293,34 @@ func _check_fighter_rig() -> void:
 	posed = Rig.transforms(pose)
 	_check(is_equal_approx((posed[Rig.REAR_ANKLE] * Rig.local(Rig.ANKLES[0])).y, Rig.local(Rig.ANKLES[0] - Vector2(0, 30)).y),
 		"A stride beyond the leg's reach should still keep the planted foot at its floor height")
+
+func _check_hit_feedback() -> void:
+	var stage := Stage.new()
+	var guard_pose := Rig.Pose.new()
+	stage._brace(guard_pose, 1.0, true)
+	var guard_bones := Rig.transforms(guard_pose)
+	var raised_shield := guard_bones[Rig.OFF_WRIST] * Stage.SHIELD_CENTER
+	_check(raised_shield.x > Stage.SHIELD_CENTER.x and raised_shield.y < Stage.SHIELD_CENTER.y,
+		"A shielded block should lift the shield toward the incoming blow")
+	var strike := {"action": "attack", "side": 0, "critical": false, "blocked": false, "damage": 0, "armor_hit": 5,
+		"positions": [14, 15], "health": [44, 44]}
+	stage.animate(strike)
+	var strike_time := stage.action_time
+	var armor_recoil := stage._hit_recoil(.13)
+	_check(not stage._bloodied_hit() and not stage._knockout(), "A hit absorbed by armor should not draw blood or topple the fighter")
+	strike.damage = 5
+	strike.armor_hit = 0
+	strike.health = [44, 39]
+	stage.animate(strike)
+	_check(stage._bloodied_hit() and stage._hit_recoil(.13) > armor_recoil, "A health hit should add blood and a stronger flinch")
+	strike.health = [44, 0]
+	stage.animate(strike)
+	_check(stage._knockout() and stage.action_time > strike_time, "A standard knockout should leave time for the full collapse")
+	strike.ring_out = true
+	strike.positions = [29, 31]
+	stage.animate(strike)
+	_check(not stage._knockout() and not stage._bloodied_hit(), "A ring-out should use the fall into the pit")
+	stage.free()
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
