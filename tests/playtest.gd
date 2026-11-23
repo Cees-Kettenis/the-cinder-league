@@ -6,6 +6,7 @@ const Campaign = preload("res://scripts/campaign.gd")
 const Simulator = preload("res://scripts/simulator.gd")
 const Game = preload("res://cinder_league.tscn")
 const Stage = preload("res://scripts/stage.gd")
+const Rig = preload("res://scripts/fighter_rig.gd")
 
 var failures: Array[String] = []
 
@@ -27,6 +28,7 @@ func _run() -> void:
 	_check_legacy_lunge(data)
 	_check_attack_styles(data)
 	_check_arena_view(data)
+	_check_fighter_rig()
 	_check_spell_charges(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
@@ -263,6 +265,33 @@ func _check_arena_view(data: RefCounted) -> void:
 		_check((view * Vector2(-1, 0)).x < 0 and (view * Vector2(edge + 1, 0)).x < viewport.x,
 			"The camera should show the right pit when the fighters are near it")
 	stage.free()
+
+func _check_fighter_rig() -> void:
+	var pose := Rig.Pose.new()
+	var rest := Rig.transforms(pose)
+	pose.weapon_arm.z = .45
+	pose.head = -.30
+	var posed := Rig.transforms(pose)
+	_check(posed[Rig.WEAPON_ELBOW] == rest[Rig.WEAPON_ELBOW] and posed[Rig.OFF_WRIST] == rest[Rig.OFF_WRIST]
+		and not (posed[Rig.WEAPON_WRIST] * Rig.local(Rig.GRIP)).is_equal_approx(Rig.local(Rig.GRIP)),
+		"The weapon wrist should turn the grip without moving either elbow or the off hand")
+	_check(posed[Rig.HEAD] != rest[Rig.HEAD] and posed[Rig.SPINE] == rest[Rig.SPINE],
+		"The head should move independently of the spine")
+	var lift := Vector2(42, -92)
+	pose.rear_leg = Rig.walk_leg(0, lift, .16)
+	pose.lead_leg = Rig.walk_leg(1, -lift * Vector2(.5, -.8), -.12)
+	posed = Rig.transforms(pose)
+	var rear_target := Rig.local(Rig.ANKLES[0] + lift)
+	var lead_target := Rig.local(Rig.ANKLES[1] - lift * Vector2(.5, -.8))
+	_check((posed[Rig.REAR_ANKLE] * Rig.local(Rig.ANKLES[0])).is_equal_approx(rear_target)
+		and (posed[Rig.LEAD_ANKLE] * Rig.local(Rig.ANKLES[1])).is_equal_approx(lead_target),
+		"The two ankles should reach their own walking targets")
+	_check(is_equal_approx(posed[Rig.REAR_ANKLE].get_rotation(), .16)
+		and is_equal_approx(posed[Rig.LEAD_ANKLE].get_rotation(), -.12), "Each foot should keep its own angle")
+	pose.rear_leg = Rig.walk_leg(0, Vector2(-300, -30), 0.0)
+	posed = Rig.transforms(pose)
+	_check(is_equal_approx((posed[Rig.REAR_ANKLE] * Rig.local(Rig.ANKLES[0])).y, Rig.local(Rig.ANKLES[0] - Vector2(0, 30)).y),
+		"A stride beyond the leg's reach should still keep the planted foot at its floor height")
 
 func _check_spell_charges(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()

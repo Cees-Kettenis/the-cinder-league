@@ -81,7 +81,7 @@ The supplied numbers are draft playtest values. Open **Playtest balance** from *
 
 Item IDs, categories, and armor slots are stable so that existing saves can load across balance edits. A saved bout keeps its opening conditions, combat stats, and rewards. Previously recorded lunges are restored with their original cost and range. An older save that predates rule snapshots records the active profile when it first loads. Player stats, equipment, and campaign progress carry forward.
 
-The art in the `art/` folder uses the approved cartoon concepts and matching original arena backdrops generated with the built-in ImageGen tool. The [unarmored base](art/gladiator-base.png) uses the original gladiator as its reference, with a bare head, plain clothes, and a free weapon hand on transparent alpha. Combat animates the shoulder, elbow, and wrist separately. Weapons from the [weapon sheet](art/weapons.png) follow the hand and also appear in the Weaponsmith. The sound effects in `audio/` are synthesized samples for the playtest.
+The art in the `art/` folder uses the approved cartoon concepts and matching original arena backdrops generated with the built-in ImageGen tool. The [unarmored base](art/gladiator-base.png) uses the original gladiator as its reference, with a bare head, plain clothes, and a free weapon hand on transparent alpha. In combat, the pelvis, spine, neck, head, and both arms and legs move independently. Weapons from the [weapon sheet](art/weapons.png) follow the weapon hand and also appear in the Weaponsmith. Shields follow the off hand, and helmets follow the head. The sound effects in `audio/` are synthesized samples for the playtest.
 
 
 Run the save, duel, and UI regressions after importing the project.

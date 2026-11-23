@@ -5,7 +5,7 @@ signal turn_animation_finished
 
 const Symbol = preload("res://scripts/ui_symbol.gd")
 const GEAR = preload("res://art/gear.png")
-const GLADIATOR = preload("res://art/gladiator-base.png")
+const Rig = preload("res://scripts/fighter_rig.gd")
 const TRIM = preload("res://art/try-on.png")
 const MAIL = preload("res://art/mail.png")
 const ARENAS = preload("res://art/arenas.png")
@@ -38,38 +38,6 @@ const SPELL_COLORS := [Color("#ffc378"), Color("#cf9eff"), Color("#ffb66e"), Col
 const SPACE_PER_FIGHTER_HEIGHT := .37
 const ARENA_MARGIN := 2.1
 const KIT_SIZE := Vector2(768, 1024)
-const BASE_SIZE := Vector2(1024, 1536)
-const BASE_SCALE := Vector2(2.0 / 3.0, 2.0 / 3.0)
-const BASE_ORIGIN := Vector2(-341, -1024)
-const GRIP := Vector2(855, 649)
-const SHOULDER := Vector2(672, 497)
-const ELBOW := Vector2(670, 582)
-const BODY_MASK := [Vector2(0, 0), Vector2(1024, 0), Vector2(1024, 478), Vector2(719, 478),
-	Vector2(702, 490), Vector2(674, 510), Vector2(633, 524), Vector2(613, 548), Vector2(607, 577),
-	Vector2(609, 623), Vector2(637, 681), Vector2(648, 742), Vector2(1024, 742), Vector2(1024, 1536), Vector2(0, 1536)]
-const UPPER_ARM_MASK := [Vector2(615, 525), Vector2(638, 515), Vector2(687, 490), Vector2(710, 479),
-	Vector2(737, 550), Vector2(710, 570), Vector2(680, 598), Vector2(648, 622), Vector2(609, 583)]
-const FOREARM_MASK := [Vector2(620, 602), Vector2(650, 580), Vector2(681, 555), Vector2(710, 535),
-	Vector2(935, 535), Vector2(935, 736), Vector2(641, 736)]
-const TUNIC_EDGE := [Vector2(1024, 891), Vector2(713, 891), Vector2(669, 922), Vector2(595, 942),
-	Vector2(507, 950), Vector2(367, 935), Vector2(265, 913), Vector2(0, 913)]
-const HIPS := [Vector2(362, 935), Vector2(592, 932)]
-const KNEES := [Vector2(259, 1127), Vector2(648, 1122)]
-const THIGHS := [
-	[Vector2(204, 884), Vector2(476, 916), Vector2(476, 991), Vector2(416, 1089), Vector2(368, 1150), Vector2(172, 1151), Vector2(173, 1050)],
-	[Vector2(472, 887), Vector2(760, 884), Vector2(794, 1144), Vector2(516, 1146), Vector2(504, 1083), Vector2(463, 1000)],
-]
-const SHINS := [
-	[Vector2(98, 1110), Vector2(417, 1110), Vector2(417, 1536), Vector2(98, 1536)],
-	[Vector2(508, 1100), Vector2(903, 1100), Vector2(903, 1536), Vector2(508, 1536)],
-]
-const SKIN_TINTS := [Color.WHITE, Color(1.12, 1.09, 1.08), Color("#d2ad94"), Color("#a57862")]
-const HAIR_TINTS := [Color.WHITE, Color(1.23, .86, .65), Color(.95, 1.05, 1.25)]
-const SKIN_MASKS := [
-	[Vector2(.441,.093),Vector2(.513,.084),Vector2(.563,.068),Vector2(.627,.094),Vector2(.624,.171),Vector2(.583,.205),Vector2(.555,.227),Vector2(.472,.198),Vector2(.390,.175),Vector2(.427,.129)],
-	[Vector2(.175,.273),Vector2(.244,.273),Vector2(.339,.315),Vector2(.299,.364),Vector2(.264,.370),Vector2(.264,.446),Vector2(.229,.497),Vector2(.279,.522),Vector2(.270,.587),Vector2(.130,.587),Vector2(.126,.397)],
-]
-const HAIR_MASK := [Vector2(.338,.009),Vector2(.649,.009),Vector2(.649,.089),Vector2(.596,.093),Vector2(.566,.064),Vector2(.520,.087),Vector2(.497,.106),Vector2(.458,.103),Vector2(.434,.095),Vector2(.436,.125),Vector2(.469,.140),Vector2(.419,.159),Vector2(.365,.171),Vector2(.338,.158)]
 const MASKS := {
 	"helmet": [Vector2(.30,0),Vector2(.63,0),Vector2(.62,.09),Vector2(.51,.10),Vector2(.48,.17),Vector2(.39,.18),Vector2(.32,.14)],
 	"chest": [Vector2(.123,.25),Vector2(.173,.203),Vector2(.30,.173),Vector2(.405,.170),Vector2(.47,.221),Vector2(.565,.216),Vector2(.629,.258),Vector2(.655,.307),Vector2(.593,.356),Vector2(.55,.387),Vector2(.543,.453),Vector2(.605,.489),Vector2(.66,.562),Vector2(.663,.622),Vector2(.587,.645),Vector2(.391,.64),Vector2(.399,.527),Vector2(.384,.436),Vector2(.352,.351),Vector2(.223,.331),Vector2(.143,.329)],
@@ -244,56 +212,28 @@ func _item(id: String) -> Dictionary:
 	return catalog.get(id, {})
 
 func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0,
-		lean: float = 0.0, arm: Vector2 = Vector2.ZERO, wrist: float = 0.0, look: Dictionary = {},
-		legs: Vector4 = Vector4.ZERO, trail: float = 0.0) -> void:
+		pose: Rig.Pose = null, look: Dictionary = {}, root_tilt: float = 0.0, trail: float = 0.0) -> Vector2:
 	if height <= 0:
-		return
+		return feet
 	var scale_value := height / 1024.0
 	var width := scale_value * clampf(float(look.get("build", 100)) / 100.0, .85, 1.2)
-	var body := Transform2D(-lean if facing_left else lean, feet).scaled_local(Vector2(-width if facing_left else width, scale_value))
+	var body := Transform2D(-root_tilt if facing_left else root_tilt, feet).scaled_local(Vector2(-width if facing_left else width, scale_value))
+	var bones := Rig.transforms(Rig.Pose.new() if pose == null else pose)
+	var hand := body * bones[Rig.WEAPON_WRIST]
+	_draw_weapon(gear, hand, Rig.local(Rig.GRIP), trail)
 	draw_set_transform_matrix(body)
-	var shoulder := BASE_ORIGIN + SHOULDER * BASE_SCALE
-	var elbow := shoulder + ((ELBOW - SHOULDER) * BASE_SCALE).rotated(arm.x)
-	var forearm_angle := arm.x + arm.y
-	var grip := elbow + ((GRIP - ELBOW) * BASE_SCALE).rotated(forearm_angle)
-	var skin_tint: Color = SKIN_TINTS[skin_index]
-	var leg_rig: Array[Transform2D] = []
-	if not legs.is_zero_approx():
-		leg_rig = _draw_legs(body, legs)
-	# The grip moves with the forearm. Draw the fist over the weapon handle.
-	_draw_weapon(gear, body, grip, forearm_angle + wrist, trail)
-	_mesh(GLADIATOR, UPPER_ARM_MASK, Vector2.ONE, shoulder - (SHOULDER * BASE_SCALE).rotated(arm.x), BASE_SCALE, skin_tint, arm.x)
-	_mesh(GLADIATOR, FOREARM_MASK, Vector2.ONE, elbow - (ELBOW * BASE_SCALE).rotated(forearm_angle), BASE_SCALE, skin_tint, forearm_angle)
-	var torso: Array = BODY_MASK if leg_rig.is_empty() else BODY_MASK.slice(0, BODY_MASK.size() - 2) + TUNIC_EDGE
-	_mesh(GLADIATOR, torso, Vector2.ONE, BASE_ORIGIN, BASE_SCALE)
-	if skin_index > 0:
-		for mask: Array in SKIN_MASKS:
-			_mesh(GLADIATOR, mask, BASE_SIZE, BASE_ORIGIN, BASE_SCALE, skin_tint)
-	if hair_index > 0:
-		_mesh(GLADIATOR, HAIR_MASK, BASE_SIZE, BASE_ORIGIN, BASE_SCALE, HAIR_TINTS[hair_index])
-	_draw_armor(gear.get("armor", {}), look, leg_rig)
+	Rig.draw_skin(self, bones, skin_index, hair_index)
+	_draw_armor(gear.get("armor", {}), look, body, bones)
 	draw_set_transform(Vector2.ZERO)
+	return hand * Rig.local(Rig.GRIP)
 
-func _draw_legs(body: Transform2D, pose: Vector4) -> Array[Transform2D]:
-	var bones: Array[Transform2D] = []
-	for side in 2:
-		var hip: Vector2 = BASE_ORIGIN + HIPS[side] * BASE_SCALE
-		var knee: Vector2 = BASE_ORIGIN + KNEES[side] * BASE_SCALE
-		var hip_angle: float = pose[side * 2]
-		var knee_angle: float = pose[side * 2 + 1]
-		var thigh := Transform2D(hip_angle, hip - hip.rotated(hip_angle))
-		var shin := thigh * Transform2D(knee_angle, knee - knee.rotated(knee_angle))
-		bones.append(thigh)
-		bones.append(shin)
-		draw_set_transform_matrix(body * shin)
-		_mesh(GLADIATOR, SHINS[side], Vector2.ONE, BASE_ORIGIN, BASE_SCALE)
-		draw_set_transform_matrix(body * thigh)
-		_mesh(GLADIATOR, THIGHS[side], Vector2.ONE, BASE_ORIGIN, BASE_SCALE)
-	draw_set_transform_matrix(body)
-	return bones
-
-func _draw_armor(armor: Dictionary, look: Dictionary, leg_rig: Array[Transform2D]) -> void:
+func _draw_armor(armor: Dictionary, look: Dictionary, body: Transform2D, bones: Array[Transform2D]) -> void:
 	for slot in ["pants", "shoes", "chest", "helmet", "shield"]:
+		match slot:
+			"helmet": draw_set_transform_matrix(body * bones[Rig.HEAD])
+			"chest": draw_set_transform_matrix(body * bones[Rig.SPINE])
+			"shield": draw_set_transform_matrix(body * bones[Rig.OFF_WRIST])
+			_: draw_set_transform_matrix(body)
 		if not look.is_empty() and slot in ["chest", "helmet"]:
 			var sheet: Array = RIVAL_CHESTS if slot == "chest" else RIVAL_HELMETS
 			var index := int(look.get(slot, -1))
@@ -308,38 +248,38 @@ func _draw_armor(armor: Dictionary, look: Dictionary, leg_rig: Array[Transform2D
 		var tier := int(item.get("tier", 0))
 		var texture := MAIL if tier >= 2 else (TRIM if tier == 1 else GEAR)
 		if texture == MAIL and slot != "shield":
-			_draw_mail_piece(slot, leg_rig)
+			_draw_mail_piece(slot, bones)
 			continue
 		match slot:
 			"helmet": _mesh(texture, MASKS.helmet, KIT_SIZE, Vector2(-359, -1010))
 			"chest": _mesh(texture, MASKS.chest, KIT_SIZE, Vector2(-296, -1034), Vector2(.89, .99))
-			"pants": _mesh(texture, MASKS.pants, KIT_SIZE, Vector2(-307, -975), Vector2.ONE, Color.WHITE, 0.0, leg_rig)
+			"pants": _mesh(texture, MASKS.pants, KIT_SIZE, Vector2(-307, -975), Vector2.ONE, bones)
 			"shoes":
-				_mesh(texture, MASKS.shoe_left, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68), Color.WHITE, 0.0, leg_rig, 0)
-				_mesh(texture, MASKS.shoe_right, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68), Color.WHITE, 0.0, leg_rig, 1)
+				_mesh(texture, MASKS.shoe_left, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68), bones, 0)
+				_mesh(texture, MASKS.shoe_right, KIT_SIZE, Vector2(-290, -696), Vector2(.90, .68), bones, 1)
 			"shield": _mesh(texture, shield_mask, KIT_SIZE, Vector2(-319, -1029))
 
-func _draw_mail_piece(slot: String, leg_rig: Array[Transform2D]) -> void:
+func _draw_mail_piece(slot: String, bones: Array[Transform2D]) -> void:
 	match slot:
 		"helmet":
 			_mesh(MAIL, MAIL_HELMET, Vector2.ONE, Vector2(-399, -1027), Vector2(1.12, 1.0))
 		"chest":
 			_mesh(MAIL, MAIL_CHEST, Vector2.ONE, Vector2(-296, -1034), Vector2(.89, .99))
 		"pants":
-			_mesh(MAIL, MAIL_LEGS[0], Vector2.ONE, Vector2(-331, -1354), Vector2(1.0, 1.43), Color.WHITE, 0.0, leg_rig, 0)
-			_mesh(MAIL, MAIL_LEGS[1], Vector2.ONE, Vector2(-312, -1354), Vector2(1.0, 1.43), Color.WHITE, 0.0, leg_rig, 1)
+			_mesh(MAIL, MAIL_LEGS[0], Vector2.ONE, Vector2(-331, -1354), Vector2(1.0, 1.43), bones, 0)
+			_mesh(MAIL, MAIL_LEGS[1], Vector2.ONE, Vector2(-312, -1354), Vector2(1.0, 1.43), bones, 1)
 		"shoes":
-			_mesh(MAIL, MAIL_BOOTS[0], Vector2.ONE, Vector2(-307, -699), Vector2(.92, .70), Color.WHITE, 0.0, leg_rig, 0)
-			_mesh(MAIL, MAIL_BOOTS[1], Vector2.ONE, Vector2(-280, -686), Vector2(.90, .70), Color.WHITE, 0.0, leg_rig, 1)
+			_mesh(MAIL, MAIL_BOOTS[0], Vector2.ONE, Vector2(-307, -699), Vector2(.92, .70), bones, 0)
+			_mesh(MAIL, MAIL_BOOTS[1], Vector2.ONE, Vector2(-280, -686), Vector2(.90, .70), bones, 1)
 
-func _draw_weapon(gear: Dictionary, body: Transform2D, grip: Vector2, angle: float, trail: float) -> void:
+func _draw_weapon(gear: Dictionary, hand: Transform2D, grip: Vector2, trail: float) -> void:
 	var weapon := _item(gear.get("weapon", ""))
 	if weapon.is_empty():
 		return
 	var sprite: Array = WEAPON_SPRITES.get(weapon.id, WEAPON_SPRITES.mace if int(weapon.art) == 1 else WEAPON_SPRITES.sword)
 	var source := _cell(WEAPONS, 3, 2, int(sprite[0]))
 	var scale_value: float = sprite[2]
-	draw_set_transform_matrix(body * Transform2D(angle, grip))
+	draw_set_transform_matrix(hand.translated_local(grip))
 	if trail > 0.0:
 		var tip: Vector2 = (Vector2(source.size.x - 43, 38) - sprite[1]) * scale_value
 		var tint := Color("#89dfff") if weapon.id == "warden_sword" else Color("#ffc278")
@@ -351,7 +291,6 @@ func _draw_weapon(gear: Dictionary, body: Transform2D, grip: Vector2, angle: flo
 	draw_texture_rect_region(WEAPONS, Rect2(-sprite[1] * scale_value, source.size * scale_value), source)
 	if not str(gear.get("enchant", "")).is_empty():
 		_weapon_glow(Vector2(.54, -.57) * source.size * scale_value, 46.0, .6 + sin(elapsed * 4.0) * .12)
-	draw_set_transform_matrix(body)
 
 static func weapon_icon(item: Dictionary) -> AtlasTexture:
 	var sprite: Array = WEAPON_SPRITES.get(item.id, WEAPON_SPRITES.mace if int(item.art) == 1 else WEAPON_SPRITES.sword)
@@ -362,20 +301,26 @@ static func weapon_icon(item: Dictionary) -> AtlasTexture:
 	return icon
 
 func _mesh(texture: Texture2D, mask: Array, source_size: Vector2, origin: Vector2, stretch: Vector2 = Vector2.ONE,
-		tint: Color = Color.WHITE, angle: float = 0.0, leg_rig: Array[Transform2D] = [], leg: int = -1) -> void:
+		bones: Array[Transform2D] = [], leg: int = -1) -> void:
 	var vertices := PackedVector2Array()
 	var uv := PackedVector2Array()
 	var texture_size := texture.get_size()
 	for point: Vector2 in mask:
 		var pixel := point * source_size
-		var vertex := origin + (pixel * stretch).rotated(angle)
-		if not leg_rig.is_empty():
-			var side := leg if leg >= 0 else int(vertex.x >= 0.0)
-			var knee: float = BASE_ORIGIN.y + KNEES[side].y * BASE_SCALE.y
-			vertex = leg_rig[side * 2 + int(vertex.y >= knee)] * vertex
-		vertices.append(vertex)
+		vertices.append(origin + pixel * stretch)
 		uv.append(pixel / texture_size)
-	draw_polygon(vertices, PackedColorArray([tint]), uv, texture)
+	var colors := PackedColorArray([Color.WHITE])
+	if bones.is_empty():
+		draw_polygon(vertices, colors, uv, texture)
+		return
+	# Keep the original triangle connections as the leggings bend across the joints.
+	var triangles := Geometry2D.triangulate_polygon(vertices)
+	for index in vertices.size():
+		var point := vertices[index]
+		var side := leg if leg >= 0 else int(point.x >= 0.0)
+		vertices[index] = Rig.bend_armor(point, bones, side)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), triangles, vertices, colors, uv,
+		PackedInt32Array(), PackedFloat32Array(), texture.get_rid())
 
 func fighter_height() -> float:
 	return _fighter_height(_battle_view(positions))
@@ -454,35 +399,40 @@ func _draw_battle() -> void:
 	var gap := absf(feet[1].x - feet[0].x) if feet.size() == 2 else 0.0
 	if action == "power" and animating and previous_positions.size() == 2:
 		gap = (previous_positions[1] - previous_positions[0]) * view.x.x
+	var casting_hand := Vector2.ZERO
 	var draw_order := [1 - side, side] if feet.size() == 2 and animating else range(feet.size())
 	for index in draw_order:
 		var loadout := left_loadout if index == 0 else right_loadout
-		_draw_fighter(feet[index], height, loadout, index, gap, approach, recovery, phase)
+		var weapon_hand := _draw_fighter(feet[index], height, loadout, index, gap, approach, recovery, phase)
+		if index == side:
+			casting_hand = weapon_hand
 	if action == "cast" and animating:
 		var kit := left_loadout if side == 0 else right_loadout
 		var attack_art := int(_item(kit.get("spell", "")).get("art", 0))
 		var target := view * Vector2(visible_positions[1 - side], 0)
 		var direction := 1.0 if side == 0 else -1.0
-		var start := view * Vector2(visible_positions[side], 0)
-		_draw_spell(start + Vector2(.20 * direction, -.56) * height, target, height, attack_art, phase, direction, event.miss)
+		_draw_spell(casting_hand, target, height, attack_art, phase, direction, event.miss)
 	if animating and elapsed >= impact_time:
 		_draw_impact(feet, height, side, recovery, view)
 
-func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int, gap: float, approach: float, recovery: float, phase: float) -> void:
+func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int, gap: float, approach: float, recovery: float,
+		phase: float) -> Vector2:
 	var actor := int(event.get("side", -1))
 	var action := str(event.get("action", ""))
 	var skin_index := skin if index == 0 else rival_skin
 	var hair_index := hair if index == 0 else rival_hair
 	var facing_left := index == 1
 	var direction := -1.0 if facing_left else 1.0
-	var lean := 0.0
-	var arm := Vector2.ZERO
-	var wrist := 0.0
-	var legs := Vector4.ZERO
+	var pose := Rig.Pose.new()
+	var root_tilt := 0.0
 	var trail := 0.0
 	var pulse := sin(phase * PI)
 	if full_arena:
-		arm.y = sin(idle_time * 2.8 + index * 2.2) * .025
+		var breath := sin(idle_time * 2.8 + index * 2.2)
+		pose.spine = .017 * breath
+		pose.head = -.018 * breath
+		pose.weapon_arm.y = .025 * breath
+		pose.off_arm.x = -.024 * breath
 	if actor == index and phase < 1:
 		match action:
 			"lunge":
@@ -493,69 +443,113 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
 				feet.x -= direction * height * (.055 * coil + (.09 if event.miss else .022) * strike)
 				feet.y += height * (.036 * (coil + plant) - .018 * absf(stride))
-				lean = -.10 * coil + .028 * strike
-				legs = Vector4(.23, -.10, -.43, .29) * plant + Vector4(-.20, .29, -.21, .32) * coil
-				legs += Vector4(.44, -.26, -.43, .25) * stride
-				arm += (Vector2(-.32, -1.39) if mace else Vector2(.60, -.96)) * coil
-				arm += (Vector2(-.86, .59) if mace else Vector2(-1.07, .73)) * strike
-				wrist = (-.51 if mace else -.65) * coil + (1.46 if mace else 1.05) * strike
+				pose.pelvis = -.05 * coil + .07 * plant
+				pose.spine += -.12 * coil + .12 * strike
+				pose.head += .12 * coil - .10 * strike
+				pose.rear_leg = Vector3(.22, -.12, -.09) * plant + Vector3(-.22, .31, -.10) * coil
+				pose.rear_leg += Vector3(.39, -.23, -.16) * stride
+				pose.lead_leg = Vector3(-.37, .36, -.03) * plant + Vector3(-.23, .32, -.09) * coil
+				pose.lead_leg += Vector3(-.38, .27, .11) * stride
+				pose.weapon_arm += (Vector3(-.30, -1.21, -.51) if mace else Vector3(.47, -.85, -.64)) * coil
+				pose.weapon_arm += (Vector3(-.75, .56, 1.17) if mace else Vector3(-.83, .54, .90)) * strike
+				pose.off_arm += Vector3(-.20, -.32, .16) * coil + Vector3(.38, -.21, .19) * strike
 				trail = smoothstep(.72, .97, approach) * (1.0 - smoothstep(.09, .43, recovery))
 			"attack", "quick", "power":
 				var windup := smoothstep(.0, .55, approach) * (1.0 - smoothstep(.58, .94, approach))
 				var follow := smoothstep(.60, 1.0, approach) * (1.0 - smoothstep(.28, .96, recovery))
-				var reach := clampf(gap - height * .38, 0, height * .38) * (.65 if event.miss else 1.0)
-				var weight := .55 if action == "quick" else 1.0
+				var weight := .55 if action == "quick" else (1.25 if action == "power" else 1.0)
+				var reach := clampf(gap - height * .38, 0, height * .32) * (.65 if event.miss else 1.0)
 				feet.x += direction * (reach * follow - height * .05 * windup) * weight
-				lean = (.08 * follow - .09 * windup) * weight
-				arm += Vector2(.48, -1.16) * windup * weight + Vector2(-.93, .55) * follow
-				wrist = -.72 * windup * weight + .98 * follow
-				trail = smoothstep(.63, .96, approach) * (1.0 - smoothstep(.04, .51, recovery)) * weight
+				feet.y += height * (.031 * windup + .025 * follow) * weight
+				pose.pelvis = (.045 * follow - .045 * windup) * weight
+				pose.spine += (.12 * follow - .24 * windup) * weight
+				pose.neck = .11 * windup * weight
+				pose.head += .09 * windup - .11 * follow
+				pose.weapon_arm += Vector3(.36, -.93, -.59) * windup * weight + Vector3(-.77, .55, .85) * follow
+				pose.off_arm += (Vector3(-.15, -.50, .17) * windup + Vector3(.31, -.19, .16) * follow) * weight
+				pose.rear_leg = (Vector3(-.16, -.06, .22) * windup + Vector3(.20, -.18, -.07) * follow) * weight
+				pose.lead_leg = (Vector3(-.12, .26, -.15) * windup + Vector3(-.22, .26, -.06) * follow) * weight
+				trail = smoothstep(.63, .96, approach) * (1.0 - smoothstep(.04, .51, recovery)) * minf(weight, 1.0)
 				if action == "power":
-					lean -= .07 * windup
-					arm += Vector2(-.53, -.41) * windup
-					wrist += .34 * follow
-					legs = Vector4(.19, -.14, -.30, .19) * follow
+					pose.weapon_arm += Vector3(-.35, -.25, 0) * windup + Vector3(0, 0, .36) * follow
 			"advance", "retreat":
-				var stride := sin(phase * TAU)
-				feet.y -= absf(stride) * height * .029
-				lean = pulse * (.09 if action == "advance" else -.09)
-				arm += Vector2(.15, -.23) * stride
+				var forward := action == "advance"
+				var stride := float(1 if forward else -1)
+				var root_progress := smoothstep(.04, .90, phase)
+				var first_step := smoothstep(.04, .49, phase)
+				var follow_step := smoothstep(.49, .94, phase)
+				var first_lift := .5 - .5 * cos(first_step * TAU)
+				var follow_lift := .5 - .5 * cos(follow_step * TAU)
+				var crouch := 51.0 * pulse
+				var spaces := absf(positions[index] - previous_positions[index])
+				var step_size := minf(spaces * SPACE_PER_FIGHTER_HEIGHT * 1536.0, 490.0) * stride
+				var first := Vector2(step_size * (first_step - root_progress), -crouch - 107.0 * first_lift)
+				var second := Vector2(step_size * (follow_step - root_progress), -crouch - 92.0 * follow_lift)
+				feet.y += height * crouch / 1536.0
+				pose.lead_leg = Rig.walk_leg(1, first if forward else second, -.16 * first_lift if forward else .12 * follow_lift)
+				pose.rear_leg = Rig.walk_leg(0, second if forward else first, .12 * follow_lift if forward else -.16 * first_lift)
+				var arm_swing := sin(phase * TAU) * stride
+				pose.spine += .13 * pulse * stride
+				pose.neck = -.09 * pulse * stride
+				pose.head += .06 * (follow_lift - first_lift)
+				pose.weapon_arm += Vector3(.29, -.36, .15) * arm_swing
+				pose.off_arm += Vector3(-.32, -.19, .20) * arm_swing
 			"jump":
-				var launch := smoothstep(.0, .13, approach) * (1.0 - smoothstep(.14, .26, approach))
+				var launch := smoothstep(.0, .14, approach) * (1.0 - smoothstep(.16, .29, approach))
 				var flight := clampf((approach - .17) / .83, 0.0, 1.0)
 				var airborne := sin(PI * flight)
 				var landing := sin(PI * recovery)
-				feet.y += height * (.045 * (launch + landing) - .31 * airborne)
-				lean = .17 * airborne + .08 * (launch + landing)
-				arm += Vector2(-.46, -.42) * airborne
-				legs = Vector4(.62, .67, -.69, .91) * airborne + Vector4(-.21, .41, -.24, .40) * (launch + landing)
+				feet.y += height * (.062 * launch + .074 * landing - .34 * airborne)
+				pose.pelvis = .065 * airborne
+				pose.spine += -.12 * launch + .19 * airborne + .17 * landing
+				pose.neck = -.15 * airborne - .10 * landing
+				pose.head += -.10 * launch + .13 * airborne + .08 * landing
+				pose.weapon_arm += Vector3(.29, -.71, -.17) * launch + Vector3(-.51, -.55, .40) * airborne
+				pose.weapon_arm += Vector3(-.26, -.32, .19) * landing
+				pose.off_arm += Vector3(.32, -.25, .19) * launch + Vector3(-.53, -.64, .29) * airborne
+				pose.off_arm += Vector3(-.30, -.32, .13) * landing
+				pose.rear_leg = Vector3(.49, -.56, .63) * airborne + Vector3(.31, -.52, .21) * (launch + landing)
+				pose.lead_leg = Vector3(-.65, .97, -.48) * airborne + Vector3(-.34, .56, -.22) * (launch + landing)
 			"cast":
 				var release := smoothstep(.44, 1.0, approach) * (1.0 - recovery)
-				lean = .09 * release
-				arm += Vector2(-.52, -.41) * release + Vector2(.25, -.63) * (pulse - release)
+				pose.spine += .17 * release
+				pose.head -= .08 * release
+				pose.weapon_arm += Vector3(-.57, -.41, .47) * release + Vector3(.31, -.70, -.28) * (pulse - release)
+				pose.off_arm += Vector3(-.33, -.42, .25) * pulse
+				pose.lead_leg = Vector3(-.15, .19, -.04) * release
 			"guard", "taunt", "sleep", "potion":
-				lean = pulse * (-.10 if action in ["guard", "sleep"] else .08)
-				arm += Vector2(-.24, -.47) * pulse
+				pose.spine += pulse * (-.16 if action in ["guard", "sleep"] else .11)
+				pose.head += pulse * (.26 if action == "sleep" else -.09)
+				pose.weapon_arm += Vector3(-.24, -.47, .29) * pulse
+				pose.off_arm += Vector3(-.32, -.56, .14) * pulse
+				pose.rear_leg = Vector3(.08, -.14, .06) * pulse
+				pose.lead_leg = Vector3(-.07, .15, -.08) * pulse
 	elif actor >= 0 and elapsed >= impact_time:
 		var recoil := _hit_recoil(recovery)
-		lean = -.24 * recoil
-		arm += Vector2(.35, .24) * recoil
-		legs = Vector4(.32, -.19, -.19, .38) * recoil
+		pose.pelvis = -.07 * recoil
+		pose.spine -= .36 * recoil
+		pose.neck -= .20 * recoil
+		pose.head += .13 * recoil
+		pose.weapon_arm += Vector3(.35, .24, -.45) * recoil
+		pose.off_arm += Vector3(.35, -.49, .26) * recoil
+		pose.rear_leg = Vector3(.33, -.30, -.08) * recoil
+		pose.lead_leg = Vector3(-.19, .39, -.23) * recoil
 		if event.get("ring_out", false):
 			var fall := smoothstep(.46, .98, recovery)
 			if fall >= .96:
-				return
+				return feet
 			feet.y += height * .035 * fall
-			lean -= .25 * sin(PI * fall)
+			root_tilt = -.25 * sin(PI * fall)
 			height *= 1.0 - fall
-			legs += Vector4(-.20, .37, .18, .62) * fall
+			pose.rear_leg += Vector3(-.20, .37, -.11) * fall
+			pose.lead_leg += Vector3(.18, .62, -.30) * fall
 		elif event.health[index] <= 0:
 			var fall := smoothstep(.14, .96, recovery)
 			feet.x -= fall * height * .28 * direction
 			feet.y += height * .06 * fall
-			lean -= (1.53 if _lethal_hit() else .80) * fall
-			arm += Vector2(.24, .68) * fall
-	_avatar(feet, height, loadout, facing_left, skin_index, hair_index, lean, arm, wrist, rival_look if facing_left else {}, legs, trail)
+			root_tilt = -(1.53 if _lethal_hit() else .80) * fall
+			pose.weapon_arm += Vector3(.24, .68, -.39) * fall
+	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {}, root_tilt, trail)
 
 func _hit_recoil(recovery: float) -> float:
 	if event.damage + event.armor_hit <= 0:
