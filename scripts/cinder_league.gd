@@ -1203,7 +1203,7 @@ func _open_bout(snapshot: Dictionary, practice: bool) -> void:
 	battle_hud = BattleHud.new()
 	battle_layer.add_child(battle_hud)
 	battle_hud.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	battle_hud.build(snapshot.arena_name, serif)
+	battle_hud.build(serif)
 	battle_hud.action_selected.connect(_player_action)
 	battle_hud.settings_requested.connect(_show_settings)
 	battle_hud.resized.connect(_place_battle_actions)

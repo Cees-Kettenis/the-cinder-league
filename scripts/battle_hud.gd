@@ -68,7 +68,6 @@ class ActionButton extends Button:
 var action_buttons: Dictionary = {}
 var action_layer := Control.new()
 var action_preview: Label
-var gap_text := ""
 var fighter_cards: Array[Dictionary] = []
 var save_notice: Label
 var settings_button: Button
@@ -78,18 +77,8 @@ var auto_sleep_notice: Label
 var split_attacks := false
 var weapon_action := "attack"
 
-func build(arena_name: String, title_font: Font) -> void:
+func build(title_font: Font) -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
-	var banner := _card(self)
-	_dock(banner.get_parent(), Vector2(.5, 0), Rect2(-265, 21, 530, 0))
-	var arena_label := _label(banner, arena_name, 25, IVORY)
-	arena_label.add_theme_font_override("font", title_font)
-	arena_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	action_preview = _label(banner, "", 16, SAND)
-	action_preview.custom_minimum_size.y = 50
-	action_preview.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	action_preview.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	action_preview.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_make_fighter_card(false, title_font)
 	_make_fighter_card(true, title_font)
 
@@ -135,7 +124,6 @@ func build(arena_name: String, title_font: Font) -> void:
 		button.visible = action not in ["quick", "power"]
 		button.accessibility_name = Duel.LABELS[action]
 		action_buttons[action] = button
-	action_layer.visibility_changed.connect(_update_action_preview)
 	for action in ["cast", "potion"]:
 		var count := _label(action_buttons[action], "", 14, IVORY)
 		count.mouse_filter = MOUSE_FILTER_IGNORE
@@ -144,6 +132,15 @@ func build(arena_name: String, title_font: Font) -> void:
 		count.add_theme_constant_override("outline_size", 4)
 		_dock(count, Vector2(1, 0), Rect2(-32, 4, 24, 20))
 		charges[action] = count
+	action_preview = _label(action_layer, "", 14, IVORY)
+	var tooltip_style := _plate(Color("#251e21"), EDGE, 8, 8)
+	tooltip_style.set_border_width_all(1)
+	action_preview.add_theme_stylebox_override("normal", tooltip_style)
+	action_preview.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	action_preview.mouse_filter = MOUSE_FILTER_IGNORE
+	action_preview.z_index = 1
+	action_preview.size.x = 258
+	action_preview.hide()
 
 	var notice := _card(self)
 	_dock(notice.get_parent(), Vector2(.5, 0), Rect2(-125, 85, 250, 0))
@@ -156,7 +153,9 @@ func build(arena_name: String, title_font: Font) -> void:
 	settings_button.add_theme_stylebox_override("normal", _plate(Color("#3b2c2b"), EDGE, 0, 18))
 	settings_button.add_theme_stylebox_override("hover", _plate(Color("#63503a"), SAND, 0, 18))
 	Symbol.on_button(settings_button, "settings", 32, "Settings")
-	settings_button.pressed.connect(func() -> void: settings_requested.emit())
+	settings_button.pressed.connect(func() -> void:
+		action_preview.hide()
+		settings_requested.emit())
 
 	var warning := _card(self)
 	_dock(warning.get_parent(), Vector2(0, 1), Rect2(22, -78, 385, 54))
@@ -218,7 +217,6 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 			bar.value = float(current) / maxf(1.0, capacity)
 			bar.readout.text = "%d/%d" % [current, capacity]
 			bar.accessibility_description = "%d out of %d" % [current, capacity]
-	gap_text = _spaces(bout.distance()) + " apart"
 	action_layer.visible = not locked and bout.active == 0 and bout.winner == -2
 	show_auto_sleep(action_layer.visible and bout.must_sleep())
 	if not action_layer.visible:
@@ -234,8 +232,6 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 	charges.potion.text = str(int(player.potions))
 	weapon_action = "lunge" if bout.in_lunge_range() else "attack"
 	split_attacks = bout.in_weapon_reach() and bout.has_attack_styles()
-	if weapon_action == "attack" and not bout.in_weapon_reach():
-		gap_text += " · Move closer to attack"
 	action_buttons.quick.visible = split_attacks
 	action_buttons.power.visible = split_attacks
 	for key in action_buttons:
@@ -262,7 +258,6 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 			continue
 		var detail := _describe_action(bout, action, title, button, reason)
 		button.accessibility_description = detail
-	_update_action_preview()
 
 func _describe_action(bout: RefCounted, action: String, title: String, button: ActionButton, reason: String) -> String:
 	var player: Dictionary = bout.fighters[0]
@@ -271,7 +266,7 @@ func _describe_action(bout: RefCounted, action: String, title: String, button: A
 		if reason in ["Out of weapon reach", "Out of spell range"]:
 			if button.summary != null:
 				button.summary.text = "Out of reach"
-			return "%s · %s · %s" % [title, cost, reason]
+			return "%s\n%s away · %s" % [reason, _spaces(bout.distance()), cost]
 		var damage := maxi(1, roundi(bout.action_damage(action, player)))
 		var accuracy := roundi(100.0 * bout.chance(action))
 		if button.summary != null:
@@ -297,9 +292,11 @@ func _describe_action(bout: RefCounted, action: String, title: String, button: A
 func _strike_preview(bout: RefCounted, action: String, title: String, cost: String, damage: int, accuracy: int, reason: String) -> String:
 	var rival: Dictionary = bout.fighters[1]
 	var block := 0 if rival.exposed else roundi(100.0 * Duel.block_chance(bout.rules, rival.stats.Defence, rival.guarding))
-	var headline := "%s · %d%% hit · %d%% block if hit · %s" % [title, accuracy, block, cost]
+	var odds := "%d%% hit · %d%% block if hit" % [accuracy, block]
+	if action == "cast":
+		odds = title + "\n" + odds
 	if not reason.is_empty():
-		return headline + "\n" + reason
+		return odds + "\n" + reason
 	var armor := mini(damage, rival.armor)
 	var health := mini(damage - armor, rival.hp)
 	var losses := "%d HP" % health if armor == 0 else "%d armor" % armor
@@ -307,26 +304,59 @@ func _strike_preview(bout: RefCounted, action: String, title: String, cost: Stri
 		losses += " and %d HP" % health
 	var impact := "Clean hit takes " + losses
 	if action == "power" and health < rival.hp:
-		impact += " · Pushes " + _spaces(bout.power_push())
+		cost += " · Pushes " + _spaces(bout.power_push())
 	elif action == "lunge":
-		impact = "Moves " + _spaces(bout.lunge_spaces()) + " · " + impact
-	return headline + "\n" + impact
+		cost += " · Moves " + _spaces(bout.lunge_spaces())
+	return odds + "\n" + cost + "\n" + impact
 
 func _spaces(count: int) -> String:
 	return "%d %s" % [count, "space" if count == 1 else "spaces"]
 
 func _update_action_preview() -> void:
-	action_preview.text = gap_text
-	if not action_layer.visible:
+	if not is_inside_tree() or not action_layer.is_visible_in_tree():
+		action_preview.hide()
 		return
 	var hovered := get_viewport().gui_get_hovered_control()
 	var focused := get_viewport().gui_get_focus_owner()
-	for button: ActionButton in action_buttons.values():
-		if button.is_visible_in_tree() and button == hovered:
-			action_preview.text = button.accessibility_description
+	var button := hovered as ActionButton
+	if button == null:
+		button = focused as ActionButton
+	if button == null or not button.is_visible_in_tree() or button.accessibility_description.is_empty():
+		action_preview.hide()
+		return
+	action_preview.text = button.accessibility_description
+	action_preview.size.y = action_preview.get_minimum_size().y
+	var area := button.get_global_rect()
+	var center := area.get_center() - action_preview.size * .5
+	var in_pack := button.get_parent() != action_layer
+	if in_pack:
+		area = pack.get_global_rect()
+	elif action_buttons.find_key(button) in Duel.MOVEMENT:
+		area = action_buttons.retreat.get_global_rect().merge(action_buttons.jump.get_global_rect())
+	var bounds := get_global_rect().grow(-12.0)
+	var extent := action_preview.size
+	var x := clampf(center.x, bounds.position.x, bounds.end.x - extent.x)
+	var above := Vector2(x, area.position.y - extent.y - 8)
+	var below := Vector2(x, area.end.y + 8)
+	var left_card: Control = fighter_cards[0].name.get_parent().get_parent()
+	var right_card: Control = fighter_cards[1].name.get_parent().get_parent()
+	var between_cards := clampf(x, left_card.get_global_rect().end.x + 8,
+		right_card.get_global_rect().position.x - extent.x - 8)
+	var above_between_cards := Vector2(between_cards, above.y)
+	var options := [above, above_between_cards, below] if button.summary != null or in_pack else [below, above, above_between_cards]
+	var y := clampf(center.y, bounds.position.y, bounds.end.y - extent.y)
+	options.append(Vector2(area.position.x - extent.x - 8, y))
+	options.append(Vector2(area.end.x + 8, y))
+	var occupied := action_buttons.values() + [settings_button, pack, save_notice.get_parent().get_parent(),
+		auto_sleep_notice.get_parent().get_parent(), left_card, right_card]
+	for tip_position: Vector2 in options:
+		var candidate := Rect2(tip_position, extent)
+		if bounds.encloses(candidate) and not occupied.any(func(control: Control) -> bool:
+				return control.is_visible_in_tree() and control.get_global_rect().intersects(candidate)):
+			action_preview.global_position = tip_position
+			action_preview.show()
 			return
-	if focused in action_buttons.values() and focused.is_visible_in_tree():
-		action_preview.text = focused.accessibility_description
+	action_preview.hide()
 
 func place_actions(feet: Vector2, fighter_height: float) -> void:
 	var top := maxf(183, feet.y - maxf(118, fighter_height + 38))
@@ -351,6 +381,7 @@ func place_actions(feet: Vector2, fighter_height: float) -> void:
 	_place("guard", Vector2(center - 96, feet.y + 56))
 	_place("sleep", Vector2(center, feet.y + 56))
 	_place("taunt", Vector2(center + 96, feet.y + 56))
+	_update_action_preview()
 
 func _place(action: String, center: Vector2) -> void:
 	var button: Button = action_buttons[action]
