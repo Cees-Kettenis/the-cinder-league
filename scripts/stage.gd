@@ -107,6 +107,7 @@ var full_arena := false
 var lethal_bout := false
 var has_pits := false
 var shield_mask: Array[Vector2] = []
+var impact_played := false
 var contact_hold_left := 0.0
 var contact_hold_elapsed := 0.0
 var impact_anchor_set := false
@@ -128,12 +129,12 @@ func _process(delta: float) -> void:
 	elif full_arena:
 		idle_time += delta
 		if not event.is_empty() and elapsed < action_time:
-			var before := elapsed
 			var hold := minf(delta, contact_hold_left)
 			contact_hold_left -= hold
 			contact_hold_elapsed += hold
-			elapsed = minf(elapsed + delta - hold, action_time)
-			if before < impact_time and elapsed >= impact_time:
+			elapsed = minf(elapsed + (delta - hold), action_time)
+			if not impact_played and elapsed >= impact_time:
+				impact_played = true
 				if _landed_strike():
 					elapsed = impact_time
 					contact_hold_left = .075 if event.blocked or event.critical or event.action == "power" else .045
@@ -147,19 +148,20 @@ func animate(change: Dictionary) -> void:
 	positions = change.positions.duplicate()
 	event = change
 	elapsed = 0.0
+	impact_played = false
 	contact_hold_left = 0.0
 	contact_hold_elapsed = 0.0
 	impact_anchor_set = false
 	match event.action:
 		"attack":
-			impact_time = .27
-			action_time = .79 if event.critical else .64
+			impact_time = .31
+			action_time = .79 if event.critical else .68
 		"quick":
 			impact_time = .17
 			action_time = .58 if event.critical else .44
 		"power":
-			impact_time = .41
-			action_time = .97 if event.critical else .87
+			impact_time = .51
+			action_time = 1.02 if event.critical else .90
 		"lunge":
 			impact_time = .42
 			action_time = .98 if event.critical else .85
@@ -393,7 +395,7 @@ func _draw_battle() -> void:
 	var shift := smoothstep(.17, 1.0, approach) if action in ["jump", "jump_back"] else smoothstep(.04, .90, phase)
 	if action == "lunge":
 		shift = smoothstep(.22, .97, approach)
-	var stagger := _hit_recoil(recovery) if animating and elapsed >= impact_time else 0.0
+	var stagger := _hit_recoil(clampf((elapsed - impact_time) / .34, 0.0, 1.0)) if animating else 0.0
 	var visible_positions: Array[float] = [float(positions[0]), float(positions[1])]
 	var pushed := false
 	if animating and previous_positions.size() == 2:
@@ -423,7 +425,7 @@ func _draw_battle() -> void:
 		var distance := visible_positions[index]
 		var foot := view * Vector2(distance, 0)
 		if side >= 0 and index != side and not pushed:
-			foot.x += height * .29 * stagger * (1.0 if side == 0 else -1.0)
+			foot.x += height * .13 * stagger * (1.0 if side == 0 else -1.0)
 		feet.append(foot)
 		if distance < 0 or distance > arena_width:
 			continue
@@ -458,7 +460,7 @@ func _draw_battle() -> void:
 		draw_order = [side, 1 - side] if event.blocked else [1 - side, side]
 	for index in draw_order:
 		var loadout := left_loadout if index == 0 else right_loadout
-		points[index] = _draw_fighter(feet[index], height, loadout, index, gap, approach, recovery, phase)
+		points[index] = _draw_fighter(feet[index], height, loadout, index, gap, approach, recovery, phase, stagger)
 	if action == "cast" and animating:
 		var kit := left_loadout if side == 0 else right_loadout
 		var attack_art := int(_item(kit.get("spell", "")).get("art", 0))
@@ -473,7 +475,7 @@ func _draw_battle() -> void:
 		_draw_impact(feet, points[1 - side], height, side, recovery, contact_offset, view)
 
 func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int, gap: float, approach: float, recovery: float,
-		phase: float) -> FighterPoints:
+		phase: float, recoil: float) -> FighterPoints:
 	var actor := int(event.get("side", -1))
 	var action := str(event.get("action", ""))
 	var skin_index := skin if index == 0 else rival_skin
@@ -494,42 +496,31 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 	if actor == index and phase < 1:
 		match action:
 			"lunge":
-				var coil := smoothstep(.0, .22, approach) * (1.0 - smoothstep(.37, .76, approach))
-				var strike := smoothstep(.61, .99, approach) * (1.0 - smoothstep(.17, .90, recovery))
-				var plant := smoothstep(.37, .93, approach) * (1.0 - smoothstep(.22, .92, recovery))
+				var coil := smoothstep(.0, .22, approach) * (1.0 - smoothstep(.37, .66, approach))
+				var release := smoothstep(.69, 1.0, approach)
+				var plant := smoothstep(.45, .93, approach) * (1.0 - smoothstep(.22, .92, recovery))
 				var stride := sin(TAU * clampf((approach - .22) / .66, 0.0, 1.0)) * (1.0 - plant)
 				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
-				feet.x -= direction * height * (.055 * coil + (.09 if event.miss else .022) * strike)
-				feet.y += height * (.036 * (coil + plant) - .018 * absf(stride))
-				pose.pelvis = -.05 * coil + .07 * plant
-				pose.spine += -.12 * coil + .12 * strike
-				pose.head += .12 * coil - .10 * strike
+				feet.x -= direction * height * (.064 * coil + (.08 if event.miss else .027) * plant)
+				feet.y += height * (.047 * (coil + plant) - .010 * absf(stride))
+				pose.pelvis = -.04 * coil + .04 * plant
+				pose.spine += -.16 * coil + .17 * plant
+				pose.head += .13 * coil - .15 * plant
 				pose.rear_leg = Vector3(.22, -.12, -.09) * plant + Vector3(-.22, .31, -.10) * coil
 				pose.rear_leg += Vector3(.39, -.23, -.16) * stride
 				pose.lead_leg = Vector3(-.37, .36, -.03) * plant + Vector3(-.23, .32, -.09) * coil
 				pose.lead_leg += Vector3(-.38, .27, .11) * stride
-				pose.weapon_arm += (Vector3(-.30, -1.21, -.51) if mace else Vector3(.47, -.85, -.64)) * coil
-				pose.weapon_arm += (Vector3(-.75, .56, 1.17) if mace else Vector3(-.83, .54, .90)) * strike
-				pose.off_arm += Vector3(-.20, -.32, .16) * coil + Vector3(.38, -.21, .19) * strike
-				trail = smoothstep(.72, .97, approach) * (1.0 - smoothstep(.09, .43, recovery))
+				var ready_arm := Vector3(-.36, -1.26, -.16) if mace else Vector3(.26, -.82, .26)
+				var hit_arm := Vector3(-.84, .44, 1.31) if mace else Vector3(-.83, .44, .94)
+				var follow_arm := Vector3(-.38, .19, 1.46) if mace else Vector3(-.64, .40, .68)
+				pose.weapon_arm += _swing_arm(ready_arm, hit_arm, follow_arm, smoothstep(.03, .32, approach), release, recovery)
+				pose.off_arm += Vector3(-.20, -.32, .16) * coil + Vector3(.33, -.26, .19) * plant
+				trail = smoothstep(.22, .86, release) * (1.0 - smoothstep(.02, .28, recovery))
 			"attack", "quick", "power":
-				var windup := smoothstep(.0, .55, approach) * (1.0 - smoothstep(.58, .94, approach))
-				var follow := smoothstep(.60, 1.0, approach) * (1.0 - smoothstep(.28, .96, recovery))
-				var weight := .55 if action == "quick" else (1.25 if action == "power" else 1.0)
-				var reach := clampf(gap - height * .38, 0, height * .32) * (.65 if event.miss else 1.0)
-				feet.x += direction * (reach * follow - height * .05 * windup) * weight
-				feet.y += height * (.031 * windup + .025 * follow) * weight
-				pose.pelvis = (.045 * follow - .045 * windup) * weight
-				pose.spine += (.12 * follow - .24 * windup) * weight
-				pose.neck = .11 * windup * weight
-				pose.head += .09 * windup - .11 * follow
-				pose.weapon_arm += Vector3(.36, -.93, -.59) * windup * weight + Vector3(-.77, .55, .85) * follow
-				pose.off_arm += (Vector3(-.15, -.50, .17) * windup + Vector3(.31, -.19, .16) * follow) * weight
-				pose.rear_leg = (Vector3(-.16, -.06, .22) * windup + Vector3(.20, -.18, -.07) * follow) * weight
-				pose.lead_leg = (Vector3(-.12, .26, -.15) * windup + Vector3(-.22, .26, -.06) * follow) * weight
-				trail = smoothstep(.63, .96, approach) * (1.0 - smoothstep(.04, .51, recovery)) * minf(weight, 1.0)
-				if action == "power":
-					pose.weapon_arm += Vector3(-.35, -.25, 0) * windup + Vector3(0, 0, .36) * follow
+				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
+				var motion := _close_strike(pose, action, approach, recovery, gap / height, mace)
+				feet += Vector2(motion.x * direction, motion.y) * height
+				trail = motion.z
 			"advance", "retreat":
 				var forward := action == "advance"
 				var stride := float(1 if forward else -1)
@@ -589,21 +580,16 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				pose.rear_leg = Vector3(.08, -.14, .06) * pulse
 				pose.lead_leg = Vector3(-.07, .15, -.08) * pulse
 	elif actor >= 0 and elapsed >= impact_time:
-		var recoil := _hit_recoil(recovery)
-		pose.pelvis = -.07 * recoil
-		pose.spine -= .36 * recoil
-		pose.neck -= .20 * recoil
-		pose.head += .13 * recoil
-		pose.weapon_arm += Vector3(.35, .24, -.45) * recoil
-		pose.off_arm += Vector3(.35, -.49, .26) * recoil
-		pose.rear_leg = Vector3(.33, -.30, -.08) * recoil
-		pose.lead_leg = Vector3(-.19, .39, -.23) * recoil
+		# Tip the fighter as a unit on contact. A deep bend in several joints made the silhouette pulse.
+		root_tilt = -.14 * recoil
+		pose.weapon_arm += Vector3(.09, .07, -.15) * recoil
+		pose.off_arm += Vector3(.07, -.10, .06) * recoil
 		if event.get("ring_out", false):
 			var fall := smoothstep(.46, .98, recovery)
 			if fall >= .96:
 				return null
 			feet.y += height * .035 * fall
-			root_tilt = -.25 * sin(PI * fall)
+			root_tilt -= .25 * sin(PI * fall)
 			height *= 1.0 - fall
 			pose.rear_leg += Vector3(-.20, .37, -.11) * fall
 			pose.lead_leg += Vector3(.18, .62, -.30) * fall
@@ -613,7 +599,7 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			var bounce := sin(PI * clampf((recovery - .72) / .21, 0.0, 1.0))
 			feet.x -= direction * height * (.06 * buckle + .17 * topple)
 			feet.y += height * (.15 * buckle + .035 * topple - .055 * bounce)
-			root_tilt = -1.40 * topple + .10 * bounce
+			root_tilt += -1.40 * topple + .10 * bounce
 			pose.pelvis += -.12 * buckle + .17 * topple
 			pose.spine += .40 * buckle - .26 * topple
 			pose.neck += .23 * buckle + .14 * topple
@@ -638,6 +624,49 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 			pose.lead_leg += Vector3(-.20, .42, -.18) * dodge
 	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {}, root_tilt, trail)
 
+func _close_strike(pose: Rig.Pose, action: String, approach: float, recovery: float, gap: float, mace: bool) -> Vector3:
+	var ready_arm := Vector3(.27, -1.08, -.72)
+	var hit_arm := Vector3(-.71, .52, 1.11)
+	var follow_arm := Vector3(-.37, .26, 1.40)
+	var weight := 1.0
+	var release_start := .64
+	match action:
+		"quick":
+			weight = .53
+			release_start = .46
+			ready_arm = Vector3(.22, -.64, .05)
+			hit_arm = Vector3(-.65, .34, 1.17) if mace else Vector3(-.72, .40, .99)
+			follow_arm = Vector3(-.40, .20, .94) if mace else Vector3(-.45, .31, .65)
+		"power":
+			weight = 1.34
+			release_start = .73
+			ready_arm = Vector3(-.53, -1.22, .44)
+			hit_arm = Vector3(-.77, .69, 1.02)
+			follow_arm = Vector3(-.40, .57, 1.12)
+	var windup := smoothstep(.01, release_start, approach)
+	var release := smoothstep(release_start, 1.0, approach)
+	var backswing := windup * (1.0 - release)
+	var drive := release * (1.0 - smoothstep(.24, .94, recovery))
+	var reach := clampf(gap - SPACE_PER_FIGHTER_HEIGHT, 0.0, .32)
+	var stride := reach * drive * (.75 if event.miss else 1.0)
+	var shift := stride + (.045 * drive - .065 * backswing) * weight
+	var sink := (.050 * backswing + .050 * drive) * weight
+	pose.spine += (.10 * drive - .125 * backswing) * weight
+	pose.neck += (.07 * backswing - .06 * drive) * weight
+	pose.head += (.15 * backswing - .11 * drive) * weight
+	pose.weapon_arm += _swing_arm(ready_arm, hit_arm, follow_arm, windup, release, recovery)
+	pose.off_arm += Vector3(-.15, -.43, .26) * backswing + Vector3(.39, -.35, .26) * drive
+	# Hold the boots on the floor as the torso loads backwards and drives forward.
+	pose.rear_leg = Rig.walk_leg(0, Vector2(-shift, -sink) * 1536.0, 0.0)
+	pose.lead_leg = Rig.walk_leg(1, Vector2(stride - shift, -sink) * 1536.0, 0.0)
+	var trail := smoothstep(.28, .95, release) * (1.0 - smoothstep(.01, .26, recovery))
+	return Vector3(shift, sink, trail * minf(1.0, weight))
+
+func _swing_arm(ready_arm: Vector3, hit_arm: Vector3, follow_arm: Vector3, windup: float, release: float, recovery: float) -> Vector3:
+	var arm := (ready_arm * windup).lerp(hit_arm, release)
+	arm = arm.lerp(follow_arm, smoothstep(.03, .35, recovery))
+	return arm * (1.0 - smoothstep(.38, .97, recovery))
+
 func _brace(pose: Rig.Pose, amount: float, shielded: bool) -> void:
 	pose.spine += .10 * amount
 	pose.neck -= .11 * amount
@@ -657,7 +686,7 @@ func _hit_recoil(recovery: float) -> float:
 	var weight := .30 if event.blocked else (.58 if event.damage <= 0 else 1.12)
 	if event.critical:
 		weight *= 1.22
-	return weight * smoothstep(.0, .13, recovery) * (1.0 - smoothstep(.22, .82, recovery))
+	return weight * smoothstep(.0, .09, recovery) * (1.0 - smoothstep(.22, .91, recovery))
 
 func _draw_dust(at: Vector2, height: float, progress: float) -> void:
 	for index in 6:

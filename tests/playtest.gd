@@ -334,7 +334,9 @@ func _check_hit_feedback() -> void:
 	stage.full_arena = true
 	stage.kind = "battle"
 	var impacts := [0]
+	var finished := [0]
 	stage.impact_reached.connect(func() -> void: impacts[0] += 1)
+	stage.turn_animation_finished.connect(func() -> void: finished[0] += 1)
 	stage._process(stage.impact_time + .01)
 	stage._process(.02)
 	_check(impacts[0] == 1 and is_equal_approx(stage.elapsed, stage.impact_time) and stage.contact_hold_elapsed > 0.0,
@@ -349,8 +351,16 @@ func _check_hit_feedback() -> void:
 	_check(impacts[0] == 2 and stage.contact_hold_left == 0.0 and stage.elapsed > stage.impact_time,
 		"A missed swing should keep moving through its follow-through")
 	strike.health = [44, 0]
+	strike.action = "quick"
 	stage.animate(strike)
 	_check(stage._knockout() and stage.action_time > strike_time, "A standard knockout should leave time for the full collapse")
+	stage._process(stage.impact_time + .01)
+	# This frame time used to round elapsed below the impact threshold during hit-stop.
+	for frame in 400:
+		stage._process(.005037)
+	_check(impacts[0] == 3 and finished[0] == 1 and is_equal_approx(stage.elapsed, stage.action_time),
+		"A knockout must play its impact and finish once even when hit-stop crosses a floating-point boundary")
+	strike.action = "attack"
 	strike.ring_out = true
 	strike.positions = [29, 31]
 	stage.animate(strike)
