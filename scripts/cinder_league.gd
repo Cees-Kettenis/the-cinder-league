@@ -1110,7 +1110,7 @@ func _preview_item(id: String) -> void:
 			_shop_stat("attack", "Extra weapon damage", "+%d → +%d" % [old, item.damage])
 		"potion":
 			_shop_stat("health", "Health restored", "+%d" % data.rules.heal)
-			_shop_stat("potion", "Uses per fight", str(int(data.rules.potion_uses)))
+			_shop_stat("potion", "Uses per death match", str(int(data.rules.potion_uses)))
 
 func _shop_stat(symbol: String, caption: String, value: String) -> void:
 	var stat := _column(shop_stats, 3)
@@ -1164,7 +1164,7 @@ func show_arena() -> void:
 	var cards := _row(content)
 	var regular := _card(cards)
 	_fill(regular.get_parent())
-	_title(regular, "Random bout", 23)
+	_title(regular, "First blood bout", 23)
 	var rewards := _row(regular, 10)
 	_token(rewards, "coin", str(game.win_gold(game.arena_index())), "Gold for a win")
 	_token(rewards, "xp", str(game.regular_win_xp()), "Experience for a win")
@@ -1208,7 +1208,7 @@ func _scout_bout(tournament: bool) -> void:
 func _show_faceoff(offer: Dictionary) -> void:
 	var rival: Dictionary = offer.rival
 	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout)
-	var heading := "Before the fight"
+	var heading := "First blood bout"
 	if offer.tournament:
 		heading = "Tournament · Round %d/%d" % [int(offer.round) + 1, int(offer.round_count)]
 	_page("scout", heading)
@@ -1238,7 +1238,8 @@ func _show_faceoff(offer: Dictionary) -> void:
 	_compare_row(kit, "Spell", player.spell.get("name", "None"), rival.spell.get("name", "None"), "cast")
 	_compare_row(kit, "Spell reach", player.spell.get("reach", "–"), rival.spell.get("reach", "–"), "advance")
 	_compare_row(kit, "Spell casts", player.casts, rival.casts, "cast")
-	_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
+	if offer.tournament:
+		_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
 	var actions := _row(content, 10)
 	if not game.tournament_in_progress():
 		_button(actions, "Back", show_arena)
@@ -1399,6 +1400,8 @@ func _finish_bout() -> void:
 		title = "%s has fallen" % game.state.name
 	elif not bout.history.is_empty() and bout.history.back().get("ring_out", false):
 		title = "Ring-out victory" if bout.winner == 0 else "Ring-out defeat"
+	elif not bout.history.is_empty() and bout.history.back().get("first_blood", false):
+		title = "First blood victory" if bout.winner == 0 else "Defeat · Yielded"
 	current_screen = "result"
 	fight_locked = true
 	_refresh_battle()
@@ -1515,7 +1518,8 @@ func show_simulator() -> void:
 	var seeds := _number(buttons, "Seed", 0, 99999999, 42)
 	var runs := _number(buttons, "Bouts", 1, 500, 20)
 	var actions := _row(content)
-	_button(actions, "Run matchup", _simulate.bind(left, right, level, seeds, runs, false), true)
+	_button(actions, "Run first blood", _simulate.bind(left, right, level, seeds, runs, false), true)
+	_button(actions, "Run death match", _simulate.bind(left, right, level, seeds, runs, false, true))
 	_button(actions, "Run campaign", _simulate.bind(left, right, level, seeds, runs, true))
 	_button(actions, "Playtest balance", show_balance)
 	sim_output = TextEdit.new()
@@ -1523,13 +1527,14 @@ func show_simulator() -> void:
 	content.add_child(sim_output)
 	_fill(sim_output, true)
 
-func _simulate(left: OptionButton, right: OptionButton, level: SpinBox, seeds: SpinBox, runs: SpinBox, campaign: bool) -> void:
+func _simulate(left: OptionButton, right: OptionButton, level: SpinBox, seeds: SpinBox, runs: SpinBox, campaign: bool, death_match: bool = false) -> void:
 	var style := Simulator.STYLES[left.selected]
 	var result: Dictionary
 	if campaign:
 		result = simulations.campaign(style, int(seeds.value), int(runs.value))
 	else:
-		result = simulations.batch(style, Simulator.STYLES[right.selected], int(level.value), int(seeds.value), int(runs.value))
+		result = simulations.batch(style, Simulator.STYLES[right.selected], int(level.value), int(seeds.value), int(runs.value),
+			{"death_match": death_match})
 	var lines: Array[String] = []
 	if result.has("error"):
 		lines.append(result.error)

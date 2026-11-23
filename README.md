@@ -23,19 +23,19 @@ Select **Play** on the title screen, then choose a save slot. Enter a name and a
 
 Movement, weapon attacks, and defence are grouped around your fighter. Hover over an action or focus it with the keyboard to see what it does, what it costs, or why it's unavailable. Fighters start five spaces apart in new bouts. Step in or back one space for 2 stamina, or leap in either direction up to three spaces for 6 stamina. Each movement takes a turn. Once the gap is smaller than the starting distance, the sword button offers **Lunge** if you are one or two spaces outside weapon reach. It moves you into reach and strikes at lower accuracy. It costs your weapon's usual stamina plus 7 and another 5 per space covered.
 
-Within weapon reach, **Quick** attacks trade damage for accuracy and cost less stamina, **Normal** uses the weapon's usual stats, and **Power** attacks hit harder with lower accuracy and higher stamina cost. Each button shows damage and hit chance. The preview shows the rival's chance to block if hit and how much armor and health an ordinary unblocked hit would take. An unblocked Power hit pushes a surviving opponent back by one space, plus one more for every 12 Strength. A fighter pushed past either edge falls into the pit and immediately loses.
+Within weapon reach, **Quick** attacks trade damage for accuracy and cost less stamina, **Normal** uses the weapon's usual stats, and **Power** attacks hit harder with lower accuracy and higher stamina cost. Each button shows damage and hit chance. The preview shows the rival's chance to block if hit and how much armor and health an ordinary unblocked hit would take. An unblocked Power hit pushes a surviving opponent back by one space, plus one more for every 12 Strength. In a death match, a fighter pushed past either edge falls into the pit and immediately loses. First-blood bouts stop the shove at the edge.
 
 The crests at each top corner show the fighter's current and maximum health, armor, and stamina. Armor absorbs damage before health. Sleep restores stamina and exposes you to attacks. The game announces and takes a sleep turn when exhaustion leaves you without another legal action. Taunt can deal damage or force an aggressive move. Spells are less accurate within reach of an opponent who has enough stamina to attack.
 
 New bouts use a 30-space arena with a pit at each end. The camera follows the fight and pulls back when the fighters spread out. Steps, jumps, attack ranges, and knockback use the same distances at any window size. Saved bouts keep their original arena width.
 
-The **Pack** appears when you bring a spell or potion into the arena and shows how many uses remain. Fireball and Lightning Strike have two casts per bout. The heavier spells have one. A miss spends a cast, and sleeping only restores stamina. Bring a weapon to follow up after casting.
+The **Pack** shows remaining spell casts and, in death matches, healing potions. Fireball and Lightning Strike have two casts per bout. The heavier spells have one. A miss spends a cast, and sleeping only restores stamina. Bring a weapon to follow up after casting.
 
 Choose **Scout rival** in the arena to reveal a randomly generated opponent near your level. Compare your stats, equipment, and reach before choosing **Fight**. You can go back to town or close the game and return to the same rival. A scouted tournament opponent stays in place while you fight regular bouts or buy gear. Your latest gear is used when you enter the ring.
 
-Losing a regular bout costs up to 8 gold. At an arena's level cap, regular wins pay half gold and give no XP. You can keep earning gold for gear before entering the tournament. Beating the champion opens the next arena and grants enough XP for its opening level.
+Regular bouts go to **first blood**. The first hit to take health wins, and the other fighter kneels to yield. Damage absorbed entirely by armor keeps the bout going. Losing costs up to 8 gold. At an arena's level cap, regular wins pay half gold and give no XP. You can keep earning gold for gear before entering the tournament. Beating the champion opens the next arena and grants enough XP for its opening level.
 
-Amber Ring has one preliminary round before Idra Vale. Iron Court has two before Oren Voss. Preliminary builds are seeded for each tournament. The two champions have fixed builds. **Fight to the death** commits you to the tournament until you win it or fall. If you close the game between rounds, continuing the slot takes you to the next match. Tournament bouts saved under earlier rules retain their original defeat conditions. Rivals keep their appearance from scouting through the fight. Their decorative armor leaves the equipment and stats on the face-off screen as the source for planning the fight.
+Amber Ring has one preliminary round before Idra Vale. Iron Court has two before Oren Voss. Preliminary builds are seeded for each tournament. The two champions have fixed builds. **Fight to the death** commits you to the tournament until you win it or fall. Fatal blows have cartoon gore. If you close the game between rounds, continuing the slot takes you to the next match. Rivals keep their appearance from scouting through the fight. Their decorative armor leaves the equipment and stats on the face-off screen as the source for planning the fight.
 
 Use **Replace save** on an occupied slot to start a new gladiator. The game archives the previous save when you finish creating the replacement. Live careers are archived under `user://retired/`, and fallen gladiators under `user://fallen/`. The **Hall of Fame** on the title screen lists current and archived gladiators by tournaments won, level, and experience.
 
@@ -45,9 +45,9 @@ Each slot autosaves independently, including resolved turns during a duel. Closi
 
 ## Simulate
 
-Open the pause menu from the title screen and choose **Settings** → **Simulator**. Choose fighter presets, level, seed, and number of bouts. Run a matchup batch or a campaign across both arenas. A campaign seed reproduces the rival draws and fight rolls. The result includes a turn-by-turn trace of the first bout.
+Open the pause menu from the title screen and choose **Settings** → **Simulator**. Choose fighter presets, level, seed, and number of bouts. Run first-blood matchups, death matches, or a campaign across both arenas. A campaign seed reproduces the rival draws and fight rolls. The result includes a turn-by-turn trace of the first bout.
 
-The same combat rules are available from a terminal. Standalone simulator matchups can end in a draw.
+The same combat rules are available from a terminal. Matchup batches default to first blood. Add `--death-match` to use tournament combat rules. Standalone simulator matchups can end in a draw.
 
 ```bash
 godot --headless --path . --script scripts/simulate.gd -- --left=hybrid --right=mage --level=4 --bouts=20 --seed=42

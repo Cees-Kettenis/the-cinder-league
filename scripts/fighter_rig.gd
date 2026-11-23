@@ -32,6 +32,8 @@ const PARENTS := [-1, PELVIS, SPINE, NECK, SPINE, WEAPON_SHOULDER, WEAPON_ELBOW,
 const SKIN_TINTS := [Color.WHITE, Color(1.12, 1.09, 1.08), Color("#d2ad94"), Color("#a57862")]
 const HAIR_TINTS := [Color.WHITE, Color(1.23, .86, .65), Color(.95, 1.05, 1.25)]
 const ROW_HEIGHT := 24
+const NECK_CUT := Vector2(482, 264)
+enum SkinPart { WHOLE, BODY, HEAD_ONLY }
 # These cuts run through the spaces between the arms and the coat.
 const OFF_ARM_CUT := [
 	Vector2(365, 0), Vector2(365, 480), Vector2(334, 521), Vector2(303, 544), Vector2(300, 624),
@@ -46,6 +48,8 @@ const WEAPON_ARM_CUT := [
 static var _points := PackedVector2Array()
 static var _uv := PackedVector2Array()
 static var _indices := PackedInt32Array()
+static var _head_indices := PackedInt32Array()
+static var _body_indices := PackedInt32Array()
 static var _bindings := PackedVector3Array()
 static var _tint_weights := PackedVector2Array()
 static var _palettes: Dictionary = {}
@@ -91,7 +95,8 @@ static func _solve_chain(upper: Vector2, lower: Vector2, target: Vector2, end_an
 		(reach * reach - length_a * length_a - length_b * length_b) / (2.0 * length_a * length_b), -1.0, 1.0)) - upper.angle_to(lower)
 	return Vector3(first, second, end_angle - first - second)
 
-static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, hair: int, firm_weapon_arm: bool = false) -> void:
+static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, hair: int,
+		firm_weapon_arm: bool = false, part: SkinPart = SkinPart.WHOLE) -> void:
 	if _points.is_empty():
 		_build_mesh()
 	var vertices := PackedVector2Array()
@@ -111,7 +116,11 @@ static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, 
 			vertices[index] = bones[int(binding.x)] * point
 		else:
 			vertices[index] = _deform(point, binding, bones)
-	RenderingServer.canvas_item_add_triangle_array(canvas.get_canvas_item(), _indices, vertices, _colors(skin, hair), _uv,
+	var indices := _indices
+	match part:
+		SkinPart.BODY: indices = _body_indices
+		SkinPart.HEAD_ONLY: indices = _head_indices
+	RenderingServer.canvas_item_add_triangle_array(canvas.get_canvas_item(), indices, vertices, _colors(skin, hair), _uv,
 		PackedInt32Array(), PackedFloat32Array(), SPRITE.get_rid())
 
 static func bend_armor(point: Vector2, bones: Array[Transform2D], side: int) -> Vector2:
@@ -145,8 +154,13 @@ static func _build_mesh() -> void:
 		for row in rows - 1:
 			for column in columns - 1:
 				var corner := first_vertex + row * columns + column
-				_indices.append_array(PackedInt32Array([corner, corner + 1, corner + columns,
-					corner + 1, corner + columns + 1, corner + columns]))
+				var triangles := PackedInt32Array([corner, corner + 1, corner + columns,
+					corner + 1, corner + columns + 1, corner + columns])
+				_indices.append_array(triangles)
+				if row * ROW_HEIGHT < NECK_CUT.y:
+					_head_indices.append_array(triangles)
+				else:
+					_body_indices.append_array(triangles)
 
 static func _cut_at(cut: Array, y: float) -> float:
 	for index in range(1, cut.size()):

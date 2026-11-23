@@ -95,7 +95,7 @@ func impact(event: Dictionary, weapon_art: int) -> void:
 	var weapon_attack: bool = event.action in Duel.WEAPON_ACTIONS
 	if weapon_attack:
 		_play_on(_effects, "swing", .88 if weapon_art == 1 else 1.1)
-	if event.miss or event.damage + event.armor_hit == 0:
+	if event.miss or (event.damage + event.armor_hit == 0 and not event.get("first_blood", false)):
 		return
 	if event.blocked or (event.armor_hit > 0 and weapon_attack):
 		_play_on(_contact, "block", .87 if event.critical else 1.0)

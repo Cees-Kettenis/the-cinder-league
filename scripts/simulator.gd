@@ -19,12 +19,14 @@ func batch(left: String, right: String, level: int, start_seed: int, count: int,
 	var right_items: Dictionary = options.get("right_loadout", data.eligible_loadout(level, right_stats, right))
 	var left_fighter: Dictionary = data.fighter(left.capitalize(), left_stats, left_items, left)
 	var right_fighter: Dictionary = data.fighter(right.capitalize(), right_stats, right_items, right)
+	var first_blood: bool = not options.get("death_match", false)
 	var summary := {"mode": "duel", "left": left, "right": right, "seed": str(start_seed), "level": level,
 		"bouts": count, "left_wins": 0, "right_wins": 0, "draws": 0, "turns": 0, "damage": 0, "blocks": 0, "misses": 0,
-		"left_stats": left_stats, "right_stats": right_stats, "left_loadout": left_items, "right_loadout": right_items, "trace": []}
+		"left_stats": left_stats, "right_stats": right_stats, "left_loadout": left_items, "right_loadout": right_items,
+		"first_blood": first_blood, "trace": []}
 	for index in count:
 		var match_seed := start_seed + index
-		var bout := Duel.new(data, left_fighter, right_fighter, match_seed, int(options.get("distance", -1)))
+		var bout := Duel.new(data, left_fighter, right_fighter, match_seed, int(options.get("distance", -1)), {"first_blood": first_blood})
 		var scripted: Array = options.get("actions", [])
 		while bout.winner == -2:
 			var action := str(scripted[bout.turn]) if bout.turn < scripted.size() else bout.choose(left if bout.active == 0 else right)
@@ -88,6 +90,8 @@ func _shop(run: RefCounted, style: String) -> void:
 			run.purchase(data.items[id])
 
 func _validate_scenario(options: Dictionary, level: int, points: int) -> String:
+	if options.has("death_match") and not options.death_match is bool:
+		return "The death_match field must be true or false."
 	if options.has("actions"):
 		if not options.actions is Array:
 			return "Scenario actions must be an array of action names."

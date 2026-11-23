@@ -22,6 +22,7 @@ var strategy_random := RandomNumberGenerator.new()
 var turn := 0
 var active := 0
 var winner := -2
+var first_blood: bool
 var defender_wins_ties := false
 var history: Array[Dictionary] = []
 var _restoring_history := false
@@ -30,6 +31,7 @@ func _init(rules_data: RefCounted, left: Dictionary, right: Dictionary, fight_se
 	rules = saved_rules.get("rules", rules_data.rules)
 	moves = saved_rules.get("moves", rules_data.moves)
 	distances = saved_rules.get("distances", rules_data.distances)
+	first_blood = saved_rules.get("first_blood", false)
 	fighters = [left.duplicate(true), right.duplicate(true)]
 	seed_value = fight_seed
 	random.seed = seed_value
@@ -119,7 +121,11 @@ func has_attack_styles() -> bool:
 	return rules.has("power_damage_multiplier")
 
 func power_push() -> int:
-	return 1 + floori(fighters[active].stats.Strength / float(rules.power_strength_per_space))
+	var push := 1 + floori(fighters[active].stats.Strength / float(rules.power_strength_per_space))
+	return mini(push, _edge_distance()) if first_blood else push
+
+func _edge_distance() -> int:
+	return int(rules.arena_size) - positions[1] if active == 0 else positions[0]
 
 func restore_history(actions: Array) -> bool:
 	_restoring_history = true
@@ -193,6 +199,8 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 			if positions[active] == (0 if active == 0 else int(rules.arena_size)):
 				return "At the arena edge"
 		"potion":
+			if first_blood:
+				return "Potions are for death matches"
 			if fighter.potions <= 0:
 				return "No draught available"
 			if fighter.hp == fighter.max_hp:
@@ -248,7 +256,7 @@ func act(action: String) -> Dictionary:
 			elif action in ["lunge", "rush"]:
 				positions[side] += (1 if side == 0 else -1) * lunge_spaces()
 			_strike(action, fighter, enemy, event)
-			if action == "power" and not event.miss and not event.blocked and enemy.hp > 0:
+			if action == "power" and not event.miss and not event.blocked and not _decisive_hit(enemy, event):
 				_knock_back(enemy, event)
 		"taunt":
 			var provoke := taunt_chance(rules, fighter.stats.Charisma)
@@ -258,7 +266,7 @@ func act(action: String) -> Dictionary:
 			else:
 				_injure(taunt_damage(rules, fighter.stats.Charisma), enemy, event)
 				event.message = "%s rattles %s. %s" % [fighter.name, enemy.name, _impact(event)]
-	if enemy.hp <= 0:
+	if _decisive_hit(enemy, event):
 		winner = side
 	else:
 		fighter.hp = mini(fighter.max_hp, fighter.hp + regeneration(rules, fighter.stats.Vitality))
@@ -273,6 +281,9 @@ func act(action: String) -> Dictionary:
 				event.message += " The defender wins ties."
 		else:
 			winner = 0 if left > right else 1
+	if first_blood and winner >= 0:
+		event.yielded = 1 - winner
+		event.message += " %s yields." % fighters[event.yielded].name
 	active = 1 - side
 	event.positions = positions.duplicate()
 	event.health = [fighters[0].hp, fighters[1].hp]
@@ -280,6 +291,9 @@ func act(action: String) -> Dictionary:
 	event.energy = [fighters[0].energy, fighters[1].energy]
 	history.append(event)
 	return event
+
+func _decisive_hit(enemy: Dictionary, event: Dictionary) -> bool:
+	return enemy.hp <= 0 or event.get("first_blood", false)
 
 func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dictionary) -> void:
 	if random.randf() >= chance(action):
@@ -317,13 +331,16 @@ func _knock_back(enemy: Dictionary, event: Dictionary) -> void:
 		enemy.hp = 0
 		event.ring_out = true
 		event.message += " %s falls into the pit." % enemy.name
-	else:
+	elif steps > 0:
 		event.message += " %s is pushed back %d." % [enemy.name, steps]
 
 func _injure(damage: int, target: Dictionary, event: Dictionary) -> void:
 	event.armor_hit = mini(damage, int(target.armor))
 	target.armor -= event.armor_hit
-	event.damage = mini(int(target.hp), damage - event.armor_hit)
+	var passed_armor := damage - int(event.armor_hit)
+	if first_blood and passed_armor > 0:
+		event.first_blood = true
+	event.damage = mini(maxi(0, int(target.hp) - int(first_blood)), passed_armor)
 	target.hp -= event.damage
 
 func _impact(event: Dictionary) -> String:
@@ -340,11 +357,10 @@ func choose(profile: String) -> String:
 		return "potion"
 	if profile == "charisma" and "taunt" in legal:
 		return "taunt"
+	var protection: int = enemy.armor + (1 if first_blood else enemy.hp)
 	if "power" in legal and not enemy.guarding:
-		var edge_distance := int(rules.arena_size) - positions[1] if active == 0 else positions[0]
-		var protection: float = enemy.hp + enemy.armor
 		var finish := action_damage("attack", fighter) < protection and action_damage("power", fighter) >= protection
-		if power_push() > edge_distance or (finish and chance("power") >= .50):
+		if power_push() > _edge_distance() or (finish and chance("power") >= .50):
 			return "power"
 	if "attack" in legal:
 		if "cast" in legal:
@@ -356,13 +372,15 @@ func choose(profile: String) -> String:
 		strategy_random.seed = seed_value ^ ((turn + 1) * 0x9e3779b9)
 		if profile == "guard" and "guard" in legal and not enemy.exposed and strategy_random.randf() < .10:
 			return "guard"
-		if "quick" in legal and action_damage("quick", fighter) >= enemy.hp + enemy.armor:
+		if "quick" in legal and action_damage("quick", fighter) >= protection:
 			return "quick"
 		return "attack"
 	if "cast" in legal and not _should_close(fighter, enemy):
 		return "cast"
 	if "quick" in legal:
 		return "quick"
+	if first_blood and "guard" in legal and _can_guard_against_cast(fighter, enemy):
+		return "guard"
 	if "lunge" in legal and not enemy.guarding:
 		return "lunge"
 	if "jump" in legal:
@@ -379,6 +397,13 @@ func choose(profile: String) -> String:
 	if fighter.energy == fighter.max_energy and "taunt" in legal:
 		return "taunt"
 	return "sleep"
+
+func _can_guard_against_cast(fighter: Dictionary, enemy: Dictionary) -> bool:
+	if (enemy.casts <= 0 or enemy.provoked or distance() > enemy.spell.reach or enemy.energy < enemy.spell.energy
+			or block_chance(rules, fighter.stats.Defence, true) <= 0.0):
+		return false
+	var damage := strike_damage(rules, enemy, true)
+	return roundi(damage) > fighter.armor and maxi(1, roundi(damage * rules.guard_damage_factor)) <= fighter.armor
 
 func _should_close(fighter: Dictionary, enemy: Dictionary) -> bool:
 	return (enemy.casts > 0 and distance() <= enemy.spell.reach

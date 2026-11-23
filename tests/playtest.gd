@@ -27,6 +27,7 @@ func _run() -> void:
 	_check_lunge(data)
 	_check_legacy_lunge(data)
 	_check_attack_styles(data)
+	_check_first_blood(data)
 	_check_arena_view(data)
 	_check_fighter_rig()
 	_check_hit_feedback()
@@ -261,6 +262,55 @@ func _check_attack_styles(data: RefCounted) -> void:
 	var legacy := Duel.new(data, attacker, target, 42, 1, {"rules": rules})
 	_check(not legacy.act("power").valid and legacy.act("attack").valid, "Older snapshots should retain Normal without the new styles")
 
+func _check_first_blood(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	var attacker: Dictionary = data.fighter("Attacker", stats, {"weapon": "sword", "spell": "fireball"})
+	var defender: Dictionary = data.fighter("Defender", stats, {"weapon": "sword", "potion": true})
+	var rules: Dictionary = data.rules.duplicate()
+	rules.minimum_hit = 1.0
+	rules.maximum_hit = 1.0
+	rules.power_hit_penalty = 0.0
+	rules.base_crit = 0.0
+	rules.block_cap = 0.0
+	rules.taunt_provoke = 0.0
+	var mode := {"rules": rules, "first_blood": true}
+	defender.armor = int(attacker.weapon.damage)
+	var duel := Duel.new(data, attacker, defender, 42, 1, mode)
+	var absorbed := duel.act("attack")
+	_check(absorbed.damage == 0 and absorbed.armor[1] == 0 and not absorbed.has("yielded") and duel.winner == -2,
+		"Removing the last armor point should leave a first-blood bout running")
+	duel.act("guard")
+	var blood := duel.act("attack")
+	_check(blood.damage > 0 and blood.health[1] > 0 and blood.first_blood and blood.yielded == 1
+		and duel.winner == 0 and not duel.act("guard").valid, "The first health damage should end the bout and make the opponent yield")
+
+	var reply := Duel.new(data, attacker, defender, 42, 1, mode)
+	reply.act("guard")
+	var lost := reply.act("attack")
+	_check(lost.get("yielded", -1) == 0 and reply.winner == 1, "An opponent should win by first blood on the same terms")
+	var heavy_hit := Duel.new(data, attacker, attacker, 42, 1, mode)
+	heavy_hit.fighters[1].hp = 3
+	var cut := heavy_hit.act("power")
+	_check(cut.get("first_blood", false) and cut.health[1] == 1 and heavy_hit.winner == 0,
+		"A finishing hit should leave the yielding fighter alive even if the blow would otherwise be fatal")
+	for action in ["cast", "taunt"]:
+		var special := Duel.new(data, attacker, attacker, 42, 2, mode)
+		var event := special.act(action)
+		_check(event.damage > 0 and event.get("yielded", -1) == 1, "%s should win by dealing health damage" % action)
+
+	defender.armor = 100
+	var protected := Duel.new(data, attacker, defender, 42, 1, mode)
+	var edge := int(rules.arena_size)
+	protected.positions = [edge - 1, edge]
+	var shove := protected.act("power")
+	_check(shove.damage == 0 and not shove.has("ring_out") and protected.winner == -2 and protected.positions[1] == edge,
+		"An armored fighter should stop at the edge in a first-blood bout")
+
+	var lethal := Duel.new(data, attacker, attacker, 42, 1, {"rules": rules})
+	var wound := lethal.act("attack")
+	_check(wound.damage > 0 and wound.health[1] > 0 and not wound.has("yielded") and lethal.winner == -2,
+		"A death match should continue after a non-fatal hit")
+
 func _check_arena_view(data: RefCounted) -> void:
 	var edge := int(data.rules.arena_size)
 	_check(edge == 30, "New bouts should use a 30-space arena")
@@ -416,6 +466,10 @@ func _check_saved_bout(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)
 	campaign.create(0, "Gladiator", 0, 0, data.build_stats("weapon", 10))
 	var snapshot := campaign.start_bout(false, 42)
+	_check(campaign.open_bout(snapshot).first_blood, "New regular bouts should save the first-blood rules")
+	var legacy_snapshot := snapshot.duplicate(true)
+	legacy_snapshot.combat.erase("first_blood")
+	_check(not campaign.open_bout(legacy_snapshot).first_blood, "A regular bout saved before first blood should retain its original win condition")
 	var tie_snapshot := snapshot.duplicate(true)
 	tie_snapshot.combat.rules.turn_limit = 2
 	var tied: RefCounted = campaign.open_bout(tie_snapshot)

@@ -12,7 +12,7 @@ func _initialize() -> void:
 		elif pair.size() == 1:
 			args[pair[0]] = true
 	if args.has("help"):
-		print("Use --campaign or --left=weapon --right=mage. Extra options: --level=4 --seed=42 --bouts=10 --balance=/path/balance.json --scenario=/path/fighters.json")
+		print("Use --campaign or --left=weapon --right=mage. Extra options: --death-match --level=4 --seed=42 --bouts=10 --balance=/path/balance.json --scenario=/path/fighters.json")
 		quit()
 		return
 	var data := Data.new()
@@ -37,6 +37,8 @@ func _initialize() -> void:
 			quit(1)
 			return
 		options = read
+	if args.has("death-match"):
+		options.death_match = true
 	var seed_value := int(args.get("seed", 42))
 	var result := simulator.campaign(left, seed_value, clampi(int(args.get("bouts", 40)), 1, 10000)) if args.has("campaign") else simulator.batch(
 		left, right, clampi(int(args.get("level", data.rules.arena_caps.front())), 1, data.max_level()),

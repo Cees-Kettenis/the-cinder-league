@@ -224,7 +224,7 @@ func refresh(bout: RefCounted, locked: bool) -> void:
 		return
 	var player: Dictionary = bout.fighters[0]
 	var has_spell: bool = not player.spell.is_empty()
-	var has_potion: bool = player.loadout.get("potion", false) or player.potions > 0
+	var has_potion: bool = not bout.first_blood and (player.loadout.get("potion", false) or player.potions > 0)
 	action_buttons.cast.visible = has_spell
 	action_buttons.potion.visible = has_potion
 	pack.visible = has_spell or has_potion
@@ -298,14 +298,17 @@ func _strike_preview(bout: RefCounted, action: String, title: String, cost: Stri
 	if not reason.is_empty():
 		return odds + "\n" + reason
 	var armor := mini(damage, rival.armor)
-	var health := mini(damage - armor, rival.hp)
+	var first_blood: bool = bout.first_blood and damage > armor
+	var health := mini(damage - armor, maxi(0, int(rival.hp) - int(bout.first_blood)))
 	var losses := "%d HP" % health if armor == 0 else "%d armor" % armor
 	if armor > 0 and health > 0:
 		losses += " and %d HP" % health
 	var impact := "Clean hit takes " + losses
-	if action == "power" and health < rival.hp:
+	if first_blood:
+		impact += " · Wins bout"
+	elif action == "power" and health < rival.hp and bout.power_push() > 0:
 		cost += " · Pushes " + _spaces(bout.power_push())
-	elif action == "lunge":
+	if action == "lunge":
 		cost += " · Moves " + _spaces(bout.lunge_spaces())
 	return odds + "\n" + cost + "\n" + impact
 
