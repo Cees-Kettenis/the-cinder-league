@@ -36,6 +36,8 @@ const WEAPON_SPRITES := {
 }
 const SPELL_CONTACT := .60
 const SPELL_COLORS := [Color("#ffc378"), Color("#cf9eff"), Color("#ffb66e"), Color("#7cdfff")]
+const STRIKE_COLORS := {"quick": Color("#7ee8ff"), "attack": Color("#ffca6e"),
+	"power": Color("#ff9156"), "lunge": Color("#a5eaff")}
 const SPACE_PER_FIGHTER_HEIGHT := .37
 const ARENA_MARGIN := 2.1
 const KIT_SIZE := Vector2(768, 1024)
@@ -154,14 +156,14 @@ func animate(change: Dictionary) -> void:
 	impact_anchor_set = false
 	match event.action:
 		"attack":
-			impact_time = .31
-			action_time = .79 if event.critical else .68
+			impact_time = .35
+			action_time = .83 if event.critical else .72
 		"quick":
 			impact_time = .17
 			action_time = .58 if event.critical else .44
 		"power":
-			impact_time = .51
-			action_time = 1.02 if event.critical else .90
+			impact_time = .56
+			action_time = 1.09 if event.critical else .98
 		"lunge":
 			impact_time = .42
 			action_time = .98 if event.critical else .85
@@ -321,7 +323,7 @@ func _draw_weapon(gear: Dictionary, hand: Transform2D, grip: Vector2, trail: flo
 	draw_set_transform_matrix(hand.translated_local(grip))
 	if trail > 0.0:
 		var tip: Vector2 = (Vector2(source.size.x - 43, 38) - sprite[1]) * scale_value
-		var tint := Color("#89dfff") if weapon.id == "warden_sword" else Color("#ffc278")
+		var tint: Color = STRIKE_COLORS.get(event.action, STRIKE_COLORS.attack)
 		var mace := int(weapon.art) == 1
 		if event.action in ["lunge", "quick"] and not mace:
 			_draw_thrust_trail(tip, tint, trail)
@@ -497,12 +499,12 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		match action:
 			"lunge":
 				var coil := smoothstep(.0, .22, approach) * (1.0 - smoothstep(.37, .66, approach))
-				var release := smoothstep(.69, 1.0, approach)
+				var release := smoothstep(.76, 1.0, approach)
 				var plant := smoothstep(.45, .93, approach) * (1.0 - smoothstep(.22, .92, recovery))
 				var stride := sin(TAU * clampf((approach - .22) / .66, 0.0, 1.0)) * (1.0 - plant)
 				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
-				feet.x -= direction * height * (.064 * coil + (.08 if event.miss else .027) * plant)
-				feet.y += height * (.047 * (coil + plant) - .010 * absf(stride))
+				feet.x -= direction * height * (.081 * coil + (.08 if event.miss else .019) * plant)
+				feet.y += height * (.065 * coil + .042 * plant - .010 * absf(stride))
 				pose.pelvis = -.04 * coil + .04 * plant
 				pose.spine += -.16 * coil + .17 * plant
 				pose.head += .13 * coil - .15 * plant
@@ -510,12 +512,12 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				pose.rear_leg += Vector3(.39, -.23, -.16) * stride
 				pose.lead_leg = Vector3(-.37, .36, -.03) * plant + Vector3(-.23, .32, -.09) * coil
 				pose.lead_leg += Vector3(-.38, .27, .11) * stride
-				var ready_arm := Vector3(-.36, -1.26, -.16) if mace else Vector3(.26, -.82, .26)
+				var ready_arm := Vector3(-1.02, -.58, .76) if mace else Vector3(.43, -.86, .35)
 				var hit_arm := Vector3(-.84, .44, 1.31) if mace else Vector3(-.83, .44, .94)
 				var follow_arm := Vector3(-.38, .19, 1.46) if mace else Vector3(-.64, .40, .68)
 				pose.weapon_arm += _swing_arm(ready_arm, hit_arm, follow_arm, smoothstep(.03, .32, approach), release, recovery)
 				pose.off_arm += Vector3(-.20, -.32, .16) * coil + Vector3(.33, -.26, .19) * plant
-				trail = smoothstep(.22, .86, release) * (1.0 - smoothstep(.02, .28, recovery))
+				trail = smoothstep(.12, .74, release) * (1.0 - smoothstep(.03, .27, recovery))
 			"attack", "quick", "power":
 				var mace := int(_item(loadout.get("weapon", "")).get("art", 0)) == 1
 				var motion := _close_strike(pose, action, approach, recovery, gap / height, mace)
@@ -625,25 +627,28 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {}, root_tilt, trail)
 
 func _close_strike(pose: Rig.Pose, action: String, approach: float, recovery: float, gap: float, mace: bool) -> Vector3:
-	var ready_arm := Vector3(.27, -1.08, -.72)
+	var ready_arm := Vector3(.32, -1.17, -.89)
 	var hit_arm := Vector3(-.71, .52, 1.11)
-	var follow_arm := Vector3(-.37, .26, 1.40)
+	var follow_arm := Vector3(-.38, .32, 1.59)
+	var guard_windup := Vector3(-.15, -.43, .26)
 	var weight := 1.0
-	var release_start := .64
+	var release_start := .73
 	match action:
 		"quick":
 			weight = .53
-			release_start = .46
-			ready_arm = Vector3(.22, -.64, .05)
+			release_start = .57
+			ready_arm = Vector3(.37, -.77, .17)
 			hit_arm = Vector3(-.65, .34, 1.17) if mace else Vector3(-.72, .40, .99)
 			follow_arm = Vector3(-.40, .20, .94) if mace else Vector3(-.45, .31, .65)
 		"power":
-			weight = 1.34
-			release_start = .73
-			ready_arm = Vector3(-.53, -1.22, .44)
+			weight = 1.56
+			release_start = .83
+			ready_arm = Vector3(-1.80, -.50, 1.38)
 			hit_arm = Vector3(-.77, .69, 1.02)
-			follow_arm = Vector3(-.40, .57, 1.12)
-	var windup := smoothstep(.01, release_start, approach)
+			follow_arm = Vector3(-.48, .59, 1.60)
+			guard_windup = Vector3(.39, -.59, .18)
+	# Finish the windup early so the raised weapon has a readable pose before it snaps forward.
+	var windup := smoothstep(.01, release_start - .15, approach)
 	var release := smoothstep(release_start, 1.0, approach)
 	var backswing := windup * (1.0 - release)
 	var drive := release * (1.0 - smoothstep(.24, .94, recovery))
@@ -655,12 +660,12 @@ func _close_strike(pose: Rig.Pose, action: String, approach: float, recovery: fl
 	pose.neck += (.07 * backswing - .06 * drive) * weight
 	pose.head += (.15 * backswing - .11 * drive) * weight
 	pose.weapon_arm += _swing_arm(ready_arm, hit_arm, follow_arm, windup, release, recovery)
-	pose.off_arm += Vector3(-.15, -.43, .26) * backswing + Vector3(.39, -.35, .26) * drive
+	pose.off_arm += guard_windup * backswing + Vector3(.39, -.35, .26) * drive
 	# Hold the boots on the floor as the torso loads backwards and drives forward.
 	pose.rear_leg = Rig.walk_leg(0, Vector2(-shift, -sink) * 1536.0, 0.0)
 	pose.lead_leg = Rig.walk_leg(1, Vector2(stride - shift, -sink) * 1536.0, 0.0)
-	var trail := smoothstep(.28, .95, release) * (1.0 - smoothstep(.01, .26, recovery))
-	return Vector3(shift, sink, trail * minf(1.0, weight))
+	var trail := smoothstep(.12, .82, release) * (1.0 - smoothstep(.03, .28, recovery))
+	return Vector3(shift, sink, trail)
 
 func _swing_arm(ready_arm: Vector3, hit_arm: Vector3, follow_arm: Vector3, windup: float, release: float, recovery: float) -> Vector3:
 	var arm := (ready_arm * windup).lerp(hit_arm, release)
@@ -710,32 +715,49 @@ func _draw_pit(at: Vector2, height: float) -> void:
 
 func _draw_lunge_lines(feet: Vector2, height: float, direction: float, approach: float) -> void:
 	var strength := smoothstep(.22, .49, approach) * (1.0 - smoothstep(.70, .97, approach))
-	for index in 4:
-		var tip := feet + Vector2(-direction * height * (.16 + index * .095), -height * (.31 + index * .101))
-		var trail := Vector2(-direction * height * (.12 + index * .04) * strength, 0)
-		draw_line(tip, tip + trail, Color(.99, .89, .70, strength * .64), 2.5, true)
+	for index in 5:
+		var tip := feet + Vector2(-direction * height * (.12 + (index % 3) * .075), -height * (.16 + index * .13))
+		var trail := Vector2(direction * height * (.28 + (index % 3) * .095) * strength, 0)
+		_draw_streak(tip, trail, height * .022 * strength, STRIKE_COLORS.lunge, strength * .86)
 
 func _draw_thrust_trail(tip: Vector2, tint: Color, pulse: float) -> void:
 	var along := tip.normalized()
 	var across := along.orthogonal()
 	for index in 3:
-		var offset := across * (float(index) - 1.0) * 24.0
-		var start := tip * .35 + offset - along * 36.0
-		var end := tip * (1.15 - .06 * index) + offset
-		draw_line(start, end, Color(tint, pulse * .74), 11.0 - index * 2.0, true)
+		var offset := across * (float(index) - 1.0) * 43.0
+		var end := tip * (1.25 + .10 * (1 - index)) + offset
+		var travel := along * tip.length() * (.85 + .18 * index) * pulse
+		_draw_streak(end, travel, (17.0 - 3.0 * index) * pulse, tint, pulse * .94)
+
+func _draw_streak(tip: Vector2, travel: Vector2, width: float, tint: Color, opacity: float) -> void:
+	if opacity < .03:
+		return
+	var edge := travel.normalized().orthogonal() * width
+	var streak := PackedVector2Array([tip, tip - travel * .29 + edge, tip - travel, tip - travel * .25 - edge])
+	draw_polygon(streak, PackedColorArray([Color(tint, opacity), Color(tint, opacity), Color(tint, 0.0), Color(tint, opacity)]))
+	draw_line(tip - travel * .62, tip - travel * .08, Color(tint.lightened(.65), opacity), width * .62, true)
 
 func _draw_weapon_trail(tip: Vector2, tint: Color, pulse: float, mace: bool) -> void:
+	if pulse < .035:
+		return
 	var vertices := PackedVector2Array()
 	var colors := PackedColorArray()
-	var spread := (.95 if mace else 1.44) * pulse
+	var outer_edge := PackedVector2Array()
+	var spread := (2.43 if event.action == "power" else (1.53 if mace else 1.86)) * sqrt(pulse)
 	for edge in 2:
-		for index in 14:
-			var progress := float(index if edge == 0 else 13 - index) / 13.0
-			var width := sin(progress * PI) * (.26 if mace else .18)
-			var radius := 1.01 + width if edge == 0 else .97 - width * .52
-			vertices.append(tip.rotated(-spread * progress) * radius)
-			colors.append(Color(tint.lightened(.18) if edge == 0 else tint, pulse * (1.0 - progress) * (.91 if edge == 0 else .31)))
+		for index in 18:
+			var progress := float(index if edge == 0 else 17 - index) / 17.0
+			var width := sin(progress * PI) * (.30 if mace else .24)
+			var radius := 1.08 + width if edge == 0 else .98 - width * .67
+			var point := tip.rotated(-spread * progress) * radius
+			vertices.append(point)
+			var shade := tint.lightened(.55) if edge == 0 else tint.darkened(.19)
+			colors.append(Color(shade, pulse * (1.0 - progress * .98)))
+			if edge == 0 and progress <= .72:
+				outer_edge.append(point)
 	draw_polygon(vertices, colors)
+	draw_polyline(outer_edge, Color("#4b2425", pulse * .70), 12.0, true)
+	draw_polyline(outer_edge, Color(tint.lightened(.65), pulse * .95), 5.0, true)
 
 func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, side: int, recovery: float,
 		contact_offset: float, view: Transform2D) -> void:
@@ -768,8 +790,16 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 		if metal or spell or event.critical:
 			_draw_sparks(contact, height * (.48 if event.critical else .36), tint, particle_phase)
 		if weapon:
-			var large: bool = metal or event.action == "power" or event.critical
-			_draw_impact_burst(contact, height * (.21 if large else .13), tint, particle_phase)
+			var radius := .22
+			match event.action:
+				"quick": radius = .16
+				"power": radius = .30
+				"lunge": radius = .24
+			if event.critical:
+				radius *= 1.12
+			var burst_tint: Color = Color("#a5e4ff") if event.blocked else STRIKE_COLORS.get(event.action, STRIKE_COLORS.attack)
+			var heavy: bool = event.action == "power" or event.critical or event.blocked
+			_draw_impact_burst(contact, height * radius, burst_tint, particle_phase, heavy)
 		if event.armor_hit > 0:
 			var armor_after: Array = event.get("armor", [])
 			var broken: bool = armor_after.size() == 2 and armor_after[1 - side] == 0
@@ -803,17 +833,30 @@ func _draw_fall_ground(feet: Vector2, height: float, direction: float, recovery:
 		draw_circle(Vector2.ZERO, spread, Color("#92283c"), true, -1, true)
 		draw_set_transform(Vector2.ZERO)
 
-func _draw_impact_burst(at: Vector2, radius: float, tint: Color, recovery: float) -> void:
-	var fade := 1.0 - smoothstep(.06, .28, recovery)
+func _draw_impact_burst(at: Vector2, radius: float, tint: Color, recovery: float, heavy: bool) -> void:
+	var fade := 1.0 - smoothstep(.09, .43, recovery)
 	if fade <= 0.0:
 		return
+	if heavy:
+		var ring_radius := radius * lerpf(.69, 1.52, smoothstep(.0, .43, recovery))
+		var ring_fade := fade * smoothstep(.0, .10, recovery)
+		if ring_fade > .01:
+			for section in 3:
+				var angle := .27 + section * TAU / 3.0
+				draw_arc(at, ring_radius, angle, angle + 1.49, 20, Color("#512928", ring_fade * .86), 5.0, true)
+				draw_arc(at, ring_radius, angle, angle + 1.49, 20, Color(tint.lightened(.41), ring_fade), 2.3, true)
+	var burst_radius := radius * lerpf(.65, 1.0, smoothstep(.0, .16, recovery))
 	var outline := PackedVector2Array()
+	var core := PackedVector2Array()
 	for index in 12:
 		var ray := Vector2.from_angle(index * TAU / 12.0 + .24)
-		outline.append(at + ray * radius * (1.0 if index % 2 == 0 else .38))
-	draw_colored_polygon(outline, Color(tint.lightened(.50), fade))
+		var spike := ray * burst_radius * (1.0 if index % 2 == 0 else .37)
+		outline.append(at + spike)
+		core.append(at + spike * .62)
+	draw_colored_polygon(outline, Color(tint, fade))
+	draw_colored_polygon(core, Color(tint.lightened(.74), fade))
 	outline.append(outline[0])
-	draw_polyline(outline, Color("#533027", fade), 3.0, true)
+	draw_polyline(outline, Color("#492128", fade), 3.8 if heavy else 2.6, true)
 
 func _draw_armor_chips(at: Vector2, height: float, direction: float, recovery: float, broken: bool) -> void:
 	var flight := clampf(recovery / .82, 0, 1)
