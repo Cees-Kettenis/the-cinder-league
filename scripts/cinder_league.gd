@@ -1124,8 +1124,10 @@ func _preview_item(id: String) -> void:
 			var action := "attack" if item.kind == "weapon" else "cast"
 			_shop_stat("stamina", "Stamina cost", "%d per %s" % [item.energy, action])
 			if item.kind == "spell":
-				var casts: int = data.spell_casts(item, int(game.state.stats.Magic), reserve_id.is_empty())
-				_shop_stat("cast", "Main casts · Bout / Death match", "%d / %d" % [int(item.uses), casts])
+				var magic := int(game.state.stats.Magic)
+				var bout_casts: int = data.spell_casts(item, magic)
+				var death_casts: int = data.spell_casts(item, magic, true, not reserve_id.is_empty())
+				_shop_stat("cast", "Main casts · Bout / Death match", "%d / %d" % [bout_casts, death_casts])
 		"enchant":
 			var old := int(data.items.get(game.state.loadout.get("enchant", ""), {}).get("damage", 0))
 			_shop_stat("attack", "Extra weapon damage", "+%d → +%d" % [old, item.damage])

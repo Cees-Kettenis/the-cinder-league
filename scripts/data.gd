@@ -40,7 +40,7 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier",
-			"bout_spell_base_multiplier", "bout_yield_health_percent", "death_match_extra_cast_magic"]:
+			"bout_spell_base_multiplier", "bout_min_spell_casts", "bout_yield_health_percent", "death_match_extra_cast_magic"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -80,6 +80,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Capped bout gold must be between 0 and 1 times the usual reward."
 	if rules.bout_spell_base_multiplier > 1:
 		return "Bout spell base damage must be between 0 and 1 times the death match base damage."
+	if rules.bout_min_spell_casts < 1 or rules.bout_min_spell_casts != floor(rules.bout_min_spell_casts):
+		return "Minimum spell casts in a regular bout must be a positive whole number."
 	if (rules.bout_yield_health_percent < 1 or rules.bout_yield_health_percent >= 100
 			or rules.bout_yield_health_percent != floor(rules.bout_yield_health_percent)):
 		return "Bout yield health must be a whole percent between 1 and 99."
@@ -169,10 +171,12 @@ func lock_reason(player: Dictionary, item: Dictionary) -> String:
 func item_name(id: String) -> String:
 	return items.get(id, {}).get("name", "None")
 
-func spell_casts(spell: Dictionary, magic: int, death_match: bool = false) -> int:
+func spell_casts(spell: Dictionary, magic: int, death_match: bool = false, reserve_equipped: bool = false) -> int:
 	if spell.is_empty():
 		return 0
-	return int(spell.uses) + int(death_match and has_reserve_slot(magic))
+	if death_match:
+		return int(spell.uses) + int(not reserve_equipped and has_reserve_slot(magic))
+	return maxi(int(spell.uses), int(rules.bout_min_spell_casts))
 
 func has_reserve_slot(magic: int) -> bool:
 	return magic >= int(rules.death_match_extra_cast_magic)
@@ -192,7 +196,7 @@ func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String
 		"name": name, "stats": stats.duplicate(), "loadout": loadout.duplicate(true), "style": style,
 		"hp": health, "max_hp": health, "armor": protection, "max_armor": protection,
 		"energy": energy, "max_energy": energy, "weapon": weapon, "spell": spell,
-		"casts": spell_casts(spell, int(stats.Magic), death_match and reserve.is_empty()),
+		"casts": spell_casts(spell, int(stats.Magic), death_match, not reserve.is_empty()),
 		"reserve_spell": reserve, "reserve_casts": int(not reserve.is_empty()),
 		"enchant_damage": int(items.get(loadout.get("enchant", ""), {}).get("damage", 0)),
 		"potions": int(rules.potion_uses) if loadout.get("potion", false) else 0,

@@ -581,8 +581,8 @@ func _check_death_match_spell_bonus(data: RefCounted) -> void:
 	var storm: Dictionary = data.items.storm
 	_check(data.spell_casts(storm, threshold - 1, true) == 1 and data.spell_casts(storm, threshold, true) == 2,
 		"An extra death match cast should require the full Magic threshold")
-	_check(data.spell_casts(storm, threshold) == 1 and data.spell_casts({}, threshold, true) == 0,
-		"Regular bouts and a fighter without a spell should receive no extra casts")
+	_check(data.spell_casts(storm, threshold - 1) == 2 and data.spell_casts(storm, threshold) == 2
+		and data.spell_casts({}, threshold, true) == 0, "Regular bout charges should come from the spell and bout rules, with no Magic bonus")
 	var campaign := Campaign.new(data)
 	var stats: Dictionary = data.stats_empty()
 	stats.Magic = threshold
@@ -590,7 +590,7 @@ func _check_death_match_spell_bonus(data: RefCounted) -> void:
 	campaign.state.level = int(data.rules.arena_caps.front())
 	campaign.state.loadout.spell = "storm"
 	var regular := campaign.start_bout(false, 42)
-	_check(regular.fighters[0].casts == 1, "A specialized caster should keep the normal charges in a regular bout")
+	_check(regular.fighters[0].casts == 2, "Heavy spells should start a regular bout with at least two casts")
 	campaign.settle(0)
 	campaign.scout_bout(true, 42)
 	var rival: Dictionary = campaign.state.scouted_tournament.rival

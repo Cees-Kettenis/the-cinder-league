@@ -55,6 +55,7 @@
     "damage_per_strength": 1.35,
     "damage_per_magic": 0.72,
     "bout_spell_base_multiplier": 0.5,
+    "bout_min_spell_casts": 2,
     "bout_yield_health_percent": 20,
     "death_match_extra_cast_magic": 30,
     "guard_damage_factor": 0.48,
