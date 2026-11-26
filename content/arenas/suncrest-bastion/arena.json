@@ -1,0 +1,80 @@
+{
+  "order": 3,
+  "xp_levels": [
+    965,
+    1130,
+    1315,
+    1520
+  ],
+  "balance": {
+    "name": "The Suncrest Bastion",
+    "descriptor": "A gilded mountain court built around a rising sun",
+    "cap": 16,
+    "opponent_gear_level": 13,
+    "gold": 125,
+    "xp": 75,
+    "opponents": [
+      {
+        "name": "Nera Flint",
+        "style": "fast_melee",
+        "point_multiplier": 1.44
+      },
+      {
+        "name": "Tess Fen",
+        "style": "mage",
+        "tactics": "keepaway_mage",
+        "point_multiplier": 1.43
+      },
+      {
+        "name": "Hale Briar",
+        "style": "guard",
+        "point_multiplier": 1.47
+      },
+      {
+        "name": "Soren Vale",
+        "style": "hybrid",
+        "tactics": "adaptive_hybrid",
+        "point_multiplier": 1.48
+      }
+    ],
+    "tournament": [
+      {
+        "name": "Orla Fen",
+        "style": "fast_melee",
+        "point_multiplier": 1.13
+      },
+      {
+        "name": "Cassian Dusk",
+        "style": "mage",
+        "tactics": "keepaway_mage",
+        "point_multiplier": 1.06
+      },
+      {
+        "name": "Helia Moss",
+        "style": "hybrid",
+        "tactics": "adaptive_hybrid",
+        "point_multiplier": 1.21
+      },
+      {
+        "name": "Edric Vale",
+        "style": "charisma",
+        "point_multiplier": 1.38
+      },
+      {
+        "name": "Garran Stoneward",
+        "style": "guard",
+        "tactics": "duelist",
+        "boss": true,
+        "stats": {
+          "Attack": 23,
+          "Strength": 8,
+          "Defence": 33,
+          "Magic": 0,
+          "Vitality": 30,
+          "Stamina": 16,
+          "Charisma": 0
+        }
+      }
+    ]
+  }
+}

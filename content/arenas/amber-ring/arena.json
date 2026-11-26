@@ -1,0 +1,53 @@
+{
+  "order": 0,
+  "xp_levels": [
+    0,
+    30,
+    65,
+    110
+  ],
+  "balance": {
+    "name": "The Amber Ring",
+    "descriptor": "The sandstone proving ground",
+    "cap": 4,
+    "opponent_gear_level": 1,
+    "gold": 33,
+    "xp": 24,
+    "opponents": [
+      {
+        "name": "Rook Fen",
+        "style": "brute",
+        "point_multiplier": 1.24
+      },
+      {
+        "name": "Mara Ash",
+        "style": "guard",
+        "point_multiplier": 1.39
+      },
+      {
+        "name": "Colt Reed",
+        "style": "skirmish",
+        "point_multiplier": 1.34
+      },
+      {
+        "name": "Jory Flint",
+        "style": "fast_melee",
+        "minimum_level": 4,
+        "point_multiplier": 1.32
+      }
+    ],
+    "tournament": [
+      {
+        "name": "Bram Alder",
+        "style": "brute",
+        "point_multiplier": 1.12
+      },
+      {
+        "name": "Idra Vale",
+        "style": "guard",
+        "boss": true,
+        "point_multiplier": 1.21
+      }
+    ]
+  }
+}

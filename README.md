@@ -31,7 +31,7 @@ git push origin v0.1-alpha
 On Linux, the same build script works with the matching Godot editor and export templates installed. Pass an output directory to use a location other than `dist/`.
 
 ```bash
-bash scripts/build-release.sh
+bash tools/build-release.sh
 ```
 
 ## Play
@@ -66,21 +66,29 @@ If you already won the Glass Crucible, continue your save to allocate your level
 
 Use **Replace save** on an occupied slot to start a new gladiator. The game archives the previous save when you finish creating the replacement. Live careers are archived under `user://retired/`, and fallen gladiators under `user://fallen/`. The **Hall of Fame** on the title screen lists current and archived gladiators by tournaments won, level, and experience.
 
-Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. **Esc** goes back from shops, the arena, and unlocked face-off or results screens. On the title screen or in town, **Esc** opens the pause menu. From the results bar, **T** returns to town when available, and **N** scouts the next bout or tournament match. Change these keys under **Settings → Controls**. **Settings** also controls the display mode. Each shop and arena fight has its own track. Face-offs build tension, victories open with a fanfare, and defeats get a quieter cue. **Audio** has separate switches for title music, Town Square music, shop and arena music, and game sounds such as the shop bell and the crowd during fights.
+Shops show the price, requirements, and how gear changes your stats. In the magic shop, the play icon replays the spell preview. **Esc** goes back from shops, the arena, and unlocked face-off or results screens. On the title screen or in town, **Esc** opens the pause menu. From the results bar, **T** returns to town when available, and **N** scouts the next bout or tournament match. Change these keys under **Settings → Controls**. Choose **Windowed** or **Fullscreen** in **Settings**. The selected mode applies to every screen. Each shop and arena fight has its own track. Face-offs build tension, victories open with a fanfare, and defeats get a quieter cue. **Audio** has separate switches for title music, Town Square music, shop and arena music, and game sounds such as the shop bell and the crowd during fights.
 
-Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. The winner celebrates in the arena while the bottom bar shows the result and animates any XP and gold changes. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. Retrying a regular bout restores its saved starting conditions.
+Each slot autosaves independently, including resolved turns during a duel. Closing the game mid-bout resumes the same fight when you continue the slot. The winner celebrates in the arena while the bottom bar shows the result and animates any XP and gold changes. At the turn limit, the fighter with the higher percentage of health wins. The defender wins ties. Level-ups require assigning all earned points. After a regular defeat, you can return to town or scout a new rival.
 
 ## Armor sprites
 
-Each armor item has its own lossless WebP under `art/armor/<set>/`. To add a set, match its item ID prefix in [placements.gd](art/armor/placements.gd). Place helmets, chest pieces, and shields relative to the head, spine, and off wrist, respectively. Pants and boot pairs map rows of the artwork to the base fighter's legs so each leg can move independently.
+Each set has a folder in [content/gear/armor](content/gear/armor) with its WebP textures and `armor.gd` definition. A player set's definition contains the shop items, armor points, and sprite placements. Start each item ID with the set folder name followed by an underscore. Place helmets, chest pieces, and shields relative to the head, spine, and off wrist. Pants and boot pairs map rows of the artwork to the base fighter's legs.
 
-Rivals mix helmets, chest pieces, pants, boots, and shields from their own six armor sets. Two sets are available at level 1. Levels 4, 7, 9, and 13 each add a set to the pool. Later rivals favor recent sets and can still use earlier pieces. The player level and encounter seed determine the look. The armor total on the face-off comes from the rival's combat loadout.
+Rivals mix helmets, chest pieces, pants, boots, and shields from their own armor sets. Maintain at least as many rival sets as player sets. Each rival set defines its unlock level and its position in the seeded outfit roll. Later rivals favor recent sets and can still use earlier pieces. The player level and encounter seed determine the look. Armor points come from the rival's combat loadout, so changing its appearance leaves those points alone.
 
-Rivals also have their own weapon art for every weapon in the four leagues. The weapon listed on the face-off gives its name and reach for the bout.
+Each weapon folder in [content/gear/weapons](content/gear/weapons) contains `weapon.gd` with its shop and combat stats, plus separate `player.webp` and `rival.webp` sprites. Use hyphens in the folder name and underscores in the item ID. Record the grip and striking point in each sprite's pixel coordinates. The weapon listed on the face-off gives its name and reach for the bout.
 
 Helmets wrap around the temples and cheeks. Leather and reinforced leather leave the base shirt visible at the neckline. Chainmail, Court, Glassguard, and Suncrest cover it with fitted collars. The Court rectangle, Glassguard kite, and Suncrest tower shield use the same off-hand grip as the round shields.
 
 Court, Glassguard, and Suncrest chest pieces include weapon-arm protection. Separate upper-arm plates, bracers, and gauntlets follow the shoulder, elbow, and wrist, with fitted padding beneath the joints. Their `weapon_arm` placements map texture pixels to the base fighter's rest pose. Closed helmets hide the covered base head and hair while keeping the neck visible.
+
+## Add an arena
+
+Add a folder to [content/arenas](content/arenas) with `arena.json`, `backdrop.webp`, `backdrop-compact.webp`, and `fight.ogg`. The JSON defines the level cap, XP thresholds, rewards, rivals, and tournament rounds. Give it the next consecutive `order` value. Keep existing order values stable because campaign saves and seeded tournaments use them. Add gear under `content/gear/` as needed.
+
+The [fight controller](game/combat/fight_screen.gd) receives a saved bout, runs each turn, and updates the arena and HUD. The [duel engine](game/combat/duel.gd) resolves moves and damage for both the game and the simulator. The [campaign](game/campaign/campaign.gd) owns save slots, rewards, and tournament progression. The [content catalog](game/catalog/content_catalog.gd) assembles the arena and gear definitions into the balance profile they use.
+
+Use the same crop for the full-size and compact backdrop. The title and town have their own backdrop pairs under [game/screens](game/screens). The compact art is up to 1280 pixels wide and loads in windows with a longest edge of 1366 pixels or less. Wider windows use the full-size art, including 1080p, 1440p, and 4K. Godot scales the artwork to fit the viewport. Painted backdrops and fighter gear use Godot's lossy WebP texture import. Keep gear placement coordinates in the original sprite's pixel dimensions.
 
 ## Simulate
 
@@ -89,8 +97,8 @@ Open the pause menu from the title screen and choose **Settings** → **Simulato
 The same combat rules are available from a terminal. Matchup batches use regular bout rules by default. Add `--death-match` to use tournament combat rules. Standalone simulator matchups can end in a draw.
 
 ```bash
-godot --headless --path . --script scripts/simulate.gd -- --left=hybrid --right=mage --level=4 --bouts=20 --seed=42
-godot --headless --path . --script scripts/simulate.gd -- --campaign --left=weapon --bouts=75 --seed=42
+godot --headless --path . --script tools/simulate.gd -- --left=hybrid --right=mage --level=4 --bouts=20 --seed=42
+godot --headless --path . --script tools/simulate.gd -- --campaign --left=weapon --bouts=75 --seed=42
 ```
 
 Preset names are `weapon`, `guard`, `mage`, `skirmish`, `charisma`, `hybrid`, `all_attack`, and `brute`. The terminal outputs JSON after Godot's startup banner.
@@ -120,17 +128,20 @@ Pass `--scenario=/absolute/path/scenario.json` to supply either side's full stat
 
 ## Review the balance
 
-The supplied numbers are draft playtest values. Open **Playtest balance** from **Settings** on the title screen or from the simulator. A valid edit is saved to `user://balance.override.json` and used for subsequent bouts and simulator runs inside the game. Use **Load bundled draft into editor**, then **Apply and save profile**, to reset it. The terminal simulator uses [balance.json](balance.json) by default and accepts a custom file through `--balance=/absolute/path/balance.json`.
+The supplied numbers are draft playtest values. Open **Playtest balance** from **Settings** on the title screen or from the simulator. A valid edit is saved to `user://balance.override.json` and used for subsequent bouts and simulator runs inside the game. Use **Load bundled draft into editor**, then **Apply and save profile**, to reset it. The bundled profile combines [balance.json](content/balance.json) with the arena and gear definitions. The terminal simulator uses this profile by default and accepts a complete override through `--balance=/absolute/path/balance.json`.
 
 Item IDs, categories, and armor slots are stable so that existing saves can load across balance edits. A saved bout keeps its opening conditions, combat stats, and rewards. Previously recorded lunges are restored with their original cost and range. An older save that predates rule snapshots records the active profile when it first loads. Player stats, equipment, and campaign progress carry forward.
 
-The art in the `art/` folder uses the approved cartoon concepts and matching original arena backdrops generated with the built-in ImageGen tool. The [unarmored base](art/gladiator-base.png) uses the original gladiator as its reference, with a bare head, plain clothes, and a free weapon hand on transparent alpha. In combat, the pelvis, spine, neck, head, and both arms and legs move independently. Weapons from the [weapon sheet](art/weapons.png) follow the weapon hand and also appear in the Weaponsmith. Shields follow the off hand, and helmets follow the head. The sound effects in `audio/` are synthesized samples for the playtest.
+The [unarmored base](game/combat/rig/gladiator-base.png) has a bare head, plain clothes, and a free weapon hand. In combat, the pelvis, spine, neck, head, arms, and legs move independently. Weapon sprites follow the weapon hand and also appear in the Weaponsmith. Shields follow the off hand, and helmets follow the head.
 
-The town, shop, and arena scores use instruments from Frank Wen's [FluidR3 SoundFont](audio/FluidR3-LICENSE.txt).
+Spell effects, icons, and cast sounds live under [content/spells](content/spells). Shared music, combat sounds, interface sounds and arena ambience live under [game/audio](game/audio). Archived artwork and art prompts are under [docs](docs).
+
+The town, shop, and arena scores use instruments from Frank Wen's [FluidR3 SoundFont](docs/licenses/FluidR3-LICENSE.txt).
 
 
-Run the save, duel, and UI regressions after importing the project.
+Run the content check and the save, duel, and UI regressions after importing the project.
 
 ```bash
+godot --headless --path . --script tools/check_content.gd
 godot --headless --path . --script tests/playtest.gd
 ```

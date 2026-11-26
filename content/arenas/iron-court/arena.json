@@ -1,0 +1,67 @@
+{
+  "order": 1,
+  "xp_levels": [
+    165,
+    225,
+    295,
+    375
+  ],
+  "balance": {
+    "name": "The Iron Court",
+    "descriptor": "The city's senior tournament",
+    "cap": 8,
+    "opponent_gear_level": 1,
+    "gold": 65,
+    "xp": 39,
+    "opponents": [
+      {
+        "name": "Sera Flint",
+        "style": "mage",
+        "point_multiplier": 1.45
+      },
+      {
+        "name": "Niall Copper",
+        "style": "skirmish",
+        "point_multiplier": 1.46
+      },
+      {
+        "name": "Kerr of the Gate",
+        "style": "guard",
+        "point_multiplier": 1.4
+      },
+      {
+        "name": "Finn Vale",
+        "style": "fast_melee",
+        "point_multiplier": 1.42
+      }
+    ],
+    "tournament": [
+      {
+        "name": "Tavin Cress",
+        "style": "mage",
+        "point_multiplier": 1.25
+      },
+      {
+        "name": "Bren Holt",
+        "style": "charisma",
+        "point_multiplier": 1.16
+      },
+      {
+        "name": "Oren Voss",
+        "style": "weapon",
+        "tactics": "duelist",
+        "boss": true,
+        "armor_level": 5,
+        "stats": {
+          "Attack": 17,
+          "Strength": 11,
+          "Defence": 5,
+          "Magic": 0,
+          "Vitality": 13,
+          "Stamina": 12,
+          "Charisma": 0
+        }
+      }
+    ]
+  }
+}

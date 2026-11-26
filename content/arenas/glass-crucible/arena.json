@@ -1,0 +1,76 @@
+{
+  "order": 2,
+  "xp_levels": [
+    465,
+    570,
+    685,
+    815
+  ],
+  "balance": {
+    "name": "The Glass Crucible",
+    "descriptor": "An arcane court cut into volcanic glass",
+    "cap": 12,
+    "opponent_gear_level": 9,
+    "gold": 90,
+    "xp": 55,
+    "opponents": [
+      {
+        "name": "Dara Holt",
+        "style": "mage",
+        "tactics": "keepaway_mage",
+        "point_multiplier": 1.43
+      },
+      {
+        "name": "Finn Ash",
+        "style": "fast_melee",
+        "point_multiplier": 1.45
+      },
+      {
+        "name": "Iona Reed",
+        "style": "hybrid",
+        "tactics": "adaptive_hybrid",
+        "point_multiplier": 1.48
+      },
+      {
+        "name": "Rook Briar",
+        "style": "guard",
+        "point_multiplier": 1.47
+      }
+    ],
+    "tournament": [
+      {
+        "name": "Mael Flint",
+        "style": "fast_melee",
+        "point_multiplier": 1.16
+      },
+      {
+        "name": "Sera Glass",
+        "style": "guard",
+        "tactics": "duelist",
+        "point_multiplier": 1.16
+      },
+      {
+        "name": "Kestrel Vane",
+        "style": "hybrid",
+        "tactics": "adaptive_hybrid",
+        "point_multiplier": 1.22
+      },
+      {
+        "name": "Veyra Ashglass",
+        "style": "mage",
+        "tactics": "keepaway_mage",
+        "boss": true,
+        "stats": {
+          "Attack": 15,
+          "Strength": 16,
+          "Defence": 8,
+          "Magic": 41,
+          "Vitality": 18,
+          "Stamina": 14,
+          "Charisma": 0
+        },
+        "armor_level": 7
+      }
+    ]
+  }
+}

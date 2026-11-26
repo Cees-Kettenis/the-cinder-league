@@ -1,13 +1,15 @@
 extends SceneTree
 
-const Data = preload("res://scripts/data.gd")
-const Duel = preload("res://scripts/duel.gd")
-const Campaign = preload("res://scripts/campaign.gd")
-const Simulator = preload("res://scripts/simulator.gd")
-const Game = preload("res://cinder_league.tscn")
-const Stage = preload("res://scripts/stage.gd")
-const Rig = preload("res://scripts/fighter_rig.gd")
-const Armor = preload("res://scripts/armor_art.gd")
+const Data = preload("res://game/catalog/data.gd")
+const Content = preload("res://game/catalog/content_catalog.gd")
+const FightScreen = preload("res://game/combat/fight_screen.tscn")
+const Duel = preload("res://game/combat/duel.gd")
+const Campaign = preload("res://game/campaign/campaign.gd")
+const Simulator = preload("res://game/simulation/simulator.gd")
+const Game = preload("res://game/screens/cinder_league.tscn")
+const Stage = preload("res://game/combat/stage.gd")
+const Rig = preload("res://game/combat/fighter_rig.gd")
+const Armor = preload("res://game/combat/armor_art.gd")
 
 var failures: Array[String] = []
 
@@ -46,6 +48,7 @@ func _run() -> void:
 	_check_spell_cast_progression(data)
 	_check_reserve_spell(data)
 	_check_saved_bout(data)
+	_check_legacy_bout_replay(data)
 	_check_scouting(data)
 	_check_previous_arena_completion(data)
 	_check_defeats(data)
@@ -54,9 +57,12 @@ func _run() -> void:
 	_check_shop_requirements()
 	_check_equipped_shop_selection()
 	_check_game_buttons()
+	_check_regular_loss_navigation()
 	_check_tournament_navigation()
 	_check_music_cues()
+	_check_display_settings()
 	_check_control_settings()
+	await _check_fight_turn_flow()
 	await process_frame
 	await process_frame
 	for failure in failures:
@@ -493,7 +499,7 @@ func _check_armor_sprites(data: RefCounted) -> void:
 		var texture: Texture2D = sprite.get("texture")
 		var family: String = item.id.get_slice("_", 0)
 		player_sets[family] = true
-		var path := "res://art/armor/%s/%s.webp" % [family, item.slot]
+		var path := "res://content/gear/armor/%s/%s.webp" % [family, item.slot]
 		_check(texture != null and texture.resource_path == path, "%s should use its own sprite" % item.name)
 		_check(sprite.has("mesh") == (item.slot in ["pants", "shoes"]),
 			"Only the lower-body pieces should use a bending mesh")
@@ -506,9 +512,9 @@ func _check_armor_sprites(data: RefCounted) -> void:
 					and pieces[2].joint == Rig.WEAPON_WRIST, "Arm plates must follow the shoulder, elbow, and weapon grip")
 	_check(Armor.ANCHORS.helmet == Rig.HEAD and Armor.ANCHORS.shield == Rig.OFF_WRIST,
 		"Helmets and shields should move with their respective joints")
-	_check(Data.RIVAL_ARMOR_LEVELS.size() >= player_sets.size(), "Rivals should have at least as many sets as the player")
+	_check(Content.rival_armor_levels().size() >= player_sets.size(), "Rivals should have at least as many sets as the player")
 	var rival_textures := {}
-	for family in Data.RIVAL_ARMOR_LEVELS:
+	for family in Content.rival_armor_levels():
 		for slot in data.SLOTS:
 			var texture: Texture2D = Armor.rival_piece(slot, family).get("texture")
 			_check(texture != null and not rival_textures.has(texture), "Each rival set should have its own art in every slot")
@@ -571,9 +577,9 @@ func _check_sabre_pose() -> void:
 	var stage := Stage.new()
 	var pose := stage._rest_pose({"weapon": "glass_sabre"})
 	var bones := Rig.transforms(pose)
-	var sprite: Array = Stage.WEAPON_SPRITES.glass_sabre
+	var sprite := Content.weapon_art("glass_sabre")
 	var grip_angle := stage._weapon_rotation({"weapon": "glass_sabre"})
-	var blade: Vector2 = bones[Rig.WEAPON_WRIST].basis_xform(((sprite[3] - sprite[1]) * sprite[2]).rotated(grip_angle))
+	var blade: Vector2 = bones[Rig.WEAPON_WRIST].basis_xform(((sprite.tip - sprite.grip) * sprite.scale).rotated(grip_angle))
 	_check(blade.y < 0.0 and absf(blade.x) < absf(blade.y) * .05, "The Glass sabre should rest upright in the hand")
 	var fist := bones[Rig.WEAPON_WRIST].basis_xform(Vector2.RIGHT)
 	_check(fist.x > .95 and absf(fist.y) < .05 and pose.weapon_arm.y < -.5,
@@ -596,14 +602,14 @@ func _check_rival_weapon_art(data: RefCounted) -> void:
 	for item in data.items.values():
 		if item.kind != "weapon":
 			continue
-		var sprite: Array = Stage.RIVAL_WEAPONS.get(item.id, [])
+		var sprite := Content.weapon_art(item.id, true)
 		if not _check(not sprite.is_empty(), "%s should have rival weapon art" % item.name):
 			continue
-		var texture: Texture2D = sprite[0]
+		var texture: Texture2D = load(sprite.texture)
 		var bounds := Rect2(Vector2.ZERO, texture.get_size())
 		_check(texture != Stage.weapon_icon(item).atlas and not textures.has(texture.resource_path),
 			"%s should use its own rival sprite" % item.name)
-		_check(bounds.has_point(sprite[1]) and bounds.has_point(sprite[2]) and sprite[1] != sprite[2],
+		_check(bounds.has_point(sprite.grip) and bounds.has_point(sprite.tip) and sprite.grip != sprite.tip,
 			"%s should have distinct grip and contact points inside its texture" % item.name)
 		textures[texture.resource_path] = true
 
@@ -889,8 +895,6 @@ func _check_saved_bout(data: RefCounted) -> void:
 	tied.act("guard")
 	tied.act("guard")
 	_check(tied.winner == 1, "An equal-health campaign bout should end in defeat at the turn limit")
-	var saved_distance := int(data.rules.starting_distance)
-	var saved_gold := campaign.win_gold(0)
 	var narrow_snapshot := snapshot.duplicate(true)
 	narrow_snapshot.combat.rules.arena_size = 10
 	narrow_snapshot.combat.rules.starting_distance = 4
@@ -904,6 +908,7 @@ func _check_saved_bout(data: RefCounted) -> void:
 	changed.load_profile()
 	changed.rules.starting_distance = 1
 	changed.rules.arena_size = 10
+	changed.rules.loss_gold += 4
 	changed.arenas[0].gold += 100
 	changed.rules.points_per_level = 12
 	campaign.data = changed
@@ -914,21 +919,30 @@ func _check_saved_bout(data: RefCounted) -> void:
 	var gold_left := int(campaign.state.gold)
 	campaign.settle(1)
 	_check(campaign.state.gold == gold_left, "Settling the same loss twice must not repeat the fee")
-	_check(campaign.retry_bout(false), "A regular defeat should be retryable")
-	var win := campaign.settle(0)
-	_check(win.gold == saved_gold, "A retry win should keep its original reward")
-	var settled := campaign.state.duplicate(true)
-	_check(campaign.retry_bout(true), "A practice bout should start after a victory")
-	_check(campaign.open_bout(snapshot).distance() == saved_distance, "A practice bout should start at the original distance")
-	campaign.record_turn("guard", -2)
-	_check(campaign.state.active_bout.practice, "A pending practice bout should persist as practice")
-	campaign.record_turn("guard", 0)
-	_check(campaign.state == settled, "Practice must leave the campaign untouched")
+	campaign.state.xp = int(changed.rules.xp_levels[1]) - 1
 	var next := campaign.start_bout(false, 43)
-	_check(campaign.open_bout(next).distance() == 1, "New bouts should use the active profile")
+	_check(next.seed == "43" and campaign.open_bout(next).distance() == 1,
+		"A new bout after a loss should use a new seed and the active profile")
 	campaign.settle(0)
 	changed.rules.points_per_level = 14
 	_check(campaign.state.pending and campaign.points_to_allocate() == 12, "Balance edits must not change an earned allocation")
+
+func _check_legacy_bout_replay(data: RefCounted) -> void:
+	var campaign := Campaign.new(data)
+	var slot := int(Time.get_unix_time_from_system() * 1000000)
+	campaign.create(slot, "Older save", 0, 0, data.build_stats("weapon", 10))
+	for winner in [1, 0]:
+		campaign.start_bout(false, 42 + winner)
+		campaign.settle(winner)
+		var settled := campaign.read_slot(slot)
+		campaign.state.active_bout = {"actions": ["guard"], "practice": winner == 0}
+		campaign.save()
+		var resumed := Campaign.new(data)
+		if _check(resumed.resume(slot), "Older saves with an active replay should open"):
+			_check(resumed.state == settled and resumed.read_slot(slot) == settled and resumed.can_scout(false),
+				"Discard an old replay and keep the original result, rewards, and career progress")
+			campaign = resumed
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(campaign.path(slot)))
 
 func _check_scouting(data: RefCounted) -> void:
 	var styles := {}
@@ -945,8 +959,8 @@ func _check_scouting(data: RefCounted) -> void:
 	_check(styles.size() > 1 and names.size() > 1, "Different seeds should generate varied regular rivals")
 	_check(outfits.size() >= 12, "Regular rivals should mix many visible cosmetic outfits")
 	for player_level in range(1, data.max_level() + 1):
-		var expected := Data.RIVAL_ARMOR_LEVELS.keys().filter(func(family: String) -> bool:
-			return Data.RIVAL_ARMOR_LEVELS[family] <= player_level)
+		var expected := Content.rival_armor_levels().keys().filter(func(family: String) -> bool:
+			return Content.rival_armor_levels()[family] <= player_level)
 		var seen := {}
 		var mixed := 0
 		for seed_value in range(96):
@@ -1035,7 +1049,7 @@ func _check_scouting(data: RefCounted) -> void:
 		_check(campaign.state.complete == (round_index == bastion_rounds - 1), "Only the Bastion champion should complete the playtest")
 	var stoneward: Dictionary = data.generate_opponent(16, 3, 42, bastion_rounds - 1)
 	_check(stoneward == data.generate_opponent(16, 3, 99, bastion_rounds - 1)
-		and Data.RIVAL_ARMOR_LEVELS.has(stoneward.look.armor.chest) and stoneward.loadout.armor.chest == "bastion_chest",
+		and Content.rival_armor_levels().has(stoneward.look.armor.chest) and stoneward.loadout.armor.chest == "bastion_chest",
 		"Stoneward should have a fixed rival outfit and keep the Bastion armor stats")
 
 func _check_previous_arena_completion(data: RefCounted) -> void:
@@ -1098,20 +1112,18 @@ func _check_defeats(data: RefCounted) -> void:
 	campaign.state.xp = data.rules.xp_levels[3]
 	campaign.start_bout(true, 43)
 	campaign.settle(0)
-	campaign.retry_bout(true)
-	_check(campaign.settle(1, true).practice and not campaign.is_fallen(), "Tournament practice should stay safe")
 	campaign.start_bout(true, 44)
 	var defeat := campaign.settle(1)
 	_check(defeat.fallen and campaign.is_fallen() and not campaign.has_active_bout(),
 		"A tournament loss should permanently end the campaign")
-	_check(not campaign.can_scout(false) and not campaign.can_tournament() and not campaign.retry_bout(false)
+	_check(not campaign.can_scout(false) and not campaign.can_tournament()
 		and not campaign.purchase(data.items.leather_chest).is_empty(), "A fallen gladiator should be locked out of play")
 	campaign.create(0, "Legacy", 0, 0, stats)
 	campaign.state.level = 4
 	campaign.start_bout(true, 44)
 	campaign.state.snapshot.rewards.erase("lethal_defeat")
 	campaign.settle(1)
-	_check(not campaign.is_fallen() and campaign.can_scout(false) and not campaign.retry_bout(false),
+	_check(not campaign.is_fallen() and campaign.can_scout(false),
 		"A tournament fight started before lethal rules should finish without a surprise death")
 
 func _check_save_replacement(data: RefCounted) -> void:
@@ -1157,7 +1169,7 @@ func _check_saved_spell_faceoff(data: RefCounted) -> void:
 	var fight := _find_button(ui, "Fight")
 	if _check(fight != null, "A reloaded caster should be able to open a face-off against a rival without a spell"):
 		fight.pressed.emit()
-		_check(ui.current_screen == "battle" and ui.bout.fighters[0].spell.id == "fireball",
+		_check(ui.current_screen == "battle" and ui.fight.bout.fighters[0].spell.id == "fireball",
 			"Starting the reloaded bout should keep the player's equipped spell")
 	ui.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(save.path(number)))
@@ -1265,86 +1277,86 @@ func _check_game_buttons() -> void:
 		"Combat must occupy the game view and offer no way back during the bout")
 	_press_escape()
 	_check(ui.current_screen == "battle" and not is_instance_valid(ui.settings_popup), "Escape should keep the player in the bout")
-	var attack: Button = ui.battle_hud.action_buttons.attack
-	_check(not ui.battle_hud.pack.visible, "A starter fight should only show Pack when something is equipped")
-	_check(not ui.battle_hud.action_buttons.has("lunge") and attack.disabled
+	var attack: Button = ui.fight.hud.action_buttons.attack
+	_check(not ui.fight.hud.pack.visible, "A starter fight should only show Pack when something is equipped")
+	_check(not ui.fight.hud.action_buttons.has("lunge") and attack.disabled
 		and attack.accessibility_description.contains("Out of weapon reach"), "The HUD should require movement from the starting gap")
 	attack.pressed.emit()
-	_check(ui.bout.turn == 0, "Pressing Attack out of range must not spend a turn")
-	_check(not ui.battle_hud.action_buttons.quick.visible and not ui.battle_hud.action_buttons.power.visible,
+	_check(ui.fight.bout.turn == 0, "Pressing Attack out of range must not spend a turn")
+	_check(not ui.fight.hud.action_buttons.quick.visible and not ui.fight.hud.action_buttons.power.visible,
 		"Quick and Power should be hidden outside weapon reach")
-	_check(ui.battle_hud.action_buttons.jump.accessibility_description.contains("3 spaces toward") and not ui.battle_hud.action_buttons.jump.disabled,
+	_check(ui.fight.hud.action_buttons.jump.accessibility_description.contains("3 spaces toward") and not ui.fight.hud.action_buttons.jump.disabled,
 		"The leap button should show the available movement distance")
-	_check(ui.battle_hud.action_buttons.jump_back.accessibility_description.contains("3 spaces away") and not ui.battle_hud.action_buttons.jump_back.disabled,
+	_check(ui.fight.hud.action_buttons.jump_back.accessibility_description.contains("3 spaces away") and not ui.fight.hud.action_buttons.jump_back.disabled,
 		"The backward leap should be available at the starting position")
-	var player: Dictionary = ui.bout.fighters[0]
+	var player: Dictionary = ui.fight.bout.fighters[0]
 	player.spell = ui.data.items.fireball
 	player.casts = 2
 	player.potions = 1
 	player.loadout.potion = true
-	ui._refresh_battle()
-	_check(ui.battle_hud.pack.visible and ui.battle_hud.charges.cast.text == "2" and ui.battle_hud.charges.potion.text == "1",
+	ui.fight.refresh()
+	_check(ui.fight.hud.pack.visible and ui.fight.hud.charges.cast.text == "2" and ui.fight.hud.charges.potion.text == "1",
 		"Equipped spells and potions should appear in the Pack with use counts")
-	var rival_start: int = ui.bout.positions[1]
+	var rival_start: int = ui.fight.bout.positions[1]
 	var original_stamina := int(player.stats.Stamina)
 	player.stats.Stamina = 10
-	ui.bout.positions[1] = rival_start - 1
-	ui._refresh_battle()
+	ui.fight.bout.positions[1] = rival_start - 1
+	ui.fight.refresh()
 	_check(attack.accessibility_name == "Lunge" and not attack.disabled
 		and attack.accessibility_description.contains("26 stamina · Moves 3 spaces")
-		and ui.battle_hud.action_buttons.jump_back.accessibility_description.contains("4 spaces away"),
+		and ui.fight.hud.action_buttons.jump_back.accessibility_description.contains("4 spaces away"),
 		"The battle HUD should preview the longer lunge and leap at ten Stamina")
 	player.stats.Stamina = original_stamina
-	ui.bout.positions[1] = ui.bout.positions[0] + 2
-	ui._refresh_battle()
+	ui.fight.bout.positions[1] = ui.fight.bout.positions[0] + 2
+	ui.fight.refresh()
 	_check(attack.accessibility_name == "Lunge" and not attack.disabled and attack.accessibility_description.contains("16 stamina"),
 		"The sword button should become Lunge in short range and show the stamina cost")
-	ui.bout.positions[1] = ui.bout.positions[0] + 1
-	ui._refresh_battle()
-	_check(ui.battle_hud.action_buttons.quick.visible and ui.battle_hud.action_buttons.power.visible
+	ui.fight.bout.positions[1] = ui.fight.bout.positions[0] + 1
+	ui.fight.refresh()
+	_check(ui.fight.hud.action_buttons.quick.visible and ui.fight.hud.action_buttons.power.visible
 		and not attack.disabled and attack.accessibility_name == "Normal attack", "Close range should expose all three attack styles")
-	var rival: Dictionary = ui.bout.fighters[1]
+	var rival: Dictionary = ui.fight.bout.fighters[1]
 	rival.armor = 2
 	rival.max_armor = 6
 	rival.guarding = true
-	ui._refresh_battle()
-	var power = ui.battle_hud.action_buttons.power
-	var hit := roundi(ui.bout.chance("power") * 100.0)
-	var block := roundi(Duel.block_chance(ui.bout.rules, rival.stats.Defence, true) * 100.0)
+	ui.fight.refresh()
+	var power = ui.fight.hud.action_buttons.power
+	var hit := roundi(ui.fight.bout.chance("power") * 100.0)
+	var block := roundi(Duel.block_chance(ui.fight.bout.rules, rival.stats.Defence, true) * 100.0)
 	_check(power.summary.text.contains("%d%% hit" % hit) and power.accessibility_description.contains("%d%% block" % block)
 		and power.accessibility_description.contains("2 armor and"), "Power should show its live hit chance, block chance, and armor absorption")
 	rival.exposed = true
-	ui._refresh_battle()
+	ui.fight.refresh()
 	_check(power.accessibility_description.contains("0% block"), "An exposed rival cannot block")
-	var starting_stamina: int = ui.bout.fighters[0].energy
-	ui.bout.fighters[0].energy = 0
-	ui._refresh_battle()
+	var starting_stamina: int = ui.fight.bout.fighters[0].energy
+	ui.fight.bout.fighters[0].energy = 0
+	ui.fight.refresh()
 	_check(attack.disabled and attack.accessibility_description.contains("Requires 4 stamina"), "The HUD should explain why an exhausted attack is disabled")
-	_check(ui.battle_hud.fighter_cards[0].bars[2].readout.text == "0/%d" % player.max_energy,
+	_check(ui.fight.hud.fighter_cards[0].bars[2].readout.text == "0/%d" % player.max_energy,
 		"Depleted stamina should show zero and the full capacity")
-	_check(ui.battle_hud.fighter_cards[1].bars[1].readout.text == "2/6", "Armor readouts should show the rival's current and maximum points")
+	_check(ui.fight.hud.fighter_cards[1].bars[1].readout.text == "2/6", "Armor readouts should show the rival's current and maximum points")
 	attack.pressed.emit()
-	_check(ui.bout.turn == 0, "The fight must reject an exhausted attack even if the button signal fires")
-	ui.bout.fighters[0].energy = starting_stamina
-	ui.bout.positions[1] = rival_start
-	ui._refresh_battle()
-	for action_button in ui.battle_hud.action_buttons.values():
+	_check(ui.fight.bout.turn == 0, "The fight must reject an exhausted attack even if the button signal fires")
+	ui.fight.bout.fighters[0].energy = starting_stamina
+	ui.fight.bout.positions[1] = rival_start
+	ui.fight.refresh()
+	for action_button in ui.fight.hud.action_buttons.values():
 		_check(not action_button.caption.text.is_empty() and not action_button.accessibility_name.is_empty(),
 			"Combat actions should have visible captions and accessible names")
-	ui.battle_hud.settings_button.pressed.emit()
+	ui.fight.hud.settings_button.pressed.emit()
 	if _check(is_instance_valid(ui.settings_popup), "Settings should open from combat"):
 		_check(_find_button(ui.settings_popup, "Simulator") == null, "Combat settings should keep the player in the bout")
-		var turn: int = ui.bout.turn
-		ui._player_action("advance")
-		_check(ui.bout.turn == turn, "Settings should block combat actions while open")
+		var turn: int = ui.fight.bout.turn
+		ui.fight.play_action("advance")
+		_check(ui.fight.bout.turn == turn, "Settings should block combat actions while open")
 		ui.settings_popup.hide()
-	ui.bout.winner = 0
-	ui.bout_result = ui.game.record_turn("attack", 0)
-	var arena_layer: Control = ui.battle_layer
-	var arena_stage: Control = ui.battle_stage
-	ui._finish_bout()
-	_check(ui.current_screen == "result" and ui.battle_layer == arena_layer and ui.battle_stage == arena_stage
-		and not ui.shell.visible and arena_stage.result_winner == 0 and not ui.battle_hud.action_layer.visible,
+	ui.fight.bout.winner = 0
+	var outcome: Dictionary = ui.game.record_turn("attack", 0)
+	var arena_layer: Control = ui.fight
+	var arena_stage: Control = ui.fight.stage
+	ui.fight.finished.emit(outcome)
+	_check(ui.current_screen == "result" and ui.fight == arena_layer and ui.fight.stage == arena_stage
+		and not ui.shell.visible and arena_stage.result_winner == 0 and not ui.fight.hud.action_layer.visible,
 		"The result should celebrate the winner in the original arena and hide the combat controls")
 	var result_panel := arena_layer.get_node_or_null("BoutResults")
 	_check(result_panel != null and _find_button(result_panel, "Spend level-up points") != null,
@@ -1355,8 +1367,25 @@ func _check_game_buttons() -> void:
 	for point in 8:
 		ui._change_point("Stamina", 1)
 	_check(ui.stat_labels.Stamina.tooltip_text.contains("Leap 4 spaces"), "The Stamina tooltip should update after reaching the threshold")
-	ui._retry()
-	_check(ui.current_screen == "allocate", "A pending level-up should block retry")
+	ui.queue_free()
+
+func _check_regular_loss_navigation() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.game.create(0, "After a loss", 0, 0, ui.data.build_stats("weapon", 10))
+	ui._open_bout(ui.game.start_bout(false, 42))
+	ui.fight.bout.winner = 1
+	ui.fight.finished.emit(ui.game.record_turn("attack", 1))
+	_check(_find_button(ui.fight, "Retry bout") == null and _find_button(ui.fight, "Return to town") != null
+		and _find_button(ui.fight, "Next Bout") != null, "Results after a loss should offer town and the next bout")
+	ui.show_arena()
+	_check(ui.current_screen == "arena" and _find_button(ui, "Retry last bout") == null,
+		"The arena should offer scouting without a retry")
+	var scout := _find_button(ui, "Scout rival")
+	if _check(scout != null and not scout.disabled, "Scouting should be available after defeat"):
+		scout.pressed.emit()
+		_check(ui.current_screen == "scout" and not ui.game.scouted_bout().is_empty() and not ui.game.has_active_bout(),
+			"Scouting should open a fresh face-off after defeat")
 	ui.queue_free()
 
 func _press_escape() -> void:
@@ -1382,10 +1411,10 @@ func _check_tournament_navigation() -> void:
 	_check(_find_button(ui, "Back") != null and not ui.game.tournament_in_progress(), "Scouting should leave the first tournament optional")
 	_find_button(ui, "Fight to the death").pressed.emit()
 	_check(ui.current_screen == "battle" and ui.game.tournament_in_progress(), "Entering the first round should lock the tournament")
-	ui.bout.winner = 0
-	ui.bout_result = ui.game.record_turn("attack", 0)
-	ui._finish_bout()
-	_check(_find_button(ui.battle_layer, "Next Match") != null and _find_button(ui.battle_layer, "Return to town") == null
+	ui.fight.bout.winner = 0
+	var outcome: Dictionary = ui.game.record_turn("attack", 0)
+	ui.fight.finished.emit(outcome)
+	_check(_find_button(ui.fight, "Next Match") != null and _find_button(ui.fight, "Return to town") == null
 		and not ui.game.can_scout(false), "Between rounds the only destination should be the next tournament match")
 	_press_key(KEY_T)
 	_press_escape()
@@ -1402,12 +1431,36 @@ func _check_tournament_navigation() -> void:
 	_press_escape()
 	_check(ui.current_screen == "scout", "Back must keep the player in the tournament face-off")
 	_find_button(ui, "Fight to the death").pressed.emit()
-	ui.bout.winner = 0
-	ui.bout_result = ui.game.record_turn("attack", 0)
-	ui._finish_bout()
-	_check(not ui.game.tournament_in_progress() and _find_button(ui.battle_layer, "Spend level-up points") != null,
+	ui.fight.bout.winner = 0
+	outcome = ui.game.record_turn("attack", 0)
+	ui.fight.finished.emit(outcome)
+	_check(not ui.game.tournament_in_progress() and _find_button(ui.fight, "Spend level-up points") != null,
 		"Beating the champion should release the lock and offer the required level-up")
 	ui.free()
+
+func _check_fight_turn_flow() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.game.create(0, "Turn flow", 0, 0, ui.data.build_stats("weapon", 10))
+	var snapshot: Dictionary = ui.game.start_bout(false, 42)
+	ui._open_bout(snapshot)
+	_check(ui.fight.stage.kind == "battle" and ui.fight.stage.full_arena, "The fight scene should initialize a full arena stage")
+	ui.fight.play_action("advance")
+	if not _check(ui.game.state.active_bout.actions == ["advance"], "Save the player's action as soon as the turn resolves"):
+		ui.queue_free()
+		return
+	await ui.fight.stage.turn_animation_finished
+	await process_frame
+	_check(ui.game.state.active_bout.actions.size() == 2 and not ui.fight.hud.action_layer.visible,
+		"The opponent should commit one reply while the action controls are locked")
+	await ui.fight.stage.turn_animation_finished
+	await process_frame
+	_check(ui.fight.bout.active == 0 and ui.fight.hud.action_layer.visible,
+		"The action controls should reopen after the opponent's animation")
+	var history: Array = ui.fight.bout.history.duplicate(true)
+	ui._open_bout(snapshot)
+	_check(ui.fight.bout.history == history, "Reopening the fight scene should replay both recorded turns")
+	ui.queue_free()
 
 func _check_music_cues() -> void:
 	var ui = Game.instantiate()
@@ -1422,25 +1475,59 @@ func _check_music_cues() -> void:
 		_check(ui._music_for_screen() == ui.SHOP_THEMES[kind], "Each shop should select its own cue")
 	ui.current_screen = "scout"
 	_check(ui._music_for_screen() == ui.PRE_FIGHT_THEME, "A face-off should select the pre-fight cue")
-	ui.battle_stage = Stage.new()
-	ui.add_child(ui.battle_stage)
+	ui.fight = FightScreen.instantiate()
+	ui.add_child(ui.fight)
 	ui.current_screen = "battle"
 	for arena in ui.data.arenas.size():
-		ui.battle_stage.arena = arena
+		ui.fight.stage.arena = arena
 		var track: AudioStreamOggVorbis = ui._music_for_screen()
-		_check(track == ui.FIGHT_THEMES[arena] and track.loop, "Each arena should select a looping combat track")
+		_check(track.resource_path == Content.arena(arena).music and track.loop, "Each arena should select a looping combat track")
 	var stats: Dictionary = ui.data.stats_empty()
 	var fighter: Dictionary = ui.data.fighter("Music test", stats, {})
-	ui.bout = Duel.new(ui.data, fighter, fighter, 42)
+	ui.fight.bout = Duel.new(ui.data, fighter, fighter, 42)
 	ui.current_screen = "result"
 	for winner in [0, 1]:
-		ui.bout.winner = winner
+		ui.fight.bout.winner = winner
 		var track: AudioStreamOggVorbis = ui._music_for_screen()
 		_check(track == (ui.VICTORY_THEME if winner == 0 else ui.DEFEAT_THEME)
 			and track.loop and track.loop_offset > 0, "A result should select its own cue and play its intro once")
 	ui.venue_music_enabled = false
 	_check(ui._music_for_screen() == null, "The shop and arena toggle should mute result music")
 	ui.free()
+
+func _check_display_settings() -> void:
+	var path := "user://settings.cfg"
+	var had_settings := FileAccess.file_exists(path)
+	var previous := FileAccess.get_file_as_bytes(path) if had_settings else PackedByteArray()
+	for stored_mode in [-1, 0, 1, 2]:
+		var settings := ConfigFile.new()
+		if stored_mode < 0:
+			settings.set_value("display", "fullscreen_bouts", true)
+		else:
+			settings.set_value("display", "mode", stored_mode)
+		_check(settings.save(path) == OK, "The display settings fixture should be writable")
+		var ui = Game.instantiate()
+		root.add_child(ui)
+		ui._show_settings()
+		var display := _find_button(ui.settings_popup, "Display") as OptionButton
+		if _check(display != null and display.item_count == 2, "Settings should offer only two display modes"):
+			_check(display.get_item_text(0) == "Windowed" and display.get_item_text(1) == "Fullscreen",
+				"The display choices should read Windowed and Fullscreen")
+			var expected_index := 1 if stored_mode == 2 else 0
+			_check(display.selected == expected_index,
+				"Display mode %d should reopen with the correct selection" % stored_mode)
+			var next_index := 1 - expected_index
+			display.select(next_index)
+			display.item_selected.emit(next_index)
+			var saved := ConfigFile.new()
+			_check(saved.load(path) == OK and saved.get_value("display", "mode", -1) == display.get_item_id(next_index)
+				and not saved.has_section_key("display", "fullscreen_bouts"),
+				"Changing the display setting should save the selected mode and remove the legacy key")
+		ui.free()
+	if had_settings:
+		_check(FileAccess.open(path, FileAccess.WRITE).store_buffer(previous), "Restore the previous settings after the display test")
+	else:
+		DirAccess.remove_absolute(path)
 
 func _check_control_settings() -> void:
 	var ui = Game.instantiate()
@@ -1461,21 +1548,20 @@ func _check_control_settings() -> void:
 	_press_key(KEY_B)
 	_check(ui.current_screen == "town", "The new Back key should navigate to town")
 	var snapshot: Dictionary = ui.game.start_bout(false, 42)
-	ui._open_bout(snapshot, false)
-	ui.bout.winner = 0
-	ui.bout_result = ui.game.record_turn("attack", 0)
-	ui._finish_bout()
-	_check(_find_button(ui.battle_layer, "Next Bout") != null and _find_button(ui, "Practice last bout") == null,
-		"Regular victories should offer the next bout without a practice button")
+	ui._open_bout(snapshot)
+	ui.fight.bout.winner = 0
+	var outcome: Dictionary = ui.game.record_turn("attack", 0)
+	ui.fight.finished.emit(outcome)
+	_check(_find_button(ui.fight, "Next Bout") != null, "Regular victories should offer the next bout")
 	_press_key(KEY_N)
 	_check(ui.current_screen == "result", "The old Next key should stop navigating after a rebind")
 	_press_key(KEY_M)
 	_check(ui.current_screen == "scout" and not ui.game.scouted_bout().is_empty(), "The new Next key should scout the regular rival")
 	ui.game.state.xp = 0
 	_find_button(ui, "Fight").pressed.emit()
-	ui.bout.winner = 0
-	ui.bout_result = ui.game.record_turn("attack", 0)
-	ui._finish_bout()
+	ui.fight.bout.winner = 0
+	outcome = ui.game.record_turn("attack", 0)
+	ui.fight.finished.emit(outcome)
 	_press_key(KEY_T)
 	_check(ui.current_screen == "result", "The old Town key should stop navigating after a rebind")
 	_press_key(KEY_J)
