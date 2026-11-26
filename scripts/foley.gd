@@ -17,6 +17,11 @@ const CLIPS := {
 	"lightning": preload("res://audio/lightning.wav"),
 	"meteor": preload("res://audio/meteor.wav"),
 	"hellfire": preload("res://audio/hellfire.wav"),
+	"prism-pop": preload("res://audio/prism-pop.wav"),
+	"pocket-anvil": preload("res://audio/pocket-anvil.wav"),
+	"royal-tantrum": preload("res://audio/royal-tantrum.wav"),
+	"dawnbolt": preload("res://audio/dawnbolt.wav"),
+	"sunseal": preload("res://audio/sunseal.wav"),
 	"buy": preload("res://audio/buy.wav"),
 	"equip": preload("res://audio/equip.wav"),
 	"shop_bell": preload("res://audio/shop-bell.wav"),
@@ -24,7 +29,8 @@ const CLIPS := {
 	"defeat": preload("res://audio/defeat.wav"),
 	"level_up": preload("res://audio/level_up.wav"),
 }
-const SPELLS: Array[String] = ["fireball", "lightning", "meteor", "hellfire"]
+const SPELLS: Array[String] = ["fireball", "lightning", "meteor", "hellfire", "prism-pop", "pocket-anvil", "royal-tantrum",
+	"dawnbolt", "sunseal"]
 const CROWD_LOOP = preload("res://audio/arena-crowd.ogg")
 var enabled := true
 var _effects: AudioStreamPlayer
@@ -99,5 +105,7 @@ func impact(event: Dictionary, weapon_art: int) -> void:
 		return
 	if event.blocked or (event.armor_hit > 0 and weapon_attack):
 		_play_on(_contact, "block", .87 if event.critical else 1.0)
+	elif int(event.get("spell_art", -1)) == 5:
+		_play_on(_contact, "mace_hit", .74)
 	elif weapon_attack:
 		_play_on(_contact, "mace_hit" if weapon_art == 1 else "blade_hit", .86 if event.critical else 1.0)

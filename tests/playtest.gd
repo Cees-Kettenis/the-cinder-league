@@ -7,6 +7,7 @@ const Simulator = preload("res://scripts/simulator.gd")
 const Game = preload("res://cinder_league.tscn")
 const Stage = preload("res://scripts/stage.gd")
 const Rig = preload("res://scripts/fighter_rig.gd")
+const Armor = preload("res://scripts/armor_art.gd")
 
 var failures: Array[String] = []
 
@@ -26,11 +27,17 @@ func _run() -> void:
 	_check_movement(data)
 	_check_lunge(data)
 	_check_stamina_mobility(data)
+	_check_tactical_presets(data)
+	_check_fast_melee_rival(data)
 	_check_legacy_lunge(data)
+	_check_strength_damage(data)
 	_check_attack_styles(data)
 	_check_first_blood(data)
 	_check_arena_view(data)
 	_check_fighter_rig()
+	_check_sabre_pose()
+	_check_rival_weapon_art(data)
+	_check_armor_sprites(data)
 	_check_hit_feedback()
 	_check_fatality_variants(data)
 	_check_spell_damage(data)
@@ -40,11 +47,15 @@ func _run() -> void:
 	_check_reserve_spell(data)
 	_check_saved_bout(data)
 	_check_scouting(data)
+	_check_previous_arena_completion(data)
 	_check_defeats(data)
 	_check_save_replacement(data)
 	_check_saved_spell_faceoff(data)
+	_check_shop_requirements()
+	_check_equipped_shop_selection()
 	_check_game_buttons()
 	_check_tournament_navigation()
+	_check_music_cues()
 	_check_control_settings()
 	await process_frame
 	await process_frame
@@ -216,6 +227,62 @@ func _check_stamina_mobility(data: RefCounted) -> void:
 		return
 	_check(false, "The long lunge test needs a roll between the two hit chances")
 
+func _check_tactical_presets(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	stats.Stamina = 10
+	var mage: Dictionary = data.fighter("Caster", stats, {"weapon": "dagger", "spell": "fireball"})
+	var rival: Dictionary = data.fighter("Pursuer", data.stats_empty(), {"weapon": "dagger"})
+	var escape := Duel.new(data, mage, rival, 42, 1)
+	_check(escape.choose("keepaway_mage") == "jump_back" and escape.act("jump_back").valid,
+		"Keepaway should leap out when a slow pursuer cannot get back into range in one turn")
+	escape.act("jump")
+	_check(escape.distance() == 2 and escape.choose("keepaway_mage") == "cast",
+		"Keepaway should cast from the space it bought")
+	var chase := Duel.new(data, rival, mage, 42)
+	chase.act("advance")
+	chase.act("sleep")
+	chase.act("advance")
+	chase.act("sleep")
+	chase.fighters[0].energy = chase.cost("lunge") + chase.cost("attack")
+	_check(chase.choose("weapon") == "lunge" and chase.choose("melee_hunter") == "jump",
+		"The hunter should save stamina on the approach if a lunge leaves only one swing")
+	var waiting := Duel.new(data, rival, rival, 42)
+	waiting.act("guard")
+	_check(waiting.choose("duelist") == "taunt", "A duelist should taunt a fighter who opens by waiting")
+	var simulator := Simulator.new(data)
+	for variant in Simulator.BUILD_PRESETS:
+		var sample := simulator.batch(variant, Simulator.BUILD_PRESETS[variant], 4, 42, 1)
+		_check(not sample.has("error") and sample.left_stats == sample.right_stats and sample.left_loadout == sample.right_loadout,
+			"The %s simulator preset should keep its original build and gear" % variant)
+
+func _check_fast_melee_rival(data: RefCounted) -> void:
+	var weapon: Dictionary = data.build_stats("weapon", 40)
+	var fast: Dictionary = data.build_stats("fast_melee", 40)
+	weapon.Vitality -= 2
+	weapon.Stamina += 2
+	_check(fast == weapon and fast.Stamina == 10, "Fast Melee should trade two Vitality points for Stamina at level four")
+	var caster_stats: Dictionary = data.stats_empty()
+	caster_stats.Magic = 24
+	caster_stats.Stamina = 10
+	var caster: Dictionary = data.fighter("Caster", caster_stats, {"spell": "storm"})
+	var found_fast := false
+	var found_other := false
+	for seed_value in range(40, 80):
+		_check(data.generate_opponent(3, 0, seed_value).style != "fast_melee", "Fast melee rivals should start appearing at level four")
+		var rival: Dictionary = data.generate_opponent(4, 0, seed_value)
+		if rival.style != "fast_melee":
+			found_other = true
+			continue
+		found_fast = true
+		_check(rival.level == 4 and rival.stats.Stamina >= 10 and rival.spell.is_empty(),
+			"The regular rival should have the four-space leap and a melee loadout")
+		var duel := Duel.new(data, caster, rival, seed_value, -1, {"regular_bout": true})
+		duel.act("guard")
+		var action := duel.choose(rival.style)
+		_check(action == "jump" and duel.act(action).valid and duel.distance() == 1 and duel.threatens_cast(duel.fighters[1]),
+			"Fast melee rivals should leap into weapon reach against casters on their opening turn")
+	_check(found_fast and found_other, "The seeded Amber Ring pool should mix fast pursuers with the other builds")
+
 func _check_legacy_lunge(data: RefCounted) -> void:
 	var fighter: Dictionary = data.fighter("Gladiator", data.stats_empty(), {"weapon": "dagger"})
 	var legacy_rules: Dictionary = data.rules.duplicate()
@@ -256,6 +323,30 @@ func _check_legacy_lunge(data: RefCounted) -> void:
 	var reloaded := Duel.new(data, fighter, fighter, 42, 5, {"rules": legacy_rules})
 	_check(new_lunge.valid and new_lunge.energy_cost == 21 and reloaded.restore_history(["advance", "advance", "lunge"])
 		and reloaded.history == continued.history, "A new short lunge in an older bout should reload with the same cost and result")
+
+func _check_strength_damage(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	stats.Strength = 28
+	stats.Vitality = 52
+	var fighter: Dictionary = data.fighter("Gladiator", stats, {"weapon": "warden_sword"})
+	var base: float = fighter.weapon.damage
+	var normal_rate: float = data.rules.damage_per_strength
+	var extra_rate: float = data.rules.damage_per_excess_strength
+	_check(is_equal_approx(Duel.strike_damage(data.rules, fighter, false), base + 20 * normal_rate + 8 * extra_rate),
+		"Strength above a quarter of 80 assigned points should give less damage")
+	fighter.stats.Vitality += 40
+	_check(is_equal_approx(Duel.strike_damage(data.rules, fighter, false), base + 28 * normal_rate),
+		"The full Strength damage bonus should apply up to 30 with 120 assigned points")
+	fighter.stats.Strength = 16
+	fighter.stats.Vitality = 24
+	_check(is_equal_approx(Duel.strike_damage(data.rules, fighter, false), base + 12 * normal_rate + 4 * extra_rate),
+		"The minimum Strength threshold should apply when fewer than 48 points are assigned")
+	var legacy_rules: Dictionary = data.rules.duplicate()
+	for field in ["strength_damage_floor", "strength_damage_point_fraction", "damage_per_excess_strength"]:
+		legacy_rules.erase(field)
+	fighter.stats.Strength = 40
+	_check(is_equal_approx(Duel.strike_damage(legacy_rules, fighter, false), base + 40 * normal_rate),
+		"Saved duel rules without the Strength threshold should preserve the original damage")
 
 func _check_attack_styles(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -393,6 +484,54 @@ func _check_arena_view(data: RefCounted) -> void:
 			"The camera should show the right pit when the fighters are near it")
 	stage.free()
 
+func _check_armor_sprites(data: RefCounted) -> void:
+	var player_sets := {}
+	for item in data.items.values():
+		if item.kind != "armor":
+			continue
+		var sprite := Armor.equipped(item)
+		var texture: Texture2D = sprite.get("texture")
+		var family: String = item.id.get_slice("_", 0)
+		player_sets[family] = true
+		var path := "res://art/armor/%s/%s.webp" % [family, item.slot]
+		_check(texture != null and texture.resource_path == path, "%s should use its own sprite" % item.name)
+		_check(sprite.has("mesh") == (item.slot in ["pants", "shoes"]),
+			"Only the lower-body pieces should use a bending mesh")
+		if item.slot == "chest":
+			var pieces: Array = sprite.get("weapon_arm", [])
+			var plated := family in ["court", "glassguard", "bastion"]
+			_check(pieces.size() == (3 if plated else 0), "%s should have its intended arm coverage" % item.name)
+			if plated and pieces.size() == 3:
+				_check(pieces[0].joint == Rig.WEAPON_SHOULDER and pieces[1].joint == Rig.WEAPON_ELBOW
+					and pieces[2].joint == Rig.WEAPON_WRIST, "Arm plates must follow the shoulder, elbow, and weapon grip")
+	_check(Armor.ANCHORS.helmet == Rig.HEAD and Armor.ANCHORS.shield == Rig.OFF_WRIST,
+		"Helmets and shields should move with their respective joints")
+	_check(Data.RIVAL_ARMOR_LEVELS.size() >= player_sets.size(), "Rivals should have at least as many sets as the player")
+	var rival_textures := {}
+	for family in Data.RIVAL_ARMOR_LEVELS:
+		for slot in data.SLOTS:
+			var texture: Texture2D = Armor.rival_piece(slot, family).get("texture")
+			_check(texture != null and not rival_textures.has(texture), "Each rival set should have its own art in every slot")
+			rival_textures[texture] = true
+	var stage := Stage.new()
+	stage.data = data
+	for family in ["court", "glassguard", "bastion"]:
+		var armor := {"helmet": family + "_helmet"}
+		_check(stage._closed_helmet(armor, {}), "A closed %s helmet should cover the base head" % family)
+		_check(not stage._closed_helmet(armor, {"armor": {"helmet": "rival_1"}}),
+			"An open rival helmet must retain its visible face")
+	var outfit := {"armor": {"chest": "riveted", "helmet": "blackened", "shield": "blackened",
+		"pants": "riveted", "shoes": "riveted"}}
+	var equipment := {}
+	for slot in data.SLOTS:
+		equipment[slot] = "bastion_" + slot
+		_check(stage._armor_piece(equipment, outfit, slot) == Armor.rival_piece(slot, outfit.armor[slot]),
+			"Every equipped rival slot should draw its own artwork")
+		_check(stage._armor_piece({}, outfit, slot).is_empty(), "An empty armor slot should stay visible as cloth or skin")
+	_check(stage._closed_helmet(equipment, outfit), "A closed rival helmet must hide the covered face")
+	_check(not stage._closed_helmet({"helmet": "leather_helmet"}, {}), "An open helmet must retain the visible face")
+	stage.free()
+
 func _check_fighter_rig() -> void:
 	var pose := Rig.Pose.new()
 	var rest := Rig.transforms(pose)
@@ -427,6 +566,46 @@ func _check_fighter_rig() -> void:
 	posed = Rig.transforms(pose)
 	_check(is_equal_approx((posed[Rig.REAR_ANKLE] * Rig.local(Rig.ANKLES[0])).y, Rig.local(Rig.ANKLES[0] - Vector2(0, 30)).y),
 		"A stride beyond the leg's reach should still keep the planted foot at its floor height")
+
+func _check_sabre_pose() -> void:
+	var stage := Stage.new()
+	var pose := stage._rest_pose({"weapon": "glass_sabre"})
+	var bones := Rig.transforms(pose)
+	var sprite: Array = Stage.WEAPON_SPRITES.glass_sabre
+	var grip_angle := stage._weapon_rotation({"weapon": "glass_sabre"})
+	var blade: Vector2 = bones[Rig.WEAPON_WRIST].basis_xform(((sprite[3] - sprite[1]) * sprite[2]).rotated(grip_angle))
+	_check(blade.y < 0.0 and absf(blade.x) < absf(blade.y) * .05, "The Glass sabre should rest upright in the hand")
+	var fist := bones[Rig.WEAPON_WRIST].basis_xform(Vector2.RIGHT)
+	_check(fist.x > .95 and absf(fist.y) < .05 and pose.weapon_arm.y < -.5,
+		"The sabre guard should keep its raised forearm and face the knuckles forward")
+	stage.size = Vector2(680, 760)
+	stage.left_loadout = {"weapon": "glass_sabre"}
+	var tip: Vector2 = bones[Rig.WEAPON_WRIST] * Rig.local(Rig.GRIP) + blade
+	_check(stage.size.y * .96 + tip.y * stage._portrait_height() / 1024.0 >= stage.size.y * .04,
+		"The portrait should show the entire upright sabre")
+	_check(stage._rest_pose({"weapon": "sword"}).weapon_arm.is_equal_approx(Vector3.ZERO), "The sword should retain its resting grip")
+	for recovery in [0.0, 1.0]:
+		var arm := stage._swing_arm(Vector3(752, 516, -1.31), Vector3(891, 568, .94),
+			Vector3(825, 672, 1.48), Vector3(63, -61, 0), recovery, recovery, recovery,
+			stage._rest_hand({"weapon": "glass_sabre"}), grip_angle)
+		_check(arm.is_equal_approx(pose.weapon_arm), "The swing should start and finish at the sabre's upright grip")
+	stage.free()
+
+func _check_rival_weapon_art(data: RefCounted) -> void:
+	var textures := {}
+	for item in data.items.values():
+		if item.kind != "weapon":
+			continue
+		var sprite: Array = Stage.RIVAL_WEAPONS.get(item.id, [])
+		if not _check(not sprite.is_empty(), "%s should have rival weapon art" % item.name):
+			continue
+		var texture: Texture2D = sprite[0]
+		var bounds := Rect2(Vector2.ZERO, texture.get_size())
+		_check(texture != Stage.weapon_icon(item).atlas and not textures.has(texture.resource_path),
+			"%s should use its own rival sprite" % item.name)
+		_check(bounds.has_point(sprite[1]) and bounds.has_point(sprite[2]) and sprite[1] != sprite[2],
+			"%s should have distinct grip and contact points inside its texture" % item.name)
+		textures[texture.resource_path] = true
 
 func _check_hit_feedback() -> void:
 	var stage := Stage.new()
@@ -489,11 +668,11 @@ func _check_fatality_variants(data: RefCounted) -> void:
 	stage.lethal_bout = true
 	var fatal := {"action": "cast", "side": 0, "critical": false, "blocked": false, "miss": false, "damage": 5, "armor_hit": 0,
 		"positions": [14, 15], "health": [44, 0]}
-	for spell in ["fireball", "lightning", "meteor", "hellfire", "storm", "arc"]:
+	for spell in ["fireball", "lightning", "meteor", "hellfire", "storm", "arc", "verdigris_bolt", "sunseal"]:
 		stage.left_loadout = {"spell": spell}
 		stage.animate(fatal)
 		var art := int(data.items[spell].art)
-		_check(stage.finisher == ("ash" if art == 1 else "burn") and stage.finishing_spell_art == art,
+		_check(stage.finisher == ("ash" if art in [1, 7] else "burn") and stage.finishing_spell_art == art,
 			"%s should choose its own fatal effect" % spell)
 	var survived := fatal.duplicate()
 	survived.health = [44, 1]
@@ -759,11 +938,35 @@ func _check_scouting(data: RefCounted) -> void:
 		var rival: Dictionary = data.generate_opponent(6, 1, seed_value)
 		_check(rival == data.generate_opponent(6, 1, seed_value), "A seed should reproduce the same rival")
 		_check(rival.level in [5, 6, 7], "Regular rivals should stay within one level of the player and inside the arena")
+		_check(rival.look == Data.rival_look(seed_value, 6), "The outfit should use the player's level even when the rival is stronger")
 		styles[rival.style] = true
 		names[rival.name] = true
-		outfits[Vector3i(rival.look.chest, rival.look.helmet, rival.look.palette)] = true
+		outfits[JSON.stringify(rival.look.armor) + str(rival.look.palette)] = true
 	_check(styles.size() > 1 and names.size() > 1, "Different seeds should generate varied regular rivals")
 	_check(outfits.size() >= 12, "Regular rivals should mix many visible cosmetic outfits")
+	for player_level in range(1, data.max_level() + 1):
+		var expected := Data.RIVAL_ARMOR_LEVELS.keys().filter(func(family: String) -> bool:
+			return Data.RIVAL_ARMOR_LEVELS[family] <= player_level)
+		var seen := {}
+		var mixed := 0
+		for seed_value in range(96):
+			var pieces: Array = Data.rival_look(seed_value, player_level).armor.values()
+			var used := {}
+			for family in pieces:
+				used[family] = true
+				seen[family] = true
+			mixed += int(used.size() > 1)
+		_check(seen.keys().all(func(family: String) -> bool: return family in expected) and seen.size() == expected.size(),
+			"Level %d should use every available armor set and respect the unlocks" % player_level)
+		_check(mixed >= 80, "Most outfits at level %d should mix pieces from different sets" % player_level)
+	for index in data.arenas.size():
+		var level: int = data.arenas[index].cap
+		for seed_value in range(40, 64):
+			var rival: Dictionary = data.generate_opponent(level, index, seed_value)
+			var points := 0
+			for item_id in rival.loadout.armor.values():
+				points += int(data.items[item_id].armor)
+			_check(rival.max_armor == points, "Rival cosmetics must leave the equipment's armor total intact")
 	var campaign := Campaign.new(data)
 	campaign.create(0, "Gladiator", 0, 0, data.build_stats("weapon", 10))
 	campaign.state.level = 4
@@ -798,9 +1001,90 @@ func _check_scouting(data: RefCounted) -> void:
 		var round_snapshot := campaign.start_bout(true, 20 + round_index)
 		_check(not round_snapshot.is_empty(), "Each tournament round should be available in order")
 		campaign.settle(0)
-		_check(campaign.state.complete == (round_index == round_count - 1), "Only the champion should finish the tournament")
+		_check(campaign.arena_index() == (1 if round_index < round_count - 1 else 2) and not campaign.state.complete,
+			"Only the Iron Court champion should open the Glass Crucible")
 	var champion: Dictionary = data.generate_opponent(8, 1, 20, round_count - 1)
 	_check(champion == data.generate_opponent(8, 1, 99, round_count - 1), "Changing the seed should not change the champion")
+	_check(campaign.state.pending and campaign.state.xp >= data.rules.xp_levels[8], "The Glass Crucible should grant level 9 eligibility")
+	campaign.state.level = 12
+	campaign.state.xp = data.rules.xp_levels[11]
+	campaign.state.pending = false
+	var glass_rounds: int = campaign.arena().tournament.size()
+	_check(glass_rounds == round_count + 1, "The Glass Crucible should add a third preliminary bout")
+	for round_index in glass_rounds:
+		var snapshot_glass := campaign.start_bout(true, 120 + round_index)
+		_check(not snapshot_glass.is_empty(), "Every Glass Crucible round should open in order")
+		var duel := campaign.open_bout(snapshot_glass) as Duel
+		_check(duel.distance() == 5, "The Glass Crucible should use the shared opening distance")
+		campaign.settle(0)
+		_check(campaign.arena_index() == (2 if round_index < glass_rounds - 1 else 3) and not campaign.state.complete,
+			"Only the Crucible champion should open the Bastion")
+	var crucible_champion: Dictionary = data.generate_opponent(12, 2, 20, glass_rounds - 1)
+	_check(crucible_champion == data.generate_opponent(12, 2, 99, glass_rounds - 1)
+		and not crucible_champion.spell.is_empty(), "The mage champion should have a fixed build and a spell")
+	_check(campaign.state.pending and campaign.state.xp >= data.rules.xp_levels[12], "The Bastion should grant level 13 eligibility")
+	campaign.state.level = 16
+	campaign.state.xp = data.rules.xp_levels[15]
+	campaign.state.pending = false
+	var bastion_rounds: int = campaign.arena().tournament.size()
+	_check(bastion_rounds == glass_rounds + 1, "The Bastion should add a fourth preliminary bout")
+	for round_index in bastion_rounds:
+		var snapshot_bastion := campaign.start_bout(true, 230 + round_index)
+		_check(not snapshot_bastion.is_empty() and snapshot_bastion.arena == 3, "Bastion rounds should use the new arena")
+		campaign.settle(0)
+		_check(campaign.state.complete == (round_index == bastion_rounds - 1), "Only the Bastion champion should complete the playtest")
+	var stoneward: Dictionary = data.generate_opponent(16, 3, 42, bastion_rounds - 1)
+	_check(stoneward == data.generate_opponent(16, 3, 99, bastion_rounds - 1)
+		and Data.RIVAL_ARMOR_LEVELS.has(stoneward.look.armor.chest) and stoneward.loadout.armor.chest == "bastion_chest",
+		"Stoneward should have a fixed rival outfit and keep the Bastion armor stats")
+
+func _check_previous_arena_completion(data: RefCounted) -> void:
+	var legacy: Dictionary = data.profile.duplicate(true)
+	legacy.arenas = legacy.arenas.slice(0, 2)
+	legacy.rules.arena_caps = legacy.rules.arena_caps.slice(0, 2)
+	legacy.rules.xp_levels = legacy.rules.xp_levels.slice(0, 8)
+	legacy.rules.xp_levels[7] = 410
+	legacy.items = legacy.items.filter(func(item: Dictionary) -> bool: return item.level <= 8)
+	var path := "user://legacy-iron-profile.json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if not _check(file != null, "The test should be able to write the legacy profile"):
+		return
+	file.store_string(JSON.stringify(legacy))
+	file.close()
+	var extended := Data.new()
+	_check(extended.load_profile(path).is_empty() and extended.max_level() == 16
+		and extended.rules.xp_levels[7] == 410 and extended.rules.xp_levels[8] > 410
+		and extended.items.has("pocket_anvil") and extended.items.has("sunseal"),
+		"Earlier balance profiles should keep custom thresholds and gain the new arena and stock")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	var campaign := Campaign.new(data)
+	campaign.create(0, "Iron winner", 0, 0, data.build_stats("weapon", 80))
+	campaign.slot = 2
+	campaign.state.arena = 1
+	campaign.state.level = 8
+	campaign.state.xp = data.rules.xp_levels[7]
+	campaign.state.complete = true
+	campaign.save()
+	var continued := Campaign.new(data)
+	if not _check(continued.resume(2), "The completed Iron Court save should reopen"):
+		return
+	_check(continued.arena_index() == 2 and not continued.state.complete
+		and continued.state.pending and continued.points_to_allocate() == int(data.rules.points_per_level)
+		and continued.state.gold == campaign.state.gold,
+		"A completed Iron Court save should continue to level 9 without changing gold")
+	for stat in data.STATS:
+		_check(continued.state.stats[stat] == campaign.state.stats[stat], "The continuation should preserve %s" % stat)
+	_check(continued.resume(2) and continued.arena_index() == 2 and continued.state.xp == data.rules.xp_levels[8],
+		"The Iron Court continuation should only grant its new level once")
+	campaign.state.arena = 2
+	campaign.state.level = 12
+	campaign.state.xp = data.rules.xp_levels[11]
+	campaign.save()
+	_check(continued.resume(2) and continued.arena_index() == 3 and not continued.state.complete
+		and continued.state.pending and continued.points_to_allocate() == int(data.rules.points_per_level)
+		and continued.state.xp == data.rules.xp_levels[12] and continued.state.gold == campaign.state.gold,
+		"A completed Crucible save should reopen at the Bastion's level-up gate with its gold")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(campaign.path(2)))
 
 func _check_defeats(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)
@@ -878,6 +1162,70 @@ func _check_saved_spell_faceoff(data: RefCounted) -> void:
 	ui.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(save.path(number)))
 
+func _check_shop_requirements() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.sound.enabled = false
+	ui.game.create(0, "Gladiator", 0, 0, ui.data.stats_empty())
+	var warden_price: int = ui.data.items.warden_sword.price
+	ui.game.state.gold = warden_price
+	for entry in [[5, 5], [5, 11], [8, 5], [8, 11]]:
+		ui.game.state.level = entry[0]
+		ui.game.state.stats.Strength = entry[1]
+		ui._enter_shop("weapon")
+		ui.shop_entries.warden_sword.pressed.emit()
+		var shown := {}
+		for label in ui.shop_requirements.find_children("*", "Label", true, false):
+			shown[label.text] = label.accessibility_name.get_slice(". ", 3)
+		var level_met: bool = entry[0] == 8
+		var strength_met: bool = entry[1] == 11
+		_check(ui.shop_requirements.visible and shown.get("Level %d / 8" % entry[0]) == ("Met" if level_met else "Locked")
+			and shown.get("Strength %d / 11" % entry[1]) == ("Met" if strength_met else "Locked"),
+			"The Warden blade should show current and required stats with each requirement's status")
+		var can_buy := level_met and strength_met
+		_check(ui.shop_buy.text == ("Buy" if can_buy else "Locked") and ui.shop_buy.disabled != can_buy,
+			"The Buy button should unlock when both requirements are met")
+	ui.game.state.gold = warden_price - 1
+	ui._preview_item("warden_sword")
+	_check(ui.shop_buy.disabled and ui.shop_buy.text == "Not enough gold", "The shop should explain affordability separately")
+	ui.shop_entries.sword.pressed.emit()
+	_check(not ui.shop_requirements.visible and not ui.shop_buy.disabled, "The starter sword should hide the requirements row")
+	ui.queue_free()
+
+func _check_equipped_shop_selection() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.sound.enabled = false
+	ui.game.create(0, "Gladiator", 0, 0, ui.data.build_stats("weapon", 10))
+	for id in ["sword", "leather_chest", "leather_pants"]:
+		ui.game.purchase(ui.data.items[id])
+
+	ui._enter_shop("weapon")
+	var sword: Button = ui.shop_entries.sword
+	var highlight: StyleBoxFlat = sword.get_theme_stylebox("normal")
+	_check(ui.selected_item == "sword" and highlight.border_color == ui.SAND and ui.shop_buy.disabled,
+		"The Weaponsmith should open with the equipped weapon highlighted")
+	ui.shop_entries.mace.pressed.emit()
+	_check(ui.selected_item == "mace" and sword.accessibility_description == "Equipped"
+		and sword.get_children().any(func(child: Node) -> bool: return child is Label and child.text == "Equipped"),
+		"Browsing weapons should keep the equipped weapon marked")
+	ui.shop_entries.dagger.pressed.emit()
+	ui.shop_buy.pressed.emit()
+	_check(ui.selected_item == "dagger" and ui.shop_entries.dagger.accessibility_description == "Equipped"
+		and ui.shop_entries.sword.accessibility_description.is_empty(),
+		"Equipping another weapon should move the equipped marker")
+
+	ui._enter_shop("armor")
+	_check(ui.selected_item == "leather_chest" and ui.shop_entries.leather_chest.accessibility_description == "Equipped",
+		"The Armory should open with the equipped chest plate selected and marked")
+	ui._select_armor("pants")
+	_check(ui.selected_item == "leather_pants" and ui.shop_buy.text == "Equipped",
+		"Each armor tab should select the gear equipped in that slot")
+	ui._select_armor("helmet")
+	_check(ui.selected_item == "leather_helmet" and ui.shop_entries.leather_helmet.accessibility_description.is_empty(),
+		"An empty armor slot should show the first item without an equipped marker")
+	ui.queue_free()
+
 func _check_game_buttons() -> void:
 	var ui = Game.instantiate()
 	root.add_child(ui)
@@ -894,7 +1242,8 @@ func _check_game_buttons() -> void:
 	_find_button(ui, "Iron mace").pressed.emit()
 	_check(ui.shop_stage.left_loadout.weapon == "mace" and ui.game.state.loadout.weapon == ui.data.rules.starter_weapon,
 		"The locked mace should appear in the preview without changing the equipped weapon")
-	_check(ui.shop_buy.disabled and ui.shop_buy.text.begins_with("Requires level"), "The mace's unlock requirement should be visible")
+	_check(ui.shop_buy.disabled and ui.shop_buy.text == "Locked" and ui.shop_requirements.visible,
+		"The mace's unlock requirement should be visible")
 	_press_escape()
 	_check(ui.current_screen == "town", "Escape should return from a shop to town")
 	_press_escape()
@@ -1002,6 +1351,10 @@ func _check_game_buttons() -> void:
 		"The results bar should show the required allocation")
 	_press_escape()
 	_check(ui.current_screen == "allocate", "Escape from results should respect a pending level-up")
+	_check(ui.stat_labels.Stamina.tooltip_text.contains("Leap 3 spaces"), "The Stamina tooltip should show the current leap")
+	for point in 8:
+		ui._change_point("Stamina", 1)
+	_check(ui.stat_labels.Stamina.tooltip_text.contains("Leap 4 spaces"), "The Stamina tooltip should update after reaching the threshold")
 	ui._retry()
 	_check(ui.current_screen == "allocate", "A pending level-up should block retry")
 	ui.queue_free()
@@ -1054,6 +1407,39 @@ func _check_tournament_navigation() -> void:
 	ui._finish_bout()
 	_check(not ui.game.tournament_in_progress() and _find_button(ui.battle_layer, "Spend level-up points") != null,
 		"Beating the champion should release the lock and offer the required level-up")
+	ui.free()
+
+func _check_music_cues() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.venue_music_enabled = true
+	ui.town_music_enabled = true
+	ui.current_screen = "town"
+	_check(ui._music_for_screen() == ui.TOWN_THEME, "The town should select its own theme")
+	ui.current_screen = "shop"
+	for kind in ["armor", "weapon", "spell"]:
+		ui.shop_type = kind
+		_check(ui._music_for_screen() == ui.SHOP_THEMES[kind], "Each shop should select its own cue")
+	ui.current_screen = "scout"
+	_check(ui._music_for_screen() == ui.PRE_FIGHT_THEME, "A face-off should select the pre-fight cue")
+	ui.battle_stage = Stage.new()
+	ui.add_child(ui.battle_stage)
+	ui.current_screen = "battle"
+	for arena in ui.data.arenas.size():
+		ui.battle_stage.arena = arena
+		var track: AudioStreamOggVorbis = ui._music_for_screen()
+		_check(track == ui.FIGHT_THEMES[arena] and track.loop, "Each arena should select a looping combat track")
+	var stats: Dictionary = ui.data.stats_empty()
+	var fighter: Dictionary = ui.data.fighter("Music test", stats, {})
+	ui.bout = Duel.new(ui.data, fighter, fighter, 42)
+	ui.current_screen = "result"
+	for winner in [0, 1]:
+		ui.bout.winner = winner
+		var track: AudioStreamOggVorbis = ui._music_for_screen()
+		_check(track == (ui.VICTORY_THEME if winner == 0 else ui.DEFEAT_THEME)
+			and track.loop and track.loop_offset > 0, "A result should select its own cue and play its intro once")
+	ui.venue_music_enabled = false
+	_check(ui._music_for_screen() == null, "The shop and arena toggle should mute result music")
 	ui.free()
 
 func _check_control_settings() -> void:

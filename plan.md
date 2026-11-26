@@ -4,7 +4,7 @@ Build an original cartoon gladiator RPG for Linux, macOS, and Windows with Godot
 
 The goal for combat is for tactics to decide fights between comparable builds. Positioning, stamina, and timing should let different builds win in different ways. The game will be free and open source, with standalone downloads and Steam as an optional distribution channel.
 
-**Current playtest.** The Godot project implements the first two arenas through level 8, with the town, shops, three save slots, and a seeded simulator. See [play and simulation instructions](README.md). The remaining arenas and multiplayer are later milestones. The playtest numbers live in [balance.json](balance.json) and can be changed in the game.
+**Current playtest.** The Godot project implements Amber Ring, Iron Court, the Glass Crucible, and the Suncrest Bastion through level 16, with the town, shops, three save slots, and a seeded simulator. See [play and simulation instructions](README.md). The fifth arena and multiplayer are later milestones. The playtest numbers live in [balance.json](balance.json) and can be changed in the game.
 
 Numbers marked **playtest values** are starting points. Draft gear names and later champion concepts can change. Each milestone ends with a check that tells us when we can move on.
 
@@ -173,8 +173,8 @@ Armor pieces contribute armor points as their only combat effect. Decide how tho
 | --- | --- | --- | --- |
 | 1 | 1–4 | Level 4 | Straightforward gladiator with comparable strength to the player and a modest difficulty increase. |
 | 2 | 5–8 | Level 8 | Draft concept for a head gladiator. |
-| 3 | 9–12 | Level 12 | Draft concept for a mage. |
-| 4 | 13–16 | Level 16 | Draft concept for a tank with low damage and high survivability. |
+| 3 | 9–12 | Level 12 | Veyra Ashglass, a mobile mage who retreats to preserve casting distance. |
+| 4 | 13–16 | Level 16 | Garran Stoneward, the Suncrest Bastion's armored defender. |
 | 5 | 17–20 | Level 20 | Open. |
 
 ### Arenas and champions
@@ -186,6 +186,8 @@ Armor pieces contribute armor points as their only combat effect. Decide how tho
 
 ### Equipment and visual progression
 
+- **Rival armor.** Keep at least as many full rival armor sets as player sets. Use the player level to unlock rival artwork and roll each slot from the available sets using the encounter seed. The combat loadout determines which slots appear and how much armor the rival has. Pick champion outfits from a stable seed tied to their identity. Save the outfit with the encounter so scouting, combat, and retries show the same fighter.
+- **Rival weapons.** Give each weapon a rival-only sprite in the style of its league. The equipped weapon ID still determines damage, reach, stamina costs, and combat behavior. Keep blades and blunt weapons easy to tell apart at fight size.
 - Plan the shop stock across levels 1–20. Each level adds at least one weapon, armor piece, or magic item to buy. Character level determines when something appears in the shop. Its stat requirement determines who can use the weapon or buy the armor or spell.
 - The five armor slots are a chest plate that covers the shoulders, shield, helmet, pants, and shoes. Within each set the chest plate contributes the most armor points, followed by the shield, then the helmet and pants at equal value, then the shoes.
 - Give each full set more total armor points than the previous set. Runeweave can look light and still protect more than the knight set. Use the first arena simulation to set the actual armor point values and Defence thresholds.
@@ -200,6 +202,12 @@ Armor pieces contribute armor points as their only combat effect. Decide how tho
 | Starforged armor | Starforged greatsword | Dramatic shapes, dark metal, and bright inlays. |
 
 The set names and matching weapons are draft themes. Pick their unlock levels after testing the shop progression. Ensure that spell upgrades, weapons, and protective purchases arrive often enough to keep all of the intended builds progressing.
+
+### Music direction
+
+- Keep the town peaceful and shops cheerful. Let the face-off build tension with a slower, serious cue. Use a faster, more percussive score once a fight starts.
+- Give each arena its own combat sound. Amber Ring uses hand-drum rhythms and dulcimer. Iron Court uses low brass and marching strings. Glass Crucible uses celesta and an uneven pulse. Suncrest Bastion uses trumpets, bells, and timpani.
+- End the battle music when the bout resolves. Give victory a bright fanfare followed by a celebratory theme. Give defeat its own low, minor-key cadence.
 
 **Ready when** several different builds can play a fresh campaign from level 1 to 20, get useful upgrades at each arena, retry and resume around tournament gates, and complete all five tournaments.
 

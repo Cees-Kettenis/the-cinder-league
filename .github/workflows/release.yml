@@ -1,0 +1,89 @@
+name: Desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-alpha'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GODOT_VERSION: '4.7.2'
+      GODOT_EDITOR_SHA256: cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4
+      GODOT_TEMPLATES_SHA256: f298490b8d44d934be425a5a65a51bf15f422428b229a06a6e11d9ffea248011
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Godot and desktop export templates
+        shell: bash
+        run: |
+          tools="$RUNNER_TEMP/godot"
+          templates="${XDG_DATA_HOME:-$HOME/.local/share}/godot/export_templates/$GODOT_VERSION.stable"
+          mkdir -p "$tools" "$templates"
+          cd "$tools"
+          release="https://github.com/godotengine/godot-builds/releases/download/$GODOT_VERSION-stable"
+          editor="Godot_v$GODOT_VERSION-stable_linux.x86_64"
+          curl --fail --silent --show-error --location --retry 4 "$release/$editor.zip" -o godot.zip
+          curl --fail --silent --show-error --location --retry 4 \
+            "$release/Godot_v$GODOT_VERSION-stable_export_templates.tpz" -o templates.tpz
+          printf '%s  %s\n' "$GODOT_EDITOR_SHA256" godot.zip "$GODOT_TEMPLATES_SHA256" templates.tpz | sha256sum -c -
+          unzip -qj godot.zip "$editor"
+          mv "$editor" godot
+          chmod +x godot
+          unzip -qj templates.tpz templates/linux_release.x86_64 \
+            templates/windows_release_x86_64.exe templates/macos.zip -d "$templates"
+          echo "$tools" >> "$GITHUB_PATH"
+
+      - name: Build and test desktop packages
+        run: bash scripts/build-release.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cinder-league-desktop
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cinder-league-desktop
+          path: dist
+
+      - name: Publish GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS.txt
+          tag="$GITHUB_REF_NAME"
+          if draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft); then
+            if [[ $draft == false ]]; then
+              echo "$tag is already published."
+              exit 0
+            fi
+            gh release upload "$tag" ./* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          else
+            gh release create "$tag" ./* --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "The Cinder League ${tag#v}" --prerelease --latest=false --generate-notes
+          fi

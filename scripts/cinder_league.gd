@@ -4,6 +4,7 @@ const Data = preload("res://scripts/data.gd")
 const Campaign = preload("res://scripts/campaign.gd")
 const Duel = preload("res://scripts/duel.gd")
 const Simulator = preload("res://scripts/simulator.gd")
+const Armor = preload("res://scripts/armor_art.gd")
 const Stage = preload("res://scripts/stage.gd")
 const Foley = preload("res://scripts/foley.gd")
 const BattleHud = preload("res://scripts/battle_hud.gd")
@@ -18,7 +19,10 @@ const SHOP_THEMES := {
 }
 const ARENA_LOBBY_THEME = preload("res://audio/arena-theme.ogg")
 const PRE_FIGHT_THEME = preload("res://audio/before-the-fight.ogg")
-const FIGHT_THEMES := [preload("res://audio/amber-ring.ogg"), preload("res://audio/iron-court.ogg")]
+const FIGHT_THEMES := [preload("res://audio/amber-ring.ogg"), preload("res://audio/iron-court.ogg"),
+	preload("res://audio/glass-crucible.ogg"), preload("res://audio/suncrest-bastion.ogg")]
+const VICTORY_THEME = preload("res://audio/victory-theme.ogg")
+const DEFEAT_THEME = preload("res://audio/defeat-theme.ogg")
 
 const SAND := Color("#e1b880")
 const TEXT := Color("#f3e8d6")
@@ -72,6 +76,7 @@ var armor_slot := "chest"
 var selected_item := ""
 var shop_stage: Control
 var shop_title: Label
+var shop_requirements: HFlowContainer
 var shop_stats: HFlowContainer
 var shop_buy: Button
 var shop_entries: Dictionary = {}
@@ -88,7 +93,6 @@ var binding_action := ""
 var binding_notice: Label
 var result_town_button: Button
 var result_next_button: Button
-var character_name: Label
 var fight_locked := false
 var fight_generation := 0
 var practicing := false
@@ -533,21 +537,26 @@ func _audio_settings(menu: VBoxContainer) -> void:
 		_sync_audio()
 		save_notice.visible = not _save_settings())
 
+func _music_for_screen() -> AudioStream:
+	if town_music_enabled and current_screen in ["town", "allocate"]:
+		return TOWN_THEME
+	if music_enabled and current_screen in ["menu", "slots", "hall", "create"]:
+		return TITLE_THEME
+	if not venue_music_enabled:
+		return null
+	match current_screen:
+		"shop": return SHOP_THEMES.get(shop_type)
+		"arena": return ARENA_LOBBY_THEME
+		"scout", "tournament": return PRE_FIGHT_THEME
+		"battle": return FIGHT_THEMES[clampi(int(battle_stage.arena), 0, FIGHT_THEMES.size() - 1)]
+		"result": return VICTORY_THEME if bout.winner == 0 else DEFEAT_THEME
+	return null
+
 func _sync_audio() -> void:
 	if quitting or is_queued_for_deletion() or DisplayServer.get_name() == "headless":
 		return
-	sound.set_crowd(current_screen in ["battle", "result"])
-	var wanted: AudioStream
-	if town_music_enabled and current_screen in ["town", "allocate"]:
-		wanted = TOWN_THEME
-	elif music_enabled and current_screen in ["menu", "slots", "hall", "create"]:
-		wanted = TITLE_THEME
-	elif venue_music_enabled:
-		match current_screen:
-			"shop": wanted = SHOP_THEMES.get(shop_type)
-			"arena": wanted = ARENA_LOBBY_THEME
-			"scout": wanted = PRE_FIGHT_THEME
-			"battle", "result": wanted = FIGHT_THEMES[clampi(int(battle_stage.arena), 0, FIGHT_THEMES.size() - 1)]
+	sound.set_crowd(current_screen == "battle")
+	var wanted := _music_for_screen()
 	if music_player.stream == wanted:
 		return
 	if music_transition != null:
@@ -565,9 +574,10 @@ func _sync_audio() -> void:
 		incoming.play()
 	music_player = incoming
 	fading_music = outgoing
+	var fade_time := .18 if current_screen == "result" else (.28 if current_screen == "battle" else .55)
 	music_transition = create_tween().set_parallel()
-	music_transition.tween_property(incoming, "volume_linear", db_to_linear(-5.0) if wanted != null else 0.0, .55)
-	music_transition.tween_property(outgoing, "volume_linear", 0.0, .55)
+	music_transition.tween_property(incoming, "volume_linear", db_to_linear(-5.0) if wanted != null else 0.0, fade_time)
+	music_transition.tween_property(outgoing, "volume_linear", 0.0, fade_time)
 	music_transition.finished.connect(func() -> void:
 		outgoing.stop()
 		outgoing.stream = null)
@@ -785,7 +795,8 @@ func _character_form() -> void:
 	creation_stage = _stage(preview, "avatar", 340)
 	if not level_mode:
 		creation_stage.left_loadout = {"weapon": data.rules.starter_weapon}
-	character_name = _title(preview, game.state.name if level_mode else "New gladiator", 23)
+	else:
+		_title(preview, game.state.name, 23)
 	var details := _card(row, 7)
 	_fill(details.get_parent(), true)
 	details.get_parent().custom_minimum_size.x = 470
@@ -794,9 +805,7 @@ func _character_form() -> void:
 		name_input.placeholder_text = "Gladiator name"
 		name_input.max_length = 32
 		details.add_child(name_input)
-		name_input.text_changed.connect(func(value: String) -> void:
-			character_name.text = value.strip_edges() if not value.strip_edges().is_empty() else "New gladiator"
-			_update_point_total())
+		name_input.text_changed.connect(func(_value: String) -> void: _update_point_total())
 		var looks := _row(details)
 		_label(looks, "Skin")
 		var skin_choice := OptionButton.new()
@@ -871,6 +880,9 @@ func _update_point_total() -> void:
 	stat_labels.Attack.tooltip_text = "%d%% hit chance · %d%% crit" % [
 		roundi(Duel.hit_chance(rule, values, false) * 100), roundi(Duel.crit_chance(rule, values.Attack) * 100)]
 	stat_labels.Strength.tooltip_text = "%d weapon damage" % roundi(Duel.strike_damage(rule, projected, false))
+	if rule.damage_per_excess_strength < rule.damage_per_strength:
+		stat_labels.Strength.tooltip_text += ". Strength adds less damage above %s points." % String.num(
+			Duel.strength_damage_threshold(rule, values), 2)
 	stat_labels.Defence.tooltip_text = "%d%% block chance" % roundi(Duel.block_chance(rule, values.Defence) * 100)
 	stat_labels.Magic.tooltip_text = "+%.1f spell damage · %.1f spell resistance\n+%d casts · One more every %d Magic\nReserve spell at %d Magic" % [
 		values.Magic * rule.damage_per_magic, Duel.spell_resistance(rule, values.Magic),
@@ -977,6 +989,7 @@ func show_shop() -> void:
 	var list := _column(scroll, 7)
 	_fill(list)
 	shop_entries.clear()
+	var equipped_id := ""
 	for item in data.items.values():
 		if item.kind != shop_type and not (shop_type == "spell" and item.kind in ["potion", "enchant"]):
 			continue
@@ -991,6 +1004,18 @@ func show_shop() -> void:
 		button.add_theme_constant_override("icon_max_width", 49)
 		if not locked.is_empty():
 			button.tooltip_text = locked
+		if shop_type != "spell" and _equipped(item):
+			equipped_id = item.id
+			button.accessibility_description = "Equipped"
+			var badge := _label(button, "Equipped", 14, GREEN)
+			badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			badge.set_anchors_preset(PRESET_CENTER_RIGHT)
+			var badge_size := badge.get_combined_minimum_size()
+			badge.offset_left = -12 - badge_size.x
+			badge.offset_right = -12
+			badge.offset_top = -badge_size.y * .5
+			badge.offset_bottom = badge_size.y * .5
+		elif not locked.is_empty():
 			var lock_icon := Symbol.make("lock", 23)
 			button.add_child(lock_icon)
 			lock_icon.set_anchors_preset(PRESET_CENTER_RIGHT)
@@ -1015,6 +1040,10 @@ func show_shop() -> void:
 	spell_preview_button.hide()
 	shop_buy = _button(checkout, "Buy & equip", _buy_item, true)
 	shop_buy.add_theme_color_override("font_disabled_color", MUTED)
+	shop_requirements = HFlowContainer.new()
+	shop_requirements.add_theme_constant_override("h_separation", 14)
+	detail.add_child(shop_requirements)
+	shop_requirements.hide()
 	shop_stats = HFlowContainer.new()
 	shop_stats.add_theme_constant_override("h_separation", 24)
 	shop_stats.add_theme_constant_override("v_separation", 8)
@@ -1030,8 +1059,10 @@ func show_shop() -> void:
 		shop_title.text = "No stock available"
 		return
 	if selected_item not in shop_entries:
-		selected_item = str(shop_entries.keys().front())
+		selected_item = equipped_id if not equipped_id.is_empty() else str(shop_entries.keys().front())
 	_preview_item(selected_item)
+	if not equipped_id.is_empty():
+		scroll.ensure_control_visible.call_deferred(shop_entries[selected_item])
 
 func _select_armor(part: String) -> void:
 	armor_slot = part
@@ -1046,17 +1077,23 @@ func _item_icon(item: Dictionary) -> AtlasTexture:
 		atlas.atlas = Stage.STOCK
 		atlas.region = Stage._cell(Stage.STOCK, 3, 2, int(item.art))
 	elif item.kind in ["spell", "enchant"]:
-		atlas.atlas = Stage.SPELLS
-		atlas.region = Stage._cell(Stage.SPELLS, 2, 2, int(item.art))
+		match int(item.art):
+			4:
+				atlas.atlas = Stage.GLASSGUARD
+				atlas.region = Stage._cell(Stage.GLASSGUARD, 3, 2, 5)
+			5:
+				atlas.atlas = Stage.POCKET_ANVIL
+				atlas.region = Rect2(Vector2.ZERO, atlas.atlas.get_size())
+			7, 8:
+				atlas.atlas = Stage.BASTION_SPELLS[int(item.art)]
+				atlas.region = Rect2(Vector2.ZERO, atlas.atlas.get_size())
+			_:
+				atlas.atlas = Stage.SPELLS
+				atlas.region = Stage._cell(Stage.SPELLS, 2, 2, mini(3, int(item.art)))
 	else:
-		var boxes := {"helmet": Rect2(245, 8, 203, 188), "chest": Rect2(91, 175, 412, 376),
-			"pants": Rect2(93, 565, 424, 241), "shoes": Rect2(46, 783, 559, 223), "shield": Rect2(1, 331, 302, 376)}
-		if item.tier >= 2 and item.slot in ["chest", "shield"]:
-			atlas.atlas = Stage.STOCK
-			atlas.region = Stage._cell(Stage.STOCK, 3, 2, 4 if item.slot == "chest" else 2)
-		else:
-			atlas.atlas = Stage.MAIL if item.tier >= 2 else Stage.TRIM if item.tier > 0 else Stage.GEAR
-			atlas.region = boxes[item.slot]
+		var sprite := Armor.equipped(item)
+		atlas.atlas = sprite.texture
+		atlas.region = Rect2(Vector2.ZERO, atlas.atlas.get_size())
 	atlas.filter_clip = true
 	return atlas
 
@@ -1097,11 +1134,18 @@ func _preview_item(id: String) -> void:
 	shop_buy.text = "Equipped" if _equipped(item) else ("Equip" if owned else "Buy")
 	shop_buy.disabled = not lock.is_empty() or _equipped(item) or (not owned and game.state.gold < item.price)
 	if not lock.is_empty():
-		shop_buy.text = lock
-		if game.state.level < item.level and not requirement.is_empty() and game.state.stats[requirement] < item.minimum:
-			shop_buy.text += " and %d %s" % [item.minimum, requirement]
+		shop_buy.text = "Locked"
 	elif not owned and game.state.gold < item.price:
 		shop_buy.text = "Not enough gold"
+	_clear(shop_requirements)
+	var requires_stat: bool = not requirement.is_empty() and item.minimum > 0
+	shop_requirements.visible = item.level > 1 or requires_stat
+	if shop_requirements.visible:
+		_label(shop_requirements, "Requirements", 15, MUTED)
+		if item.level > 1:
+			_shop_requirement("Level", int(game.state.level), int(item.level))
+		if requires_stat:
+			_shop_requirement(requirement, int(game.state.stats[requirement]), int(item.minimum))
 	var reserve_id := str(game.state.loadout.get("reserve_spell", ""))
 	reserve_row.visible = item.kind == "spell" and data.has_reserve_slot(int(game.state.stats.Magic))
 	if reserve_row.visible:
@@ -1138,6 +1182,13 @@ func _preview_item(id: String) -> void:
 		"potion":
 			_shop_stat("health", "Health restored", "+%d" % data.rules.heal)
 			_shop_stat("potion", "Uses per death match", str(int(data.rules.potion_uses)))
+
+func _shop_requirement(caption: String, current: int, required: int) -> void:
+	var entry := _row(shop_requirements, 5)
+	var met := current >= required
+	entry.add_child(Symbol.make("check" if met else "lock", 18))
+	var label := _label(entry, "%s %d / %d" % [caption, current, required], 16, GREEN if met else SAND)
+	label.accessibility_name = "%s. You have %d. Requires %d. %s" % [caption, current, required, "Met" if met else "Locked"]
 
 func _shop_stat(symbol: String, caption: String, value: String) -> void:
 	var stat := _column(shop_stats, 3)
@@ -1222,7 +1273,12 @@ func _show_rival(stage: Control, fighter: Dictionary) -> void:
 	stage.right_loadout = fighter.loadout
 	stage.rival_skin = int(fighter.get("skin", 0))
 	stage.rival_hair = int(fighter.get("hair", 0))
-	stage.rival_look = fighter.get("look", Data.rival_look(str(fighter.name).hash()))
+	var look: Dictionary = fighter.get("look", {})
+	if not look.has("armor"):
+		var legacy_build: int = int(look.get("build", 100))
+		look = Data.rival_look(str(fighter.name).hash(), int(game.state.get("level", 1)))
+		look.build = legacy_build
+	stage.rival_look = look
 
 func _scout_bout(tournament: bool) -> void:
 	if game.has_active_bout():
@@ -1441,7 +1497,8 @@ func _finish_bout() -> void:
 		return
 	var outcome := bout_result
 	var title := "Victory" if bout.winner == 0 else "Defeat"
-	sound.play("victory" if bout.winner == 0 else "defeat")
+	if not venue_music_enabled:
+		sound.play("victory" if bout.winner == 0 else "defeat")
 	if outcome.get("complete", false) and bout.winner == 0:
 		title = "League champion"
 	elif outcome.get("fallen", false):
@@ -1453,6 +1510,7 @@ func _finish_bout() -> void:
 	elif not bout.history.is_empty() and bout.history.back().get("yield_threshold_reached", false):
 		title = "Victory · Rival yielded" if bout.winner == 0 else "Defeat · Yielded"
 	current_screen = "result"
+	_sync_audio()
 	fight_locked = true
 	_refresh_battle()
 	battle_hud.show_save_error("")

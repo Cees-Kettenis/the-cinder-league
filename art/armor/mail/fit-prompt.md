@@ -1,0 +1,11 @@
+# Chainmail fit edit
+
+The helmet's chin strap was edited with the built-in ImageGen tool. The boot artwork is unchanged; its mesh starts below the painted hollow cuff so it fits beneath the trouser hem.
+
+## Helmet prompt
+
+Precise localized edit of the supplied standalone chainmail helmet sprite. Keep the entire upper helmet, brow, nasal guard, image scale, side silhouette and bottom coif hem EXACTLY unchanged. The lower bronze-edged chin strap is still too high and crosses the wearer's teeth. MOVE THE ENTIRE LOWER CURVED CHIN STRAP DOWN by approximately 120 pixels in this 768-pixel-high source sprite, about 16% of total helmet height. This is a substantial downward shift, not a slight rounding of the face hole. The bottommost curve of the face opening must now sit near 90% of total sprite height, leaving only a narrow strip of mail above the existing bottom coif hem. Enlarge the alpha-transparent face opening DOWNWARD into the mail accordingly, repainting only the displaced strap and adjacent mail. Preserve the existing left cheek attachment higher up but extend its descending side to meet a deep under-chin curve. The entire mouth and teeth must sit above the strap and the strap should cradle the bottom of the jaw. Retain this exact helmet's design, materials, fine outline, original hand-painted steel, brass and mail texture. No model, skin, face, hair, redesign, text, background or shadow. Preserve true transparent alpha exterior and face opening. Same overall object bounds and all upper-half pixels as supplied.
+
+## Strap-end cleanup
+
+Make one tiny precise cleanup to this chainmail helmet sprite. The lowered curved bronze-edged chin strap ends at screen-right in a long, sharp upward-curving hook that sticks out in front of the wearer's chin. REMOVE ONLY THAT UPWARD POINTED HOOK. Terminate the strap with a short smooth rounded leather end at the bottom-right of its under-chin curve, close to the lower jaw, without any upward projection or spike. The strap remains visible under the chin at its current lowered height. Keep the same face opening, dome, brow, nasal guard, coif, silver links, gold trim, black outlines, alpha transparency, image bounds and all other artwork exactly unchanged. Do not raise the strap, add a new strap, or redesign anything. No wearer, face, text or background. Preserve true transparent alpha.

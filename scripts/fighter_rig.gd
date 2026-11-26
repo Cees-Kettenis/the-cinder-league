@@ -32,6 +32,7 @@ const PARENTS := [-1, PELVIS, SPINE, NECK, SPINE, WEAPON_SHOULDER, WEAPON_ELBOW,
 const SKIN_TINTS := [Color.WHITE, Color(1.12, 1.09, 1.08), Color("#d2ad94"), Color("#a57862")]
 const HAIR_TINTS := [Color.WHITE, Color(1.23, .86, .65), Color(.95, 1.05, 1.25)]
 const ROW_HEIGHT := 24
+const BOOT_REPLACEMENT_LINE := 1368
 const NECK_CUT := Vector2(482, 264)
 const ARM_CUT := Vector2(665, 552)
 const ARM_END := 744
@@ -56,6 +57,10 @@ static var _arm_indices := PackedInt32Array()
 static var _without_arm_indices := PackedInt32Array()
 static var _bindings := PackedVector3Array()
 static var _tint_weights := PackedVector2Array()
+static var _starter_shoe_vertices := PackedInt32Array()
+static var _tunic_hem_vertices := PackedInt32Array()
+static var _covered_head_vertices := PackedInt32Array()
+static var _weapon_arm_vertices := PackedInt32Array()
 static var _palettes: Dictionary = {}
 
 static func local(point: Vector2) -> Vector2:
@@ -100,7 +105,9 @@ static func _solve_chain(upper: Vector2, lower: Vector2, target: Vector2, end_an
 	return Vector3(first, second, end_angle - first - second)
 
 static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, hair: int,
-		firm_weapon_arm: bool = false, part: SkinPart = SkinPart.WHOLE, tint: Color = Color.WHITE) -> void:
+		firm_weapon_arm: bool = false, part: SkinPart = SkinPart.WHOLE, tint: Color = Color.WHITE,
+		wearing_boots: bool = false, wearing_pants: bool = false, closed_helmet: bool = false,
+		sleeve_tint: Color = Color.WHITE) -> void:
 	if _points.is_empty():
 		_build_mesh()
 	var vertices := PackedVector2Array()
@@ -127,9 +134,24 @@ static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, 
 		SkinPart.WITHOUT_ARM: indices = _without_arm_indices
 		SkinPart.ARM_ONLY: indices = _arm_indices
 	var colors := _colors(skin, hair)
+	if tint != Color.WHITE or wearing_boots or wearing_pants or closed_helmet or sleeve_tint != Color.WHITE:
+		colors = colors.duplicate()
+	if sleeve_tint != Color.WHITE:
+		for index in _weapon_arm_vertices:
+			# Dark fitted padding remains visible between the articulated plates.
+			colors[index] = sleeve_tint
 	if tint != Color.WHITE:
 		for index in colors.size():
 			colors[index] *= tint
+	if wearing_boots:
+		for index in _starter_shoe_vertices:
+			colors[index] = Color(colors[index], 0.0)
+	if wearing_pants:
+		for index in _tunic_hem_vertices:
+			colors[index] = Color(colors[index], 0.0)
+	if closed_helmet:
+		for index in _covered_head_vertices:
+			colors[index] = Color(colors[index], 0.0)
 	RenderingServer.canvas_item_add_triangle_array(canvas.get_canvas_item(), indices, vertices, colors, _uv,
 		PackedInt32Array(), PackedFloat32Array(), SPRITE.get_rid())
 
@@ -156,10 +178,21 @@ static func _build_mesh() -> void:
 			for column in columns:
 				var pixel := Vector2(lerpf(edges[strip], edges[strip + 1], float(column) / (columns - 1)), y)
 				var binding := _skin_binding(pixel, strip, edges)
+				if strip == 2 and y >= 480 and y < ARM_END:
+					_weapon_arm_vertices.append(_points.size())
+				if y >= BOOT_REPLACEMENT_LINE:
+					_starter_shoe_vertices.append(_points.size())
+				# The tunic flares sooner on the weapon side. Leave the off hand intact.
+				var hem_top := 792.0 if pixel.x >= 630.0 else 840.0
+				if y >= hem_top and y <= 960 and (strip != 0 or y >= 912):
+					_tunic_hem_vertices.append(_points.size())
 				_points.append(local(pixel))
 				_uv.append(pixel / extent)
 				_bindings.append(binding)
 				var color := image.get_pixel(mini(int(pixel.x), image.get_width() - 1), mini(int(pixel.y), image.get_height() - 1))
+				# Hide the head and trailing hair, preserving the neck and shirt under a closed helmet.
+				if (y <= 264 or y <= 336 and pixel.x < 450) and color.r > color.b + .03:
+					_covered_head_vertices.append(_points.size())
 				_tint_weights.append(_tint_at(pixel, color, binding))
 		for row in rows - 1:
 			for column in columns - 1:

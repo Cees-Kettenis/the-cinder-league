@@ -2,7 +2,9 @@ extends RefCounted
 
 const Duel = preload("res://scripts/duel.gd")
 const Campaign = preload("res://scripts/campaign.gd")
-const STYLES: Array[String] = ["weapon", "guard", "mage", "skirmish", "charisma", "hybrid", "all_attack", "brute"]
+const STYLES: Array[String] = ["weapon", "guard", "mage", "skirmish", "charisma", "hybrid", "all_attack", "brute",
+	"keepaway_mage", "melee_hunter", "adaptive_hybrid", "fast_melee"]
+const BUILD_PRESETS := {"keepaway_mage": "mage", "melee_hunter": "weapon", "adaptive_hybrid": "hybrid"}
 var data: RefCounted
 
 func _init(rules_data: RefCounted) -> void:
@@ -13,10 +15,12 @@ func batch(left: String, right: String, level: int, start_seed: int, count: int,
 	var problem := _validate_scenario(options, level, points)
 	if not problem.is_empty():
 		return {"error": problem}
-	var left_stats: Dictionary = options.get("left_stats", data.build_stats(left, points))
-	var right_stats: Dictionary = options.get("right_stats", data.build_stats(right, points))
-	var left_items: Dictionary = options.get("left_loadout", data.eligible_loadout(level, left_stats, left))
-	var right_items: Dictionary = options.get("right_loadout", data.eligible_loadout(level, right_stats, right))
+	var left_build: String = BUILD_PRESETS.get(left, left)
+	var right_build: String = BUILD_PRESETS.get(right, right)
+	var left_stats: Dictionary = options.get("left_stats", data.build_stats(left_build, points))
+	var right_stats: Dictionary = options.get("right_stats", data.build_stats(right_build, points))
+	var left_items: Dictionary = options.get("left_loadout", data.eligible_loadout(level, left_stats, left_build))
+	var right_items: Dictionary = options.get("right_loadout", data.eligible_loadout(level, right_stats, right_build))
 	var regular_bout: bool = not options.get("death_match", false)
 	var left_fighter: Dictionary = data.fighter(left.capitalize(), left_stats, left_items, left)
 	var right_fighter: Dictionary = data.fighter(right.capitalize(), right_stats, right_items, right)
@@ -49,11 +53,12 @@ func batch(left: String, right: String, level: int, start_seed: int, count: int,
 
 func campaign(style: String, seed_value: int, limit: int) -> Dictionary:
 	var run := Campaign.new(data)
-	run.create(0, style.capitalize(), 0, 0, data.build_stats(style, int(data.rules.starting_points)))
+	var build: String = BUILD_PRESETS.get(style, style)
+	run.create(0, style.capitalize(), 0, 0, data.build_stats(build, int(data.rules.starting_points)))
 	var results: Array[Dictionary] = []
 	var first_trace: Array[Dictionary] = []
 	for step in limit:
-		_shop(run, style)
+		_shop(run, build)
 		var snapshot := run.start_bout(run.can_tournament(), seed_value + step)
 		var bout: RefCounted = run.open_bout(snapshot)
 		while bout.winner == -2:
@@ -68,7 +73,7 @@ func campaign(style: String, seed_value: int, limit: int) -> Dictionary:
 			var invested := 0
 			for points in run.state.stats.values():
 				invested += int(points)
-			if not run.confirm_points(data.build_stats(style, run.points_to_allocate(), invested)):
+			if not run.confirm_points(data.build_stats(build, run.points_to_allocate(), invested)):
 				return {"error": "Could not allocate the earned points."}
 		results.append({"bout": step + 1, "seed": snapshot.seed, "opponent_seed": snapshot.opponent_seed,
 			"opponent": snapshot.opponent, "opponent_level": snapshot.fighters[1].level, "winner": bout.winner,

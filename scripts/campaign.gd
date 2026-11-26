@@ -47,8 +47,23 @@ func resume(number: int) -> bool:
 		state.scouted_tournament = state.scouted_bout
 		state.scouted_bout = {}
 		migrated = true
+	if _continue_completed_campaign():
+		migrated = true
 	if migrated:
 		save()
+	return true
+
+func _continue_completed_campaign() -> bool:
+	if not state.complete or has_active_bout() or arena_index() + 1 >= data.arenas.size():
+		return false
+	var entry_xp: int = int(data.rules.xp_levels[int(arena().cap)])
+	state.arena += 1
+	state.xp = maxi(int(state.xp), entry_xp)
+	state.complete = false
+	state.tournament = 0
+	state.scouted_bout = {}
+	state.scouted_tournament = {}
+	consider_level_up()
 	return true
 
 func slot_revision(number: int) -> String:
@@ -422,5 +437,8 @@ func settle(winner: int, practice: bool = false) -> Dictionary:
 		"unlocked": int(state.arena) > previous_arena, "complete": state.complete,
 		"fallen": is_fallen(), "practice": false}
 	state.active_bout = {}
+	if _continue_completed_campaign():
+		state.outcome.unlocked = true
+		state.outcome.complete = false
 	save()
 	return state.outcome.duplicate(true)

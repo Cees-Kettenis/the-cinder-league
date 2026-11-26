@@ -2,11 +2,15 @@ extends RefCounted
 
 const STATS: Array[String] = ["Attack", "Strength", "Defence", "Magic", "Vitality", "Stamina", "Charisma"]
 const SLOTS: Array[String] = ["helmet", "chest", "pants", "shoes", "shield"]
+# Keep these in unlock order so the outfit roll can favor recent sets.
+const RIVAL_ARMOR_LEVELS := {"sandhide": 1, "flint": 1, "ashmail": 4, "blackened": 7, "riveted": 9, "verdant": 13}
 const DEFAULT_FILE = "res://balance.json"
 const GIVEN_NAMES := ["Ari", "Bram", "Cleo", "Dara", "Ember", "Finn", "Iona", "Jory", "Lark", "Mara", "Niall", "Quinn", "Rook", "Sera", "Tess", "Wren"]
 const FAMILY_NAMES := ["Ash", "Briar", "Copper", "Dale", "Fen", "Flint", "Holt", "Reed", "Rowan", "Slate", "Thorn", "Vale"]
 const STAT_PATTERNS := {
 	"weapon": ["Strength", "Vitality", "Stamina", "Attack", "Defence"],
+	"fast_melee": ["Strength", "Vitality", "Stamina", "Attack", "Defence", "Strength", "Vitality", "Stamina", "Attack", "Defence",
+		"Strength", "Vitality", "Stamina", "Attack", "Defence", "Strength", "Stamina", "Stamina", "Attack", "Defence"],
 	"brute": ["Strength", "Strength", "Vitality", "Defence", "Stamina", "Attack"],
 	"guard": ["Defence", "Vitality", "Strength", "Defence", "Stamina", "Attack"],
 	"mage": ["Magic", "Strength", "Attack", "Vitality", "Stamina", "Defence", "Magic", "Strength", "Attack", "Magic"],
@@ -51,7 +55,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			"stamina_per_extra_space", "stamina_per_extra_leap_space", "max_stamina_move_bonus", "lunge_hit_penalty_per_extra_space",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier",
-			"bout_yield_health_percent", "spell_resistance_per_magic", "magic_per_extra_cast", "reserve_spell_magic"]:
+			"bout_yield_health_percent", "spell_resistance_per_magic", "magic_per_extra_cast", "reserve_spell_magic",
+			"strength_damage_floor", "strength_damage_point_fraction", "damage_per_excess_strength"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -63,8 +68,17 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	rules = profile.rules
 	moves = profile.moves
 	distances = profile.distances
-	if rules.arena_caps != bundled.rules.arena_caps or profile.arenas.size() != bundled.arenas.size() or rules.xp_levels.size() != max_level():
+	var arena_count: int = rules.arena_caps.size()
+	if (arena_count == 0 or rules.arena_caps != bundled.rules.arena_caps.slice(0, arena_count)
+			or profile.arenas.size() != arena_count or rules.xp_levels.size() != max_level()):
 		return "Keep the bundled arena gates and provide an XP threshold for each level through %d." % int(bundled.rules.arena_caps.back())
+	var previous_cap := max_level()
+	if arena_count < bundled.arenas.size():
+		var extra_xp := maxf(0.0, float(rules.xp_levels.back()) - float(bundled.rules.xp_levels[previous_cap - 1]))
+		rules.arena_caps.append_array(bundled.rules.arena_caps.slice(arena_count))
+		for xp in bundled.rules.xp_levels.slice(previous_cap):
+			rules.xp_levels.append(xp + extra_xp)
+		profile.arenas.append_array(bundled.arenas.slice(arena_count))
 	var previous_xp := -1
 	for xp in rules.xp_levels:
 		if not xp is float or xp <= previous_xp:
@@ -92,6 +106,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Opponent point variance must be 0.25 or less."
 	if rules.capped_gold_multiplier > 1:
 		return "Capped bout gold must be between 0 and 1 times the usual reward."
+	if rules.strength_damage_point_fraction > 1:
+		return "The Strength damage threshold can use up to all assigned points."
 	if (rules.bout_yield_health_percent < 1 or rules.bout_yield_health_percent >= 100
 			or rules.bout_yield_health_percent != floor(rules.bout_yield_health_percent)):
 		return "Bout yield health must be a whole percent between 1 and 99."
@@ -127,6 +143,9 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 			item.uses = maxf(item.uses, old_bout_casts)
 		items[item.id] = item
 	for reference_item in bundled.items:
+		if reference_item.level > previous_cap and not items.has(reference_item.id):
+			items[reference_item.id] = reference_item
+			profile.items.append(reference_item)
 		if reference_item.id == "dagger" and not items.has("dagger"):
 			var dagger: Dictionary = reference_item.duplicate()
 			items.dagger = dagger
@@ -149,6 +168,8 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		for field in bundled.arenas[index]:
 			if not arena.has(field) or typeof(arena[field]) != typeof(bundled.arenas[index][field]):
 				return "Missing or invalid arena field: " + field
+		var first_level := 1 if index == 0 else int(rules.arena_caps[index - 1]) + 1
+		var has_opening_rival := false
 		for field in ["opponents", "tournament"]:
 			if arena[field].is_empty():
 				return "Every arena needs regular and tournament opponents."
@@ -159,6 +180,22 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 					return "Opponent armor level must be a positive whole number."
 				if entry.has("point_multiplier") and (not entry.point_multiplier is float or entry.point_multiplier <= 0):
 					return "Opponent point multiplier must be positive."
+				if entry.has("tactics") and not entry.tactics is String:
+					return "Opponent tactics must be a style name."
+				if entry.has("stats"):
+					if not entry.get("boss", false) or not entry.stats is Dictionary:
+						return "Only champions can have a fixed stat allocation."
+					for stat in STATS:
+						var value = entry.stats.get(stat)
+						if not value is float or value < 0 or value != floor(value):
+							return "Champion stats must be non-negative whole numbers."
+				if field == "opponents":
+					var minimum = entry.get("minimum_level", 1.0)
+					if not minimum is float or minimum < 1 or minimum > arena.cap or minimum != floor(minimum):
+						return "Regular rival minimum level must be a whole number within the campaign through that arena."
+					has_opening_rival = has_opening_rival or minimum <= first_level
+		if not has_opening_rival:
+			return "Every arena needs a regular rival available at its first level."
 		if arena.cap != rules.arena_caps[index] or arena.xp <= 0 or arena.gold < 0 or arena.opponent_gear_level < 1:
 			return "An arena has invalid progression or rewards."
 	return ""
@@ -176,12 +213,13 @@ func stat_requirement(item: Dictionary) -> String:
 	return {"weapon": "Strength", "armor": "Defence", "spell": "Magic", "enchant": "Magic"}.get(item.kind, "")
 
 func lock_reason(player: Dictionary, item: Dictionary) -> String:
+	var missing := PackedStringArray()
 	if player.level < item.level:
-		return "Requires level %d" % item.level
+		missing.append("level %d" % item.level)
 	var stat := stat_requirement(item)
 	if not stat.is_empty() and player.stats[stat] < item.minimum:
-		return "Requires %d %s" % [item.minimum, stat]
-	return ""
+		missing.append("%d %s" % [item.minimum, stat])
+	return "" if missing.is_empty() else "Requires " + " and ".join(missing)
 
 func item_name(id: String) -> String:
 	return items.get(id, {}).get("name", "None")
@@ -228,6 +266,7 @@ func build_stats(style: String, points: int, offset: int = 0) -> Dictionary:
 
 func eligible_loadout(level: int, stats: Dictionary, style: String, armor_level: int = -1) -> Dictionary:
 	var loadout := {"weapon": rules.starter_weapon, "armor": {}, "spell": "", "potion": false, "enchant": ""}
+	var reach_value := 0 if style == "brute" else 7
 	for item in items.values():
 		if item.kind == "armor" and armor_level >= 0 and item.level > armor_level:
 			continue
@@ -235,7 +274,8 @@ func eligible_loadout(level: int, stats: Dictionary, style: String, armor_level:
 			continue
 		match item.kind:
 			"weapon":
-				if item.damage >= items[loadout.weapon].damage:
+				var current: Dictionary = items[loadout.weapon]
+				if item.damage + item.reach * reach_value >= current.damage + current.reach * reach_value:
 					loadout.weapon = item.id
 			"armor":
 				var current: Dictionary = items.get(loadout.armor.get(item.slot, ""), {})
@@ -262,31 +302,41 @@ func generate_opponent(player_level: int, arena: int, seed_value: int, round_ind
 		var definition: Dictionary = venue.tournament[round_index]
 		var boss: bool = definition.get("boss", false)
 		var entrant := opponent(definition, level, arena, null if boss else random)
-		entrant.look = rival_look(str(definition.name).hash() if boss else seed_value)
-		if boss:
-			entrant.look.chest = 0 if arena == 0 else 2
-			entrant.look.helmet = entrant.look.chest
+		entrant.look = rival_look(str(definition.name).hash() if boss else seed_value, player_level)
 		return entrant
 	var level_floor := 1 if arena == 0 else int(arenas[arena - 1].cap) + 1
-	var candidates: Array = venue.opponents
+	var candidates: Array = venue.opponents.filter(func(entry: Dictionary) -> bool:
+		return int(entry.get("minimum_level", 1)) <= maxi(level_floor, player_level))
 	var style: Dictionary = candidates[random.randi_range(0, candidates.size() - 1)].duplicate()
 	var given: String = GIVEN_NAMES[random.randi_range(0, GIVEN_NAMES.size() - 1)]
 	var family: String = FAMILY_NAMES[random.randi_range(0, FAMILY_NAMES.size() - 1)]
 	style.name = given + " " + family
 	# Most rivals are peers. The opening bout uses the player's exact level.
-	if player_level > level_floor and random.randf() < .45:
-		player_level += -1 if random.randf() < .5 else 1
-	level = clampi(player_level, level_floor, level)
+	var nearby_level := player_level
+	if nearby_level > level_floor and random.randf() < .45:
+		nearby_level += -1 if random.randf() < .5 else 1
+	level = clampi(nearby_level, maxi(level_floor, int(style.get("minimum_level", 1))), level)
 	var rival := opponent(style, level, arena, random)
-	rival.look = rival_look(seed_value)
+	rival.look = rival_look(seed_value, player_level)
 	return rival
 
-static func rival_look(seed_value: int) -> Dictionary:
+static func rival_look(seed_value: int, player_level: int) -> Dictionary:
 	# Keep the cosmetic draws independent of the stat and gear draws.
 	var outfit := RandomNumberGenerator.new()
 	outfit.seed = seed_value ^ 0x74c163bd
-	return {"chest": outfit.randi_range(0, 2), "helmet": outfit.randi_range(-1, 2),
-		"palette": outfit.randi_range(0, 4), "build": outfit.randi_range(90, 117)}
+	var available := PackedStringArray()
+	for family in RIVAL_ARMOR_LEVELS:
+		if RIVAL_ARMOR_LEVELS[family] <= maxi(1, player_level):
+			available.append(family)
+	var recent := maxi(0, available.size() - 3)
+	var armor := {}
+	for slot in SLOTS:
+		var first := recent if outfit.randf() < .7 else 0
+		armor[slot] = available[outfit.randi_range(first, available.size() - 1)]
+	return {
+		"armor": armor,
+		"palette": outfit.randi_range(0, 4), "build": outfit.randi_range(90, 117),
+	}
 
 func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumberGenerator = null) -> Dictionary:
 	var scaling: float = rules.encounter_scaling
@@ -299,7 +349,9 @@ func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumb
 		point_multiplier *= random.randf_range(1.0 - variance, 1.0 + variance)
 	var points := roundi(budget * point_multiplier)
 	var stats: Dictionary
-	if random == null:
+	if definition.has("stats"):
+		stats = definition.stats.duplicate()
+	elif random == null:
 		stats = build_stats(definition.style, points)
 	else:
 		var pattern: Array = STAT_PATTERNS.get(definition.style, STAT_PATTERNS.weapon)
@@ -307,13 +359,20 @@ func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumb
 		stats = build_stats(definition.style, points - varied, random.randi_range(0, pattern.size() - 1))
 		for index in varied:
 			stats[pattern[random.randi_range(0, pattern.size() - 1)]] += 1
+	if definition.style == "fast_melee" and rules.max_stamina_move_bonus > 0:
+		# Generated rivals have smaller point budgets than simulator presets.
+		var leap_threshold := mini(int(rules.stamina_per_extra_leap_space), floori(points / 2.0))
+		for stat in ["Vitality", "Attack", "Defence", "Strength"]:
+			var moved := mini(int(stats[stat]), maxi(0, leap_threshold - int(stats.Stamina)))
+			stats[stat] -= moved
+			stats.Stamina += moved
 	var loadout := eligible_loadout(level, stats, definition.style, int(definition.get("armor_level", -1)))
 	if level == 1 and not definition.get("boss", false):
 		loadout.weapon = rules.starter_weapon
 	if level < arenas[arena].opponent_gear_level and not definition.get("boss", false):
 		loadout.armor = {}
 		loadout.potion = false
-	var rival := fighter(definition.name, stats, loadout, definition.style)
+	var rival := fighter(definition.name, stats, loadout, definition.get("tactics", definition.style))
 	rival.level = level
 	rival.skin = random.randi_range(0, 3) if random != null else clampi(int(definition.get("skin", 0)), 0, 3)
 	rival.hair = random.randi_range(0, 2) if random != null else clampi(int(definition.get("hair", 0)), 0, 2)

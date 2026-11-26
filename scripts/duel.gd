@@ -1,5 +1,6 @@
 extends RefCounted
 
+const Data = preload("res://scripts/data.gd")
 const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power", "lunge"]
 const SPELL_ACTIONS: Array[String] = ["cast", "cast_reserve"]
 const MOVEMENT: Array[String] = ["advance", "retreat", "jump", "jump_back"]
@@ -54,12 +55,15 @@ static func lunge_range(rule: Dictionary, stamina: int) -> int:
 	return int(rule.get("lunge_max_spaces", 2)) + stamina_move_bonus(rule, stamina)
 
 func travel(action: String) -> int:
-	var steps := int(distances["jump" if action == "jump_back" else action])
-	steps += stamina_move_bonus(rules, int(fighters[active].stats.Stamina), action in ["jump", "jump_back"])
+	var steps := _movement_range(action, active)
 	if action in ["retreat", "jump_back"]:
 		var room := positions[0] if active == 0 else int(rules.arena_size) - positions[1]
 		return mini(steps, room)
 	return mini(steps, distance() - 1)
+
+func _movement_range(action: String, side: int) -> int:
+	var move := "jump" if action == "jump_back" else action
+	return int(distances[move]) + stamina_move_bonus(rules, int(fighters[side].stats.Stamina), move == "jump")
 
 static func hit_chance(rule: Dictionary, stats: Dictionary, spell: bool, exposed: bool = false, threatened: bool = false) -> float:
 	var hit := float(rule.base_hit + stats.Attack * rule.hit_per_attack)
@@ -90,12 +94,24 @@ static func spell_for_action(fighter: Dictionary, action: String) -> Dictionary:
 static func spell_charges(fighter: Dictionary, action: String) -> int:
 	return int(fighter.get("reserve_casts" if action == "cast_reserve" else "casts", 0))
 
+static func strength_damage_threshold(rule: Dictionary, stats: Dictionary) -> float:
+	if not rule.has("strength_damage_floor"):
+		return float(stats.Strength)
+	var points := 0.0
+	for stat in Data.STATS:
+		points += float(stats[stat])
+	return maxf(rule.strength_damage_floor, points * rule.strength_damage_point_fraction)
+
 static func strike_damage(rule: Dictionary, fighter: Dictionary, spell: bool, is_bout: bool = false, action: String = "cast") -> float:
 	if spell:
 		# Old fight snapshots retain their original bout-only base damage.
 		var scale := float(rule.get("bout_spell_base_multiplier", 1.0)) if is_bout else 1.0
 		return spell_for_action(fighter, action).damage * scale + fighter.stats.Magic * rule.damage_per_magic
-	return fighter.weapon.damage + fighter.stats.Strength * rule.damage_per_strength + fighter.get("enchant_damage", 0)
+	var strength: float = fighter.stats.Strength
+	var excess := maxf(0.0, strength - strength_damage_threshold(rule, fighter.stats))
+	var excess_rate := minf(rule.damage_per_strength, rule.get("damage_per_excess_strength", rule.damage_per_strength))
+	var bonus: float = (strength - excess) * rule.damage_per_strength + excess * excess_rate
+	return fighter.weapon.damage + bonus + fighter.get("enchant_damage", 0)
 
 static func recovery(rule: Dictionary, stamina: float) -> int:
 	return roundi(rule.base_rest + stamina * rule.rest_per_stamina)
@@ -119,11 +135,15 @@ func cost(action: String, side: int = -1) -> int:
 			# The old action ID is only used to reconstruct recorded turns.
 			if action == "rush" and not rules.has("lunge_base_cost"):
 				return int(fighter.weapon.energy) + int(moves.jump)
-			var extra: float = rules.get("lunge_base_cost", 7.0) + lunge_spaces(side) * rules.get("lunge_cost_per_space", 5.0)
-			return int(fighter.weapon.energy) + ceili(extra)
+			return _lunge_cost(fighter, distance())
 		"cast", "cast_reserve": return int(spell_for_action(fighter, action).get("energy", 0))
 		"jump_back": return int(moves.jump)
 	return int(moves.get(action, 0))
+
+func _lunge_cost(fighter: Dictionary, gap: int) -> int:
+	var spaces := maxi(0, gap - int(fighter.weapon.reach))
+	var extra: float = rules.get("lunge_base_cost", 7.0) + spaces * rules.get("lunge_cost_per_space", 5.0)
+	return int(fighter.weapon.energy) + ceili(extra)
 
 func _quick_cost(fighter: Dictionary) -> int:
 	return maxi(1, ceili(fighter.weapon.energy * rules.get("quick_stamina_multiplier", 1.0)))
@@ -136,15 +156,15 @@ func lunge_spaces(side: int = -1) -> int:
 	return maxi(0, distance() - int(fighter.weapon.reach))
 
 func in_lunge_range() -> bool:
-	if fighters[active].weapon.reach < 1 or in_weapon_reach():
-		return false
-	# Older snapshots required the gap itself to shrink before a lunge.
-	if not rules.has("stamina_per_extra_space") and distance() >= opening_distance:
-		return false
 	var opening_left := int((int(rules.arena_size) - opening_distance) * .5)
-	if positions[0] == opening_left and positions[1] == opening_left + opening_distance:
+	var moved := positions[0] != opening_left or positions[1] != opening_left + opening_distance
+	return moved and _can_cover_lunge(fighters[active], distance())
+
+func _can_cover_lunge(fighter: Dictionary, gap: int) -> bool:
+	var reach := int(fighter.weapon.reach)
+	if not rules.has("stamina_per_extra_space") and gap >= opening_distance:
 		return false
-	return lunge_spaces() <= lunge_range(rules, int(fighters[active].stats.Stamina))
+	return reach >= 1 and gap > reach and gap - reach <= lunge_range(rules, int(fighter.stats.Stamina))
 
 func has_attack_styles() -> bool:
 	return rules.has("power_damage_multiplier")
@@ -180,15 +200,15 @@ func chance(action: String) -> float:
 		"quick": return minf(1.0, accuracy + float(rules.get("quick_hit_bonus", 0.0)))
 	return accuracy
 
-func threatens_cast(fighter: Dictionary) -> bool:
+func threatens_cast(fighter: Dictionary, gap: int = -1) -> bool:
 	var stamina := int(fighter.weapon.energy)
 	if has_attack_styles():
 		stamina = mini(stamina, _quick_cost(fighter))
-	return distance() <= fighter.weapon.reach and fighter.energy >= stamina
+	return (distance() if gap < 0 else gap) <= fighter.weapon.reach and fighter.energy >= stamina
 
-func spell_armor_only(target: Dictionary) -> bool:
+func spell_armor_only(target: Dictionary, gap: int = -1) -> bool:
 	return (first_blood and rules.get("bout_ranged_spells_armor_only", false)
-		and distance() > int(target.weapon.reach))
+		and (distance() if gap < 0 else gap) > int(target.weapon.reach))
 
 func yield_health(target: Dictionary) -> int:
 	if not regular_bout or first_blood:
@@ -210,15 +230,15 @@ func health_damage(action: String, damage: int, target: Dictionary) -> int:
 func health_hit_wins(target: Dictionary, loss: int) -> bool:
 	return loss > 0 if first_blood else int(target.hp) - loss <= yield_health(target)
 
-func _spell_reason(action: String, fighter: Dictionary, target: Dictionary) -> String:
+func _spell_reason(action: String, fighter: Dictionary, target: Dictionary, gap: int = -1) -> String:
 	var spell := spell_for_action(fighter, action)
 	if spell.is_empty():
 		return "Equip a spell"
 	if spell_charges(fighter, action) <= 0:
 		return "Spell uses spent"
-	if distance() > spell.reach:
+	if (distance() if gap < 0 else gap) > spell.reach:
 		return "Out of spell range"
-	if spell_armor_only(target) and target.armor <= 0:
+	if spell_armor_only(target, gap) and target.armor <= 0:
 		return "Get within the rival's weapon reach to draw first blood"
 	return ""
 
@@ -420,12 +440,16 @@ func _impact(event: Dictionary) -> String:
 	return "%d health, %d armor lost." % [event.damage, event.armor_hit]
 
 func choose(profile: String) -> String:
+	if profile == "fast_melee":
+		profile = "melee_hunter"
 	var fighter: Dictionary = fighters[active]
 	var enemy: Dictionary = fighters[1 - active]
 	var legal: Array[String] = []
 	for action in ACTIONS:
 		if reason(action).is_empty():
 			legal.append(action)
+	if profile == "duelist" and turn == 1 and history[0].action in ["guard", "sleep"] and "taunt" in legal:
+		return "taunt"
 	if "potion" in legal and fighter.hp <= fighter.max_hp - int(rules.heal):
 		return "potion"
 	if profile == "charisma" and "taunt" in legal:
@@ -439,6 +463,10 @@ func choose(profile: String) -> String:
 		var finish := action_damage("attack", fighter) < protection and action_damage("power", fighter) >= protection
 		if power_push() > _edge_distance() or (finish and chance("power") >= .50):
 			return "power"
+	if profile in ["keepaway_mage", "melee_hunter", "adaptive_hybrid"] and not fighter.provoked:
+		var tactic := _choose_tactic(profile, fighter, enemy, legal, cast, enemy_cast)
+		if not tactic.is_empty():
+			return tactic
 	if "attack" in legal:
 		if not cast.is_empty():
 			var melee := _expected_strike(fighter, enemy, "attack")
@@ -474,6 +502,73 @@ func choose(profile: String) -> String:
 	if fighter.energy == fighter.max_energy and "taunt" in legal:
 		return "taunt"
 	return "sleep"
+
+func _choose_tactic(profile: String, fighter: Dictionary, enemy: Dictionary, legal: Array[String], cast: String, enemy_cast: String) -> String:
+	if profile != "melee_hunter" and not cast.is_empty() and not in_weapon_reach():
+		var damage := roundi(action_damage(cast, fighter, enemy))
+		if health_hit_wins(enemy, health_damage(cast, damage, enemy)):
+			return cast
+	var prefers_spell := profile == "keepaway_mage" or (profile == "adaptive_hybrid" and not cast.is_empty()
+		and _expected_strike(fighter, enemy, cast) > _expected_strike(fighter, enemy, "attack"))
+	if prefers_spell:
+		var retreat := _keepaway(fighter, enemy, legal, cast, enemy_cast)
+		if not retreat.is_empty():
+			return retreat
+	if profile != "keepaway_mage" and not in_weapon_reach() and not enemy_cast.is_empty():
+		if not cast.is_empty() and not _should_close(fighter, enemy, cast, enemy_cast):
+			return ""
+		return _hunt(fighter, enemy, legal, enemy_cast)
+	return ""
+
+func _keepaway(fighter: Dictionary, enemy: Dictionary, legal: Array[String], cast: String, enemy_cast: String) -> String:
+	if not cast.is_empty() and not threatens_cast(enemy):
+		return ""
+	if not _melee_threat_at(enemy, distance()):
+		if cast.is_empty() and enemy_cast.is_empty() and "sleep" in legal:
+			var rested := mini(int(fighter.max_energy), int(fighter.energy) + recovery(rules, fighter.stats.Stamina))
+			for spell_action in SPELL_ACTIONS:
+				if _spell_reason(spell_action, fighter, enemy).is_empty() and rested >= cost(spell_action):
+					return "sleep"
+		return ""
+	# Repeated retreats give away turns while a pursuer follows. Spend the next turn fighting.
+	if history.size() >= 2 and history[-2].action in ["retreat", "jump_back"]:
+		return ""
+	var pursuer := 1 - active
+	var swing := cost("quick" if has_attack_styles() else "attack", pursuer)
+	var chase := 0
+	for approach in ["advance", "jump"]:
+		if enemy.energy >= cost(approach, pursuer) + swing and (not enemy.provoked or approach == "advance"):
+			chase = maxi(chase, _movement_range(approach, pursuer))
+	for move in ["retreat", "jump_back"]:
+		if move not in legal:
+			continue
+		var gap := distance() + travel(move)
+		if _melee_threat_at(enemy, gap) or gap - chase <= enemy.weapon.reach:
+			continue
+		if not enemy_cast.is_empty() and _spell_reason(enemy_cast, enemy, fighter, gap).is_empty():
+			continue
+		for spell_action in SPELL_ACTIONS:
+			if _spell_reason(spell_action, fighter, enemy, gap).is_empty() and fighter.energy >= cost(move) + cost(spell_action):
+				return move
+	return ""
+
+func _melee_threat_at(fighter: Dictionary, gap: int) -> bool:
+	return threatens_cast(fighter, gap) or (_can_cover_lunge(fighter, gap) and fighter.energy >= _lunge_cost(fighter, gap))
+
+func _hunt(fighter: Dictionary, enemy: Dictionary, legal: Array[String], enemy_cast: String) -> String:
+	if "guard" in legal and _can_guard_against_cast(fighter, enemy, enemy_cast):
+		return "guard"
+	var attack_cost := cost("attack")
+	if "lunge" in legal and not enemy.guarding and (fighter.energy >= cost("lunge") + 2 * attack_cost
+		or health_hit_wins(enemy, health_damage("lunge", roundi(action_damage("lunge", fighter)), enemy))):
+		return "lunge"
+	if "advance" in legal and distance() - travel("advance") <= fighter.weapon.reach:
+		return "advance"
+	if "jump" in legal and fighter.energy >= cost("jump") + attack_cost:
+		return "jump"
+	if "advance" in legal:
+		return "advance"
+	return ""
 
 func _preferred_cast(fighter: Dictionary, target: Dictionary) -> String:
 	if fighter.provoked:
