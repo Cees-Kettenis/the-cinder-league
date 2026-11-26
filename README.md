@@ -1,4 +1,7 @@
-# The Cinder League
+<a name="the-cinder-league"></a>
+<h1 align="center">
+  <img src="docs/assets/readme-banner.png" alt="The Cinder League" width="680" />
+</h1>
 
 **The Cinder League** is a turn-based fantasy gladiator RPG for Linux, Windows, and macOS. You enter the Amber Ring with a dagger and a little gold. Fight for your next upgrade, then enter a tournament when you’re ready to put your career on the line.
 
