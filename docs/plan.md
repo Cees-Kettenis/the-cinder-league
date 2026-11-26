@@ -4,7 +4,7 @@ Build an original cartoon gladiator RPG for Linux, macOS, and Windows with Godot
 
 The goal for combat is for tactics to decide fights between comparable builds. Positioning, stamina, and timing should let different builds win in different ways. The game will be free and open source, with standalone downloads and Steam as an optional distribution channel.
 
-**Current playtest.** The Godot project implements Amber Ring, Iron Court, the Glass Crucible, and the Suncrest Bastion through level 16, with the town, shops, three save slots, and a seeded simulator. See [play and simulation instructions](../README.md). The fifth arena and multiplayer are later milestones. The playtest numbers live in [balance.json](../content/balance.json) and can be changed in the game.
+**Current playtest.** The Godot project implements Amber Ring, Iron Court, the Glass Crucible, and the Suncrest Bastion through level 16, with the town, shops, three save slots, and a seeded simulator. See [How to play](how-to-play.md) and the [simulator guide](contributing/simulator.md). The fifth arena and multiplayer are later milestones. The playtest numbers live in [balance.json](../content/balance.json) and can be changed in the game.
 
 Numbers marked **playtest values** are starting points. Draft gear names and later champion concepts can change. Each milestone ends with a check that tells us when we can move on.
 
