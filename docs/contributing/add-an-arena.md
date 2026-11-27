@@ -19,6 +19,8 @@ content/arenas/your-arena/
 
 The content catalog discovers the folder by convention. The arena file holds its own enemies and progression values, and shared move rules live in [the balance file](../../content/balance.json).
 
+For background movement, add an optional `ambience.gd` beside the backdrops. The [Glass Crucible layout](../../content/arenas/glass-crucible/ambience.gd) shows how to place cloth, flames, lamp glows, and spectator routes using coordinates measured on the painting at 1,000 pixels wide. Keep cloth rectangles inside the fabric and set walkway endpoints along the top of a railing. Check the anchors in the arena lobby and with the fight camera panned to each side.
+
 ## Add gear
 
 - In [content/gear/armor](../../content/gear/armor/), put each set’s textures beside its `armor.gd`. For player gear, start the item ID with the set folder name and an underscore. The [Court set](../../content/gear/armor/court/armor.gd) shows both shop stats and fitted armor layers. For a rival look, set `RIVAL_LEVEL` and `RIVAL_ORDER`. Keep the order of existing sets stable for seeded looks.

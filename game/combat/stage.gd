@@ -12,6 +12,7 @@ const Duel = preload("res://game/combat/duel.gd")
 const Data = preload("res://game/catalog/data.gd")
 const Content = preload("res://game/catalog/content_catalog.gd")
 const BackdropArt = preload("res://game/screens/backdrop_art.gd")
+const ArenaAmbience = preload("res://game/screens/arena/arena_ambience.gd")
 const TownAmbience = preload("res://game/screens/town/town_ambience.gd")
 const SPELLS = preload("res://content/spells/shared/projectiles.png")
 const TOWN_DESIGN_SIZE := TownAmbience.DESIGN_SIZE
@@ -102,6 +103,7 @@ var swing_trace: Array[Vector3] = []
 var result_winner := -2
 var celebration_time := 0.0
 var _backdrop: Texture2D
+var _arena_ambience: ArenaAmbience
 var _town_ambience: TownAmbience
 var _armor_pieces: Dictionary = {}
 var _weapon_textures: Dictionary = {}
@@ -109,8 +111,8 @@ var _weapon_halos: Dictionary = {}
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip_contents = kind in ["town", "arena_preview"]
 	if kind == "town":
-		clip_contents = true
 		if data != null:
 			_town_ambience = TownAmbience.new(data)
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
@@ -127,6 +129,8 @@ func _sync_backdrop() -> void:
 		return
 	var path := BackdropArt.texture_path(stem, get_window().size)
 	if _backdrop == null or _backdrop.resource_path != path:
+		if kind != "town" and (_backdrop == null or _backdrop.resource_path.get_base_dir() != path.get_base_dir()):
+			_arena_ambience = ArenaAmbience.new(stem)
 		_backdrop = load(path)
 	queue_redraw()
 
@@ -160,6 +164,9 @@ func _process(delta: float) -> void:
 		elapsed += delta
 		if _town_ambience != null:
 			_town_ambience.advance(elapsed)
+		queue_redraw()
+	elif kind == "arena_preview":
+		idle_time += delta
 		queue_redraw()
 	elif full_arena:
 		idle_time += delta
@@ -474,6 +481,8 @@ func _draw_arena_backdrop(pan: float, vertical: float = .50) -> void:
 		extent *= .85
 	var crop := Rect2(region.position + (region.size - extent) * Vector2(pan, vertical), extent)
 	draw_texture_rect_region(_backdrop, Rect2(Vector2.ZERO, size), crop)
+	if _arena_ambience != null:
+		_arena_ambience.draw(self, _backdrop, crop, size, idle_time)
 
 # Live previews use the catalog. A saved bout uses the equipment recorded when it began.
 func _item(id: String) -> Dictionary:
