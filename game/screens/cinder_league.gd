@@ -679,10 +679,6 @@ func _reset_control_bindings() -> void:
 func _refresh_control_settings() -> void:
 	for action in binding_buttons:
 		binding_buttons[action].text = "Press a key…" if binding_action == action else OS.get_keycode_string(key_bindings[action])
-	if is_instance_valid(result_town_button):
-		result_town_button.tooltip_text = "Shortcut · " + OS.get_keycode_string(key_bindings.town)
-	if is_instance_valid(result_next_button):
-		result_next_button.tooltip_text = "Shortcut · " + OS.get_keycode_string(key_bindings.next)
 
 	for entry in shortcut_labels:
 		_update_shortcut_label(entry)
@@ -2230,6 +2226,7 @@ func _open_bout(snapshot: Dictionary) -> void:
 		return
 	_remove_battle()
 	current_screen = "battle"
+	shortcut_labels.clear()
 	title_art.hide()
 	_sync_title_art()
 	shell.hide()
@@ -2246,104 +2243,145 @@ func _finish_bout(outcome: Dictionary) -> void:
 	if current_screen != "battle":
 		return
 	var bout: Duel = fight.bout
-	var title := "Victory" if bout.winner == 0 else "Defeat"
+	var won := bout.winner == 0
+	var fallen: bool = outcome.get("fallen", false)
+	var title := "Victory" if won else "Defeat"
+	var detail := ""
 	if not venue_music_enabled:
-		sound.play("victory" if bout.winner == 0 else "defeat")
-	if outcome.get("complete", false) and bout.winner == 0:
+		sound.play("victory" if won else "defeat")
+	var last: Dictionary = bout.history.back() if not bout.history.is_empty() else {}
+	if outcome.get("complete", false) and won:
 		title = "League champion"
-	elif outcome.get("fallen", false):
+	elif fallen:
 		title = "%s has fallen" % game.state.name
-	elif not bout.history.is_empty() and bout.history.back().get("ring_out", false):
-		title = "Ring-out victory" if bout.winner == 0 else "Ring-out defeat"
-	elif not bout.history.is_empty() and bout.history.back().get("first_blood", false):
-		title = "First blood victory" if bout.winner == 0 else "Defeat · Yielded"
-	elif not bout.history.is_empty() and bout.history.back().get("yield_threshold_reached", false):
-		title = "Victory · Rival yielded" if bout.winner == 0 else "Defeat · Yielded"
+	elif last.get("ring_out", false):
+		detail = "Ring-out"
+	elif last.get("first_blood", false):
+		detail = "First blood" if won else "Yielded"
+	elif last.get("yield_threshold_reached", false):
+		detail = "Rival yielded" if won else "Yielded"
 	current_screen = "result"
 	_sync_audio()
 	fight.celebrate()
-	var result := _card(fight, 10)
+	# An arena unlock updates the campaign before the result is shown. Match the arena still on screen.
+	var palette := ShopView.new(str(Content.arena(fight.stage.arena).get("id", "")))
+	var result := palette.card(fight, 10)
 	var panel: PanelContainer = result.get_parent()
 	panel.name = "BoutResults"
-	panel.add_theme_stylebox_override("panel", _style(Color("#2d2329f8"), Color("#bd895c"), 15))
+	panel.add_theme_stylebox_override("panel", palette.frame(Color(palette.base.darkened(.32), .97), palette.edge, 12))
 	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	panel.offset_left = -484
-	panel.offset_right = 484
-	var summary := _row(result, 22)
-	var heading := _title(summary, title, 30)
-	heading.add_theme_color_override("font_color", SAND if bout.winner == 0 else TEXT)
-	heading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	var fit_width := func() -> void:
+		var half_width := clampf(fight.size.x * .30, 255.0, 375.0)
+		panel.offset_left = -half_width
+		panel.offset_right = half_width
+	fight.resized.connect(fit_width)
+	fit_width.call()
+	var summary := _row(result, 10)
+	var headline := _column(summary, 2)
+	headline.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_fill(headline)
+	var heading := _row(headline, 7)
+	if won:
+		var trophy := Symbol.make("trophy", 27)
+		trophy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		heading.add_child(trophy)
+	var name := _title(heading, title, 30)
+	name.add_theme_color_override("font_color", ShopView.GOLD if won else ShopView.TEXT)
+	name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name.tooltip_text = title
+	_fill(name)
+	if not detail.is_empty():
+		palette.label(headline, detail, 15, ShopView.MUTED)
 	var motion := panel.create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	if not outcome.get("fallen", false):
-		_show_bout_rewards(summary, outcome, motion)
+	if not fallen:
+		_show_bout_rewards(summary, palette, outcome, motion)
+	if outcome.get("unlocked", false):
+		_token(result, "trophy", game.arena().name + " unlocked", "New arena")
+	var practice_defeat: bool = outcome.get("practice_defeat", false)
+	if practice_defeat:
+		palette.label(result, "Tournament practice · Gladiator survives", 15, ShopView.MUTED)
 	if not game.save_error.is_empty():
 		_wrapped(result, game.save_error, 15, RED)
 	var controls := _row(result, 8)
-	var unlocked: bool = outcome.get("unlocked", false)
-	if unlocked:
-		_token(controls, "trophy", game.arena().name + " unlocked", "New arena")
-	var practice_defeat: bool = outcome.get("practice_defeat", false)
-	if practice_defeat:
-		_label(controls, "Tournament practice · Gladiator survives").size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_space(controls)
-	if outcome.get("fallen", false):
-		_button(controls, "Title screen", show_menu, true)
+	if fallen:
+		_result_button(controls, palette, "Title screen", show_menu, true)
 	elif game.state.pending:
-		_button(controls, "Spend level-up points", _allocate_level, true)
+		_result_button(controls, palette, "Spend level-up points", _allocate_level, true)
 	else:
 		var tournament_locked: bool = game.tournament_in_progress()
 		if not tournament_locked:
-			result_town_button = _button(controls, "Return to town", show_town)
+			result_town_button = _result_button(controls, palette, "Return to town", show_town, false, "town")
 		var next_tournament := tournament_locked or practice_defeat
-		result_next_button = _button(controls, "Next Match" if next_tournament else "Next Bout",
-			_scout_bout.bind(next_tournament), true)
-		_refresh_control_settings()
+		result_next_button = _result_button(controls, palette, "Next Match" if next_tournament else "Next Bout",
+			_scout_bout.bind(next_tournament), true, "next")
 	var height := panel.get_combined_minimum_size().y
 	panel.offset_top = 8
 	panel.offset_bottom = height + 8
 	motion.tween_property(panel, "offset_top", -height - 20, .32)
 	motion.tween_property(panel, "offset_bottom", -20.0, .32)
 
-func _show_bout_rewards(parent: HBoxContainer, outcome: Dictionary, motion: Tween) -> void:
-	var levels: Array = data.rules.xp_levels
+func _result_button(parent: Control, palette: ShopView, caption: String, callback: Callable,
+		primary: bool, action: String = "") -> Button:
+	var button := _button(parent, "", callback)
+	button.accessibility_name = caption
+	button.custom_minimum_size.y = 44
+	_fill(button)
+	palette.style_button(button, false, primary)
+	var cap := palette.button_copy(button, caption, _key_name(action) if not action.is_empty() else "")
+	if not action.is_empty():
+		_track_shortcut(button, caption, action, cap)
+	return button
+
+func _result_metric(parent: Control, palette: ShopView, width: float) -> VBoxContainer:
+	var tile := PanelContainer.new()
+	tile.custom_minimum_size.x = width
+	tile.add_theme_stylebox_override("panel", palette.frame(palette.base, palette.edge.darkened(.22), 8))
+	parent.add_child(tile)
+	return _column(tile, 4)
+
+func _show_bout_rewards(parent: HBoxContainer, palette: ShopView, outcome: Dictionary, motion: Tween) -> void:
 	var level := int(game.state.level)
-	var capped: bool = level >= int(game.arena().cap)
-	var floor_index := maxi(0, level - (2 if capped else 1))
-	var ceiling_index := mini(level - (1 if capped else 0), levels.size() - 1)
-	var xp := int(game.state.xp)
-	var gained_xp := int(outcome.xp)
-	var progress := _column(parent, 5)
-	_fill(progress)
-	var stat := _row(progress, 6)
-	_token(stat, "xp", "+%d XP" % gained_xp if gained_xp > 0 else "XP", "Experience")
-	_space(stat)
-	if capped and not game.state.complete:
-		_label(stat, "Tournament ready", 14, MUTED)
-	var bar := ProgressBar.new()
-	bar.max_value = maxi(int(levels[ceiling_index]), int(levels[floor_index]) + 1)
-	bar.min_value = int(levels[floor_index])
-	# Campaign has already granted the reward. Start the bar at the previous XP for the animation.
-	bar.value = xp - gained_xp
-	bar.show_percentage = false
-	bar.accessibility_name = "Experience"
-	bar.custom_minimum_size.y = 12
-	bar.add_theme_stylebox_override("background", _style(Color("#18151b"), Color("#604a48"), 2))
-	bar.add_theme_stylebox_override("fill", _style(SAND, SAND.lightened(.15), 2))
-	progress.add_child(bar)
-	if gained_xp > 0:
-		motion.tween_property(bar, "value", minf(xp, bar.max_value), .86).set_delay(.22)
-	var wallet := _column(parent, 1)
-	wallet.custom_minimum_size.x = 90
+	if level < int(game.arena().cap):
+		_show_bout_xp(parent, palette, level, int(outcome.xp), motion)
+	elif not game.state.complete and not game.tournament_in_progress():
+		var status := _result_metric(parent, palette, 170)
+		status.alignment = BoxContainer.ALIGNMENT_CENTER
+		_token(status, "trophy", "Tournament ready", "Tournament")
+	var wallet := _result_metric(parent, palette, 122)
 	var gold := int(game.state.gold)
 	var gained_gold := int(outcome.gold)
 	var gold_row := _row(wallet, 6)
-	gold_row.add_child(Symbol.make("coin", 23))
-	var gold_total := _label(gold_row, str(gold - gained_gold), 19, SAND)
+	gold_row.add_child(Symbol.make("coin", 22))
+	var caption := "%+d gold" % gained_gold if gained_gold != 0 else "Gold"
+	palette.label(gold_row, caption, 17, RED if gained_gold < 0 else ShopView.GOLD)
+	var gold_total := palette.label(wallet, "%d total" % (gold - gained_gold), 14, ShopView.MUTED)
 	gold_total.accessibility_name = "Total gold"
-	_label(wallet, "%+d gold" % gained_gold if gained_gold != 0 else "Gold", 14, RED if gained_gold < 0 else MUTED)
 	if gained_gold != 0:
-		motion.tween_method(func(value: float) -> void: gold_total.text = str(roundi(value)),
+		motion.tween_method(func(value: float) -> void: gold_total.text = "%d total" % roundi(value),
 			float(gold - gained_gold), float(gold), .72).set_delay(.33)
+
+func _show_bout_xp(parent: Control, palette: ShopView, level: int, gained_xp: int, motion: Tween) -> void:
+	var progress := _result_metric(parent, palette, 170)
+	var stat := _row(progress, 8)
+	_token(stat, "xp", "+%d XP" % gained_xp if gained_xp > 0 else "XP", "Experience")
+	_space(stat)
+	var caption := "Lv. %d ready" % (level + 1) if game.state.pending else "Lv. %d" % level
+	palette.label(stat, caption, 13, ShopView.MUTED)
+	var bar := ProgressBar.new()
+	bar.max_value = int(data.rules.xp_levels[level])
+	bar.min_value = int(data.rules.xp_levels[level - 1])
+	var xp := int(game.state.xp)
+	# Campaign already granted the XP. Animate from the balance before the bout.
+	bar.value = xp - gained_xp
+	bar.show_percentage = false
+	bar.accessibility_name = "Experience"
+	bar.custom_minimum_size.y = 8
+	bar.add_theme_stylebox_override("background", palette.frame(palette.base.darkened(.38), palette.edge, 0))
+	bar.add_theme_stylebox_override("fill", palette.frame(SAND, SAND, 0))
+	progress.add_child(bar)
+	if gained_xp > 0:
+		motion.tween_property(bar, "value", minf(xp, bar.max_value), .86).set_delay(.22)
 
 func _number(parent: Node, caption: String, minimum: int, maximum: int, initial: int) -> SpinBox:
 	_label(parent, caption, 13, MUTED)
