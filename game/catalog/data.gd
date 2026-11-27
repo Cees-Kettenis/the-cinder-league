@@ -4,6 +4,7 @@ extends RefCounted
 const STATS: Array[String] = ["Attack", "Strength", "Defence", "Magic", "Vitality", "Stamina", "Charisma"]
 const SLOTS: Array[String] = ["helmet", "chest", "pants", "shoes", "shield"]
 const Content = preload("res://game/catalog/content_catalog.gd")
+const PREPARED_ITEM_FIELDS := ["effect", "power", "retired"]
 const DEFAULT_FILE = Content.BALANCE_PATH
 const GIVEN_NAMES := ["Ari", "Bram", "Cleo", "Dara", "Ember", "Finn", "Iona", "Jory", "Lark", "Mara", "Niall", "Quinn", "Rook", "Sera", "Tess", "Wren"]
 const FAMILY_NAMES := ["Ash", "Briar", "Copper", "Dale", "Fen", "Flint", "Holt", "Reed", "Rowan", "Slate", "Thorn", "Vale"]
@@ -13,7 +14,7 @@ const STAT_PATTERNS := {
 		"Strength", "Vitality", "Stamina", "Attack", "Defence", "Strength", "Stamina", "Stamina", "Attack", "Defence"],
 	"brute": ["Strength", "Strength", "Vitality", "Defence", "Stamina", "Attack"],
 	"guard": ["Defence", "Vitality", "Strength", "Defence", "Stamina", "Attack"],
-	"mage": ["Magic", "Strength", "Attack", "Vitality", "Stamina", "Defence", "Magic", "Strength", "Attack", "Magic"],
+	"mage": ["Magic", "Strength", "Attack", "Vitality", "Stamina", "Defence", "Magic", "Strength", "Defence", "Magic"],
 	"skirmish": ["Stamina", "Strength", "Attack", "Vitality", "Defence", "Magic"],
 	"charisma": ["Charisma", "Charisma", "Stamina", "Vitality", "Defence"],
 	"hybrid": ["Magic", "Strength", "Stamina", "Defence", "Vitality", "Attack"],
@@ -57,13 +58,19 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 	profile.rules.erase("bout_min_spell_casts")
 	profile.rules.erase("death_match_extra_cast_magic")
 	profile.rules.erase("bout_ranged_spells_armor_only")
+	# Older overrides use the same HP gain for every Vitality point.
+	if not profile.rules.has("health_vitality_point_fraction"):
+		profile.rules.health_vitality_point_fraction = 1.0
+	if not profile.rules.has("health_per_excess_vitality"):
+		profile.rules.health_per_excess_vitality = profile.rules.get("health_per_vitality", bundled.rules.health_per_vitality)
 	for key in ["spell_close_penalty", "crit_power_cap", "opponent_point_variance", "capped_gold_multiplier",
 			"lunge_hit_penalty", "lunge_base_cost", "lunge_cost_per_space", "lunge_max_spaces",
 			"stamina_per_extra_space", "stamina_per_extra_leap_space", "max_stamina_move_bonus", "lunge_hit_penalty_per_extra_space",
 			"power_hit_penalty", "power_damage_multiplier",
 			"power_stamina_extra", "power_strength_per_space", "quick_hit_bonus", "quick_damage_multiplier", "quick_stamina_multiplier",
-			"bout_yield_health_percent", "spell_resistance_per_magic", "magic_per_extra_cast", "reserve_spell_magic",
-			"strength_damage_floor", "strength_damage_point_fraction", "damage_per_excess_strength"]:
+			"bout_yield_health_percent", "spell_resistance_per_magic", "magic_per_extra_cast", "reserve_spell_magic", "distance_based_spell_movement",
+			"strength_damage_floor", "strength_damage_point_fraction", "damage_per_excess_strength",
+			"health_potion_base", "health_potion_per_vitality", "armor_potion_fraction", "tournament_scaling_bonus"]:
 		if not profile.rules.has(key):
 			profile.rules[key] = bundled.rules[key]
 	for section in ["rules", "moves", "distances"]:
@@ -116,9 +123,13 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		return "Capped bout gold must be between 0 and 1 times the usual reward."
 	if rules.strength_damage_point_fraction > 1:
 		return "The Strength damage threshold can use up to all assigned points."
+	if rules.health_vitality_point_fraction > 1 or rules.health_per_excess_vitality > rules.health_per_vitality:
+		return "The Vitality health threshold can use up to all assigned points and excess Vitality cannot add more health per point."
 	if (rules.bout_yield_health_percent < 1 or rules.bout_yield_health_percent >= 100
 			or rules.bout_yield_health_percent != floor(rules.bout_yield_health_percent)):
 		return "Bout yield health must be a whole percent between 1 and 99."
+	if rules.armor_potion_fraction <= 0 or rules.armor_potion_fraction > 1 or rules.health_potion_base < 1:
+		return "Potions must restore a positive amount. The armor fraction cannot exceed 1."
 	for key in ["magic_per_extra_cast", "reserve_spell_magic"]:
 		if rules[key] < 1 or rules[key] != floor(rules[key]):
 			return "Magic requirements must be positive whole numbers: " + key
@@ -133,26 +144,39 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		if not item is Dictionary or not item_types.has(item.get("kind", "")):
 			return "An item has an invalid category."
 		for field in item_types[item.kind]:
+			if field in PREPARED_ITEM_FIELDS or (item.kind == "enchant" and field == "energy"):
+				continue
 			if not item.has(field) or typeof(item[field]) != typeof(item_types[item.kind][field]):
 				return "Missing or invalid item field: %s / %s" % [item.get("id", "unknown"), field]
 		if items.has(item.id) or item.id.is_empty() or item.price < 0 or item.minimum < 0 or item.level < 1:
 			return "An item has a duplicate ID or invalid price or requirement."
 		if item.kind == "armor" and (item.slot not in SLOTS or item.armor < 0):
 			return "Invalid armor slot or armor points: " + item.id
-		if item.kind in ["weapon", "spell"] and (item.energy < 0 or item.reach <= 0 or item.damage <= 0):
+		if item.kind in ["weapon", "spell"] and (item.energy < 0 or item.reach < 0 or item.damage < 0
+				or (item.get("effect", "damage") == "damage" and (item.reach <= 0 or item.damage <= 0))):
 			return "Invalid cost, reach or damage: " + item.id
 		if item.kind == "enchant" and item.damage < 0:
 			return "Invalid enchantment damage: " + item.id
+		if item.has("retired") and not item.retired is bool:
+			return "Invalid retired flag: " + item.id
+		if item.has("effect"):
+			var effects := ["damage", "shield", "push", "pull"] if item.kind == "spell" else ["enchant"]
+			if item.kind not in ["spell", "enchant"] or item.effect not in effects:
+				return "Invalid spell effect: " + item.id
+			if item.effect != "damage" and (not item.get("power") is float or item.power < 1 or item.power != floor(item.power)):
+				return "Utility spells require positive whole-number power: " + item.id
+		if item.has("energy") and (not item.energy is float or item.energy < 0):
+			return "Invalid stamina cost: " + item.id
 		if item.kind == "spell" and item.uses < 1:
 			return "A spell needs at least one use: " + item.id
-		if legacy_magic and item.kind == "spell":
+		if legacy_magic and item.kind == "spell" and item.get("effect", "damage") == "damage":
 			# Start existing profiles from their previous regular-bout spell values.
 			item.damage = maxf(1.0, roundf(item.damage * old_bout_scale))
 			item.uses = maxf(item.uses, old_bout_casts)
 		items[item.id] = item
 	# Import gear above the old cap as arenas are added. Old item IDs and armor slots belong to save data.
 	for reference_item in bundled.items:
-		if reference_item.level > previous_cap and not items.has(reference_item.id):
+		if (reference_item.level > previous_cap or reference_item.id in ["magic_shield", "push", "pull", "armor_potion"]) and not items.has(reference_item.id):
 			items[reference_item.id] = reference_item
 			profile.items.append(reference_item)
 		if reference_item.id == "dagger" and not items.has("dagger"):
@@ -162,6 +186,12 @@ func load_profile(path: String = DEFAULT_FILE) -> String:
 		if (not items.has(reference_item.id) or items[reference_item.id].kind != reference_item.kind
 				or items[reference_item.id].get("slot", "") != reference_item.get("slot", "")):
 			return "Keep the original item IDs, categories, and slots to preserve existing saves."
+		# Old overrides can omit the metadata that determines the effect and active shop roster.
+		for field in PREPARED_ITEM_FIELDS:
+			if reference_item.has(field) and not items[reference_item.id].has(field):
+				items[reference_item.id][field] = reference_item[field]
+		if reference_item.id == "ember_etching" and not items.ember_etching.has("energy"):
+			items.ember_etching.energy = reference_item.energy
 	for slot in rules.opening_armour:
 		if slot not in SLOTS or not items.has(rules.opening_armour[slot]) or items[rules.opening_armour[slot]].get("slot", "") != slot:
 			return "Invalid starting armor for slot " + slot
@@ -244,6 +274,22 @@ func spell_casts(spell: Dictionary, magic: int, reserve_equipped: bool = false) 
 func has_reserve_slot(magic: int) -> bool:
 	return magic >= int(rules.reserve_spell_magic) and bonus_spell_casts(magic) > 0
 
+func spell_slots(magic: int) -> int:
+	return 2 + bonus_spell_casts(magic)
+
+func is_prepared_spell(item: Dictionary) -> bool:
+	return item.get("kind") in ["spell", "enchant"] and not item.get("retired", false)
+
+func _spell_options(level: int, stats: Dictionary, effect: String) -> Array[Dictionary]:
+	var available: Array[Dictionary] = []
+	for item in items.values():
+		if (is_prepared_spell(item) and item.get("effect", "damage") == effect
+				and lock_reason({"level": level, "stats": stats}, item).is_empty()):
+			available.append(item)
+	available.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		return left.damage > right.damage)
+	return available
+
 ## Prepare a fighter with resolved equipment and starting resources for a new bout.
 func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String = "weapon") -> Dictionary:
 	var weapon: Dictionary = items.get(loadout.get("weapon", ""), items[rules.starter_weapon])
@@ -254,9 +300,15 @@ func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String
 	var protection := 0
 	for id in loadout.get("armor", {}).values():
 		protection += int(items.get(id, {}).get("armor", 0))
-	var health := int(rules.base_health + stats.Vitality * rules.health_per_vitality)
+	# The threshold grows with the fighter's point budget so leveling naturally raises it.
+	var points := 0.0
+	for stat in STATS:
+		points += float(stats.get(stat, 0))
+	var full_vitality := minf(stats.Vitality, points * rules.health_vitality_point_fraction)
+	var excess_vitality: float = stats.Vitality - full_vitality
+	var health := int(rules.base_health + full_vitality * rules.health_per_vitality + excess_vitality * rules.health_per_excess_vitality)
 	var energy := int(rules.base_energy + stats.Stamina * rules.energy_per_stamina)
-	return {
+	var fighter_state := {
 		"name": name, "stats": stats.duplicate(), "loadout": loadout.duplicate(true), "style": style,
 		"hp": health, "max_hp": health, "armor": protection, "max_armor": protection,
 		"energy": energy, "max_energy": energy, "weapon": weapon, "spell": spell,
@@ -266,6 +318,19 @@ func fighter(name: String, stats: Dictionary, loadout: Dictionary, style: String
 		"potions": int(rules.potion_uses) if loadout.get("potion", false) else 0,
 		"guarding": false, "exposed": false, "provoked": false,
 	}
+	if loadout.has("spells"):
+		var prepared: Array[Dictionary] = []
+		for id in loadout.spells.slice(0, spell_slots(int(stats.Magic))):
+			var item: Dictionary = items.get(id, {})
+			prepared.append(item if is_prepared_spell(item) else {})
+		fighter_state.prepared = prepared
+		fighter_state.spent_slots = []
+		fighter_state.magic_shield = 0
+		fighter_state.enchant_hits = 0
+		fighter_state.enchant_damage = 0
+		fighter_state.draught = str(loadout.get("draught", ""))
+		fighter_state.potions = int(not fighter_state.draught.is_empty())
+	return fighter_state
 
 func build_stats(style: String, points: int, offset: int = 0) -> Dictionary:
 	var stats := stats_empty()
@@ -275,7 +340,7 @@ func build_stats(style: String, points: int, offset: int = 0) -> Dictionary:
 	return stats
 
 func eligible_loadout(level: int, stats: Dictionary, style: String, armor_level: int = -1) -> Dictionary:
-	var loadout := {"weapon": rules.starter_weapon, "armor": {}, "spell": "", "potion": false, "enchant": ""}
+	var loadout := {"weapon": rules.starter_weapon, "armor": {}, "spells": [], "draught": ""}
 	# Most builds trade some damage for reach. Brutes compare weapons by damage alone.
 	var reach_value := 0 if style == "brute" else 7
 	for item in items.values():
@@ -292,16 +357,30 @@ func eligible_loadout(level: int, stats: Dictionary, style: String, armor_level:
 				var current: Dictionary = items.get(loadout.armor.get(item.slot, ""), {})
 				if item.armor >= current.get("armor", 0):
 					loadout.armor[item.slot] = item.id
-			"spell":
-				if style in ["mage", "hybrid", "skirmish"]:
-					var current: Dictionary = items.get(loadout.spell, {})
-					if item.damage >= current.get("damage", 0):
-						loadout.spell = item.id
-			"potion":
-				loadout.potion = true
-			"enchant":
-				if style in ["hybrid", "skirmish", "mage"]:
-					loadout.enchant = item.id
+	return _prepared_loadout(loadout, level, stats, style)
+
+func _prepared_loadout(loadout: Dictionary, level: int, stats: Dictionary, style: String) -> Dictionary:
+	var mage := style in ["mage", "hybrid", "skirmish"]
+	var prepared: Array[String] = []
+	var damage := _spell_options(level, stats, "damage")
+	if mage and not damage.is_empty():
+		prepared.append(damage.pop_front().id)
+		if style == "mage":
+			# Leave room for control and defense when there are more damage spells than slots.
+			while not damage.is_empty() and prepared.size() < spell_slots(int(stats.Magic)) - 2:
+				prepared.append(damage.pop_front().id)
+	for effect in (["push", "shield", "enchant", "pull"] if mage else ["enchant", "shield", "pull", "push"]):
+		var utility := _spell_options(level, stats, effect)
+		if not utility.is_empty():
+			prepared.append(utility[0].id)
+	if mage:
+		for item in damage:
+			prepared.append(item.id)
+	loadout.spells = prepared.slice(0, spell_slots(int(stats.Magic)))
+	var armor := 0
+	for id in loadout.armor.values():
+		armor += int(items[id].armor)
+	loadout.draught = "armor_potion" if armor * rules.armor_potion_fraction > rules.health_potion_base + stats.Vitality * rules.health_potion_per_vitality else "potion"
 	return loadout
 
 func generate_opponent(player_level: int, arena: int, seed_value: int, round_index: int = -1) -> Dictionary:
@@ -313,7 +392,7 @@ func generate_opponent(player_level: int, arena: int, seed_value: int, round_ind
 	if round_index >= 0:
 		var definition: Dictionary = venue.tournament[round_index]
 		var boss: bool = definition.get("boss", false)
-		var entrant := opponent(definition, level, arena, null if boss else random)
+		var entrant := opponent(definition, level, arena, null if boss else random, true)
 		entrant.look = rival_look(str(definition.name).hash() if boss else seed_value, player_level)
 		return entrant
 	var level_floor := 1 if arena == 0 else int(arenas[arena - 1].cap) + 1
@@ -351,10 +430,12 @@ static func rival_look(seed_value: int, player_level: int) -> Dictionary:
 		"palette": outfit.randi_range(0, 4), "build": outfit.randi_range(90, 117),
 	}
 
-func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumberGenerator = null) -> Dictionary:
+func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumberGenerator = null, tournament: bool = false) -> Dictionary:
 	var scaling: float = rules.encounter_scaling
 	if definition.get("boss", false):
 		scaling += rules.boss_scaling_bonus
+	elif tournament:
+		scaling += float(rules.get("tournament_scaling_bonus", 0.0))
 	var budget: float = rules.starting_points * rules.encounter_creation_factor + (level - 1) * rules.points_per_level * scaling
 	var point_multiplier := float(definition.get("point_multiplier", 1.0))
 	if random != null:
@@ -384,7 +465,7 @@ func opponent(definition: Dictionary, level: int, arena: int, random: RandomNumb
 		loadout.weapon = rules.starter_weapon
 	if level < arenas[arena].opponent_gear_level and not definition.get("boss", false):
 		loadout.armor = {}
-		loadout.potion = false
+		loadout.draught = ""
 	var rival := fighter(definition.name, stats, loadout, definition.get("tactics", definition.style))
 	rival.level = level
 	rival.skin = random.randi_range(0, 3) if random != null else clampi(int(definition.get("skin", 0)), 0, 3)

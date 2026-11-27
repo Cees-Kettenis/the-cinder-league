@@ -5,6 +5,8 @@
 	"starting_gold": 85,
 	"base_health": 44,
 	"health_per_vitality": 4,
+	"health_vitality_point_fraction": 0.15,
+	"health_per_excess_vitality": 1.75,
 	"regen_per_vitality": 0.22,
 	"base_energy": 28,
 	"energy_per_stamina": 3.2,
@@ -17,7 +19,7 @@
 	"hit_per_attack": 0.018,
 	"spell_hit": 0.76,
 	"hit_per_magic": 0.013,
-	"spell_close_penalty": 0.22,
+	"spell_close_penalty": 0.12,
 	"lunge_hit_penalty": 0.2,
 	"lunge_hit_penalty_per_extra_space": 0.08,
 	"lunge_base_cost": 7,
@@ -37,7 +39,7 @@
 	"crit_power_per_attack": 0.045,
 	"crit_power_cap": 3.2,
 	"base_block": 0.02,
-	"block_per_defence": 0.0115,
+	"block_per_defence": 0.0135,
 	"guard_block": 0.25,
 	"sleep_vulnerability": 0.18,
 	"minimum_hit": 0.16,
@@ -46,15 +48,16 @@
 	"strength_damage_floor": 12,
 	"strength_damage_point_fraction": 0.25,
 	"damage_per_excess_strength": 0.2,
-	"damage_per_magic": 0.8,
+	"damage_per_magic": 0.4,
 	"spell_resistance_per_magic": 0.35,
 	"magic_per_extra_cast": 10,
+	"distance_based_spell_movement": true,
 	"reserve_spell_magic": 30,
 	"bout_yield_health_percent": 20,
 	"guard_damage_factor": 0.48,
 	"taunt_minimum": 9,
 	"taunt_base_damage": 4,
-	"taunt_per_charisma": 1.5,
+	"taunt_per_charisma": 0.9,
 	"taunt_provoke": 0.27,
 	"arena_size": 30,
 	"starting_distance": 5,
@@ -62,7 +65,7 @@
 	"gold_per_charisma": 1.75,
 	"loss_gold": 8,
 	"capped_gold_multiplier": 0.5,
-	"encounter_scaling": 0.58,
+	"encounter_scaling": 0.6,
 	"opponent_point_variance": 0.08,
 	"starter_weapon": "dagger",
 	"heal": 21,
@@ -72,7 +75,11 @@
 	"taunt_provoke_cap": 0.7,
 	"block_cap": 0.85,
 	"encounter_creation_factor": 0.8,
-	"boss_scaling_bonus": 0.21
+	"boss_scaling_bonus": 0.22,
+	"health_potion_base": 12,
+	"health_potion_per_vitality": 0.5,
+	"armor_potion_fraction": 0.3,
+	"tournament_scaling_bonus": 0.16
   },
   "moves": {
 	"advance": 2,
@@ -98,9 +105,9 @@
 	  "level": 1,
 	  "price": 21,
 	  "minimum": 1,
-	  "damage": 7,
+	  "damage": 20,
 	  "reach": 6,
-	  "energy": 6,
+	  "energy": 8,
 	  "uses": 2,
 	  "art": 0,
 	  "order": 26
@@ -117,7 +124,8 @@
 	  "energy": 7,
 	  "uses": 2,
 	  "art": 1,
-	  "order": 27
+	  "order": 27,
+	  "retired": true
 	},
 	{
 	  "id": "meteor",
@@ -131,18 +139,19 @@
 	  "energy": 9,
 	  "uses": 2,
 	  "art": 2,
-	  "order": 28
+	  "order": 28,
+	  "retired": true
 	},
 	{
 	  "id": "hellfire",
 	  "name": "Blue Hellfire",
 	  "kind": "spell",
-	  "level": 2,
+	  "level": 5,
 	  "price": 35,
-	  "minimum": 5,
-	  "damage": 13,
+	  "minimum": 7,
+	  "damage": 28,
 	  "reach": 5,
-	  "energy": 9,
+	  "energy": 12,
 	  "uses": 2,
 	  "art": 3,
 	  "order": 29
@@ -159,18 +168,19 @@
 	  "energy": 9,
 	  "uses": 2,
 	  "art": 1,
-	  "order": 30
+	  "order": 30,
+	  "retired": true
 	},
 	{
 	  "id": "arc",
 	  "name": "Falling Ember",
 	  "kind": "spell",
-	  "level": 6,
+	  "level": 9,
 	  "price": 51,
-	  "minimum": 9,
-	  "damage": 18,
+	  "minimum": 12,
+	  "damage": 38,
 	  "reach": 9,
-	  "energy": 9,
+	  "energy": 15,
 	  "uses": 2,
 	  "art": 2,
 	  "order": 31
@@ -187,18 +197,19 @@
 	  "energy": 8,
 	  "uses": 2,
 	  "art": 4,
-	  "order": 39
+	  "order": 39,
+	  "retired": true
 	},
 	{
 	  "id": "pocket_anvil",
 	  "name": "Pocket Anvil",
 	  "kind": "spell",
-	  "level": 10,
+	  "level": 13,
 	  "price": 86,
-	  "minimum": 14,
-	  "damage": 24,
+	  "minimum": 17,
+	  "damage": 51,
 	  "reach": 6,
-	  "energy": 10,
+	  "energy": 22,
 	  "uses": 2,
 	  "art": 5,
 	  "order": 40
@@ -215,7 +226,8 @@
 	  "energy": 11,
 	  "uses": 2,
 	  "art": 6,
-	  "order": 41
+	  "order": 41,
+	  "retired": true
 	},
 	{
 	  "id": "verdigris_bolt",
@@ -229,7 +241,8 @@
 	  "energy": 10,
 	  "uses": 2,
 	  "art": 7,
-	  "order": 49
+	  "order": 49,
+	  "retired": true
 	},
 	{
 	  "id": "sunseal",
@@ -243,11 +256,12 @@
 	  "energy": 12,
 	  "uses": 2,
 	  "art": 8,
-	  "order": 50
+	  "order": 50,
+	  "retired": true
 	},
 	{
 	  "id": "potion",
-	  "name": "Restorative draught",
+	  "name": "Health Potion",
 	  "kind": "potion",
 	  "level": 1,
 	  "price": 22,
@@ -257,14 +271,75 @@
 	},
 	{
 	  "id": "ember_etching",
-	  "name": "Ember etching",
+	  "name": "Ember Etching",
 	  "kind": "enchant",
-	  "level": 3,
-	  "price": 25,
-	  "minimum": 3,
+	  "level": 13,
+	  "price": 88,
+	  "minimum": 16,
 	  "damage": 3,
 	  "art": 0,
-	  "order": 52
+	  "order": 52,
+	  "energy": 5,
+	  "effect": "enchant",
+	  "power": 3
+	},
+	{
+	  "id": "magic_shield",
+	  "name": "Magic Shield",
+	  "kind": "spell",
+	  "level": 1,
+	  "minimum": 1,
+	  "price": 19,
+	  "damage": 0,
+	  "reach": 0,
+	  "energy": 4,
+	  "uses": 1,
+	  "art": 0,
+	  "order": 53,
+	  "effect": "shield",
+	  "power": 11
+	},
+	{
+	  "id": "push",
+	  "name": "Push",
+	  "kind": "spell",
+	  "level": 5,
+	  "minimum": 5,
+	  "price": 43,
+	  "damage": 0,
+	  "reach": 6,
+	  "energy": 5,
+	  "uses": 1,
+	  "art": 0,
+	  "order": 54,
+	  "effect": "push",
+	  "power": 2
+	},
+	{
+	  "id": "pull",
+	  "name": "Pull",
+	  "kind": "spell",
+	  "level": 9,
+	  "minimum": 10,
+	  "price": 68,
+	  "damage": 0,
+	  "reach": 8,
+	  "energy": 6,
+	  "uses": 1,
+	  "art": 0,
+	  "order": 55,
+	  "effect": "pull",
+	  "power": 2
+	},
+	{
+	  "id": "armor_potion",
+	  "name": "Armor Potion",
+	  "kind": "potion",
+	  "level": 1,
+	  "price": 22,
+	  "minimum": 0,
+	  "art": 5,
+	  "order": 56
 	}
   ]
 }

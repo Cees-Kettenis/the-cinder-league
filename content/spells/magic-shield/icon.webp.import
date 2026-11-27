@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ynlpeuybiuk7"
-path="res://.godot/imported/stock.png-cf2bf61f59615f64ec703e790660cbaa.ctex"
+uid="uid://d1due6oi3esh8"
+path="res://.godot/imported/icon.webp-ef030532534f280334f30fef794bf3be.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://game/screens/shops/stock.png"
-dest_files=["res://.godot/imported/stock.png-cf2bf61f59615f64ec703e790660cbaa.ctex"]
+source_file="res://content/spells/magic-shield/icon.webp"
+dest_files=["res://.godot/imported/icon.webp-ef030532534f280334f30fef794bf3be.ctex"]
 
 [params]
 

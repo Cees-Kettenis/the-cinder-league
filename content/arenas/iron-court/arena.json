@@ -17,34 +17,34 @@
       {
         "name": "Sera Flint",
         "style": "mage",
-        "point_multiplier": 1.45
+        "point_multiplier": 1.64
       },
       {
         "name": "Niall Copper",
         "style": "skirmish",
-        "point_multiplier": 1.46
+        "point_multiplier": 1.4
       },
       {
         "name": "Kerr of the Gate",
         "style": "guard",
-        "point_multiplier": 1.4
+        "point_multiplier": 1.18
       },
       {
         "name": "Finn Vale",
         "style": "fast_melee",
-        "point_multiplier": 1.42
+        "point_multiplier": 1.59
       }
     ],
     "tournament": [
       {
         "name": "Tavin Cress",
         "style": "mage",
-        "point_multiplier": 1.25
+        "point_multiplier": 1.19
       },
       {
         "name": "Bren Holt",
-        "style": "charisma",
-        "point_multiplier": 1.16
+        "style": "brute",
+        "point_multiplier": 1.12
       },
       {
         "name": "Oren Voss",
@@ -53,12 +53,12 @@
         "boss": true,
         "armor_level": 5,
         "stats": {
-          "Attack": 17,
-          "Strength": 11,
-          "Defence": 5,
-          "Magic": 0,
-          "Vitality": 13,
-          "Stamina": 12,
+          "Attack": 18,
+          "Strength": 14,
+          "Defence": 8,
+          "Magic": 3,
+          "Vitality": 19,
+          "Stamina": 16,
           "Charisma": 0
         }
       }

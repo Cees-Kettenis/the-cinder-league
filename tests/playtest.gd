@@ -33,6 +33,7 @@ func _run() -> void:
 	_check_fast_melee_rival(data)
 	_check_legacy_lunge(data)
 	_check_strength_damage(data)
+	_check_vitality_health(data)
 	_check_attack_styles(data)
 	_check_first_blood(data)
 	_check_arena_view(data)
@@ -44,9 +45,8 @@ func _run() -> void:
 	_check_fatality_variants(data)
 	_check_spell_damage(data)
 	_check_yield_bout(data)
-	_check_spell_charges(data)
-	_check_spell_cast_progression(data)
-	_check_reserve_spell(data)
+	_check_prepared_magic(data)
+	_check_previous_save_version(data)
 	_check_saved_bout(data)
 	_check_legacy_bout_replay(data)
 	_check_scouting(data)
@@ -56,9 +56,11 @@ func _run() -> void:
 	_check_saved_spell_faceoff(data)
 	_check_shop_requirements()
 	_check_equipped_shop_selection()
+	_check_equipment_shop_controls()
 	_check_game_buttons()
 	_check_regular_loss_navigation()
 	_check_tournament_navigation()
+	_check_tournament_practice()
 	_check_music_cues()
 	_check_display_settings()
 	_check_control_settings()
@@ -353,6 +355,21 @@ func _check_strength_damage(data: RefCounted) -> void:
 	fighter.stats.Strength = 40
 	_check(is_equal_approx(Duel.strike_damage(legacy_rules, fighter, false), base + 40 * normal_rate),
 		"Saved duel rules without the Strength threshold should preserve the original damage")
+
+func _check_vitality_health(data: RefCounted) -> void:
+	var stats: Dictionary = data.stats_empty()
+	stats.Strength = 136
+	stats.Vitality = 24
+	var rules: Dictionary = data.rules
+	var full_health := int(rules.base_health + 24 * rules.health_per_vitality)
+	_check(data.fighter("Gladiator", stats, {}).max_hp == full_health,
+		"Vitality at 15% of an endgame point budget should give full max health")
+	stats.Strength = 72
+	stats.Vitality = 88
+	var specialist: Dictionary = data.fighter("Gladiator", stats, {})
+	_check(specialist.max_hp == int(full_health + 64 * rules.health_per_excess_vitality)
+		and specialist.hp == specialist.max_hp,
+		"Excess Vitality should still add max health at the lower rate")
 
 func _check_attack_styles(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
@@ -762,6 +779,8 @@ func _check_yield_bout(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
 	stats.Magic = 80
 	var mage: Dictionary = data.fighter("Mage", stats, {"spell": "lightning"})
+	mage.spell = mage.spell.duplicate()
+	mage.spell.damage = 55 # Isolate the ranged yield rule from balance changes.
 	var rival: Dictionary = data.fighter("Rival", data.stats_empty(), {})
 	rival.hp = 50
 	rival.max_hp = 50
@@ -785,100 +804,158 @@ func _check_yield_bout(data: RefCounted) -> void:
 	_check(death_match.act("cast").health[1] == 0 and death_match.winner == 0,
 		"A fatal ranged hit should still be possible in a death match")
 
-func _check_spell_charges(data: RefCounted) -> void:
+func _check_prepared_magic(data: RefCounted) -> void:
 	var stats: Dictionary = data.stats_empty()
-	var caster: Dictionary = data.fighter("Caster", stats, {"spell": "fireball"})
-	var enemy: Dictionary = data.fighter("Gladiator", stats, {})
+	stats.Magic = 16
+	stats.Vitality = 8
+	var run := Campaign.new(data)
+	var slot := int(Time.get_unix_time_from_system() * 1000000)
+	run.create(slot, "Caster", 0, 0, stats)
+	run.state.level = 13
+	run.state.gold = 500
+	var fireball: Dictionary = data.items.fireball
+	var shield: Dictionary = data.items.magic_shield
+	_check(data.spell_slots(0) == 2 and data.spell_slots(9) == 2 and data.spell_slots(10) == 3
+		and data.spell_slots(20) == 4, "Prepared capacity should increase only at ten-point Magic thresholds")
+	_check(run.purchase(fireball).is_empty() and run.purchase(shield).is_empty(), "Spells should be bought directly into free slots")
+	var gold := int(run.state.gold)
+	run.purchase(fireball, 2)
+	_check(run.state.loadout.spells == ["fireball", "magic_shield"] and run.state.gold == gold, "Preparing a duplicate must not charge gold or waste a slot")
+	run.purchase(data.items.push, 0)
+	_check(run.state.loadout.spells[0] == "push" and run.state.gold == gold - int(data.items.push.price), "A paid swap should replace just the selected slot")
+	run.clear_spell(0)
+	gold = int(run.state.gold)
+	run.purchase(fireball, 0)
+	_check(run.state.gold == gold - int(fireball.price), "Buying a previously replaced spell should charge again")
+	run.purchase(data.items.potion)
+	run.purchase(data.items.armor_potion)
+	_check(run.state.loadout.draught == "armor_potion" and run.state.loadout.spells.size() == 2, "A potion should occupy its own single pouch")
+	var snapshot := run.start_bout(false, 42)
+	var saved := run.open_bout(snapshot) as Duel
+	var ward_action := Duel.slot_action(1)
+	var ward := saved.act(ward_action)
+	run.record_turn(ward_action, -2)
+	var reopened := Campaign.new(data)
+	_check(reopened.resume(slot), "The new-format save should reopen mid-bout")
+	var resumed := reopened.open_bout(reopened.state.snapshot) as Duel
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(run.path(slot)))
+	_check(resumed != null and ward.get("utility") == "shield" and resumed.history.size() == 1
+		and resumed.history[0].action == ward_action and resumed.history[0].positions == ward.positions
+		and int(resumed.history[0].energy[0]) == int(ward.energy[0])
+		and Duel.spell_charges(resumed.fighters[0], ward_action) == 0
+		and resumed.fighters[0].magic_shield == shield.power, "A recorded slot cast should replay its exact ward and charge")
+
+	var enemy: Dictionary = data.fighter("Rival", data.stats_empty(), {"weapon": "sword"})
+	var kit := {"weapon": "sword", "armor": {}, "spells": ["magic_shield", "push", "pull"], "draught": "armor_potion"}
+	var caster: Dictionary = data.fighter("Caster", stats, kit)
+	caster.max_armor = 41
+	caster.armor = 41
 	var rules: Dictionary = data.rules.duplicate()
-	rules.minimum_hit = 0.0
-	rules.spell_hit = 0.0
-	var duel := Duel.new(data, caster, enemy, 42, 4, {"rules": rules})
-	_check(caster.casts == 2 and data.items.lightning.uses == 2 and data.items.arc.uses == 2,
-		"Starter and heavy spells should both have two base casts")
-	for remaining in [1, 0]:
-		var event := duel.act("cast")
-		_check(event.get("miss", false) and duel.fighters[0].casts == remaining, "A cast should spend a charge even if it misses")
-		duel.act("guard")
-	duel.act("sleep")
-	duel.act("guard")
-	_check(duel.reason("cast") == "Spell uses spent" and not duel.act("cast").valid, "Sleeping must not restore used casts")
-	var fresh := Duel.new(data, caster, enemy, 42, 4)
-	_check(fresh.fighters[0].casts == 2, "Spell charges should reset for a new fight")
+	rules.minimum_hit = 1.0
+	rules.maximum_hit = 1.0
+	rules.regen_per_vitality = 0.0
+	var duel := Duel.new(data, caster, enemy, 42, 1, {"rules": rules, "regular_bout": true})
+	var plain := Duel.new(data, caster, enemy, 42, 1, {"rules": rules, "regular_bout": true})
+	duel.act(Duel.slot_action(0))
+	plain.act("guard")
+	plain.fighters[0].guarding = false
+	var strike := duel.act("attack")
+	var reference := plain.act("attack")
+	_check(strike.get("shield_absorbed", 0) > 0 and strike.armor_hit == reference.armor_hit - strike.shield_absorbed
+		and duel.fighters[0].magic_shield == 0, "A ward should absorb the next hit before armor and then expire")
+	duel.fighters[0].armor = 23
+	var potion := duel.act("potion")
+	_check(potion.valid and potion.armor[0] == 36 and duel.fighters[0].potions == 0, "An Armor Potion should restore 30 percent of starting armor rounded up in a regular bout")
+	var naked := Duel.new(data, data.fighter("Caster", stats, kit), enemy, 42)
+	_check(not naked.act("potion").valid and naked.fighters[0].potions == 1, "A fighter without armor should keep an unusable Armor Potion")
+	var health: Dictionary = caster.duplicate(true)
+	health.draught = "potion"
+	var health_duel := Duel.new(data, health, enemy, 42, 1, {"rules": rules})
+	health_duel.fighters[0].hp -= 4
+	_check(health_duel.act("potion").health[0] == health.max_hp and Duel.potion_amount(rules, health) == 16,
+		"A Health Potion should scale with Vitality and stop at max health")
 
-	var campaign := Campaign.new(data)
-	campaign.create(0, "Gladiator", 0, 0, stats)
-	campaign.scout_bout(false, 42)
-	var rival: Dictionary = campaign.state.scouted_bout.rival
-	rival.loadout.spell = "fireball"
-	rival.spell = data.items.fireball.duplicate()
-	rival.spell.uses = 5
-	rival.casts = 5
-	var snapshot := campaign.start_bout(false, 42)
-	_check(snapshot.fighters[1].name == rival.name and snapshot.fighters[1].casts == 2,
-		"A previously scouted rival should keep their identity and start with the current spell charges")
-	snapshot.fighters[1].spell = rival.spell
-	snapshot.fighters[1].casts = 5
-	_check(campaign.open_bout(snapshot).fighters[1].casts == 5, "A saved fight should preserve its original spell charges")
+	var movement := Duel.new(data, caster, enemy, 42, 2)
+	var push := Duel.slot_action(1)
+	var pull := Duel.slot_action(2)
+	for side in [0, 1]:
+		var pair := [caster, enemy] if side == 0 else [enemy, caster]
+		for gap in [1, 3, int(data.items.push.reach)]:
+			var pushed_at_range := Duel.new(data, pair[0], pair[1], 42, gap)
+			pushed_at_range.active = side
+			var start := pushed_at_range.positions[side]
+			_check(pushed_at_range.act(push).valid and pushed_at_range.distance() == gap * 2
+				and pushed_at_range.positions[side] == start, "Push should double the gap on either side")
+		var pulled_at_range := Duel.new(data, pair[0], pair[1], 42, int(data.items.pull.reach))
+		pulled_at_range.active = side
+		var start := pulled_at_range.positions[side]
+		_check(pulled_at_range.act(pull).valid and pulled_at_range.distance() == 1
+			and pulled_at_range.positions[side] == start, "Pull should bring the rival directly in front at maximum range")
+		var edge := int(data.rules.arena_size)
+		var near_edge := Duel.new(data, pair[0], pair[1], 42, 2)
+		near_edge.active = side
+		near_edge.positions.assign([edge - 3, edge - 1] if side == 0 else [1, 3])
+		var capped := near_edge.act(push)
+		_check(capped.valid and near_edge.positions[1 - side] == (edge if side == 0 else 0)
+			and not capped.get("ring_out", false), "Push should stop at either edge without causing a ring-out")
+	movement.positions = [int(data.rules.arena_size) - 3, int(data.rules.arena_size) - 1]
+	var pushed := movement.act(push)
+	_check(pushed.get("utility") == "push" and movement.positions[1] == data.rules.arena_size,
+		"Push should stop at the edge, even next to the pit")
+	movement.act("guard")
+	var pulled := movement.act(pull)
+	_check(pulled.get("utility") == "pull" and movement.distance() == 1, "Pull should stop at adjacent")
+	var adjacent := Duel.new(data, caster, enemy, 42, 1)
+	_check(not adjacent.act(pull).valid and Duel.spell_charges(adjacent.fighters[0], pull) == 1,
+		"An impossible pull should spend neither the turn nor the prepared slot")
+	var far := Duel.new(data, caster, enemy, 42, int(data.items.pull.reach) + 1)
+	_check(not far.act(pull).valid and not far.act(push).valid and far.turn == 0,
+		"Neither movement spell should spend a turn outside its casting range")
+	var legacy_rules := rules.duplicate()
+	legacy_rules.erase("distance_based_spell_movement")
+	var legacy := Duel.new(data, caster, enemy, 42, 5, {"rules": legacy_rules})
+	_check(legacy.restore_history([push]) and legacy.distance() == 7,
+		"An unfinished bout without the new rule should replay its original two-space Push")
+	var legacy_pull := Duel.new(data, caster, enemy, 42, 5, {"rules": legacy_rules})
+	_check(legacy_pull.restore_history([pull]) and legacy_pull.distance() == 3,
+		"An unfinished bout without the new rule should replay its original two-space Pull")
 
-func _check_spell_cast_progression(data: RefCounted) -> void:
-	var step := int(data.rules.magic_per_extra_cast)
-	var storm: Dictionary = data.items.storm
-	_check(data.spell_casts(storm, step - 1) == 2 and data.spell_casts(storm, step) == 3
-		and data.spell_casts(storm, step * 2 - 1) == 3 and data.spell_casts(storm, step * 2) == 4,
-		"Every ten Magic should award one more cast")
-	_check(data.spell_casts({}, step * 3) == 0, "Magic should not grant casts without an equipped spell")
-	var campaign := Campaign.new(data)
-	var stats: Dictionary = data.stats_empty()
-	stats.Magic = step * 3
-	campaign.create(0, "Mage", 0, 0, stats)
-	campaign.state.level = int(data.rules.arena_caps.front())
-	campaign.state.loadout.spell = "storm"
-	var regular := campaign.start_bout(false, 42)
-	_check(regular.fighters[0].casts == 5, "A 30 Magic caster should get three bonus casts in regular bouts")
-	campaign.settle(0)
-	campaign.scout_bout(true, 42)
-	var rival: Dictionary = campaign.state.scouted_tournament.rival
-	rival.stats.Magic = step * 3
-	rival.loadout.spell = "storm"
-	rival.spell = storm
-	rival.casts = 1
-	_check(campaign.scouted_bout(true).rival.casts == 5, "A scouted rival should gain the same bonus casts")
-	var snapshot := campaign.start_bout(true, 42)
-	var tournament: RefCounted = campaign.open_bout(snapshot)
-	_check(tournament.fighters[0].casts == 5 and tournament.fighters[1].casts == 5,
-		"Death matches should start with the same bonus casts as regular bouts")
-	campaign.record_turn("cast", -2)
-	var resumed: RefCounted = campaign.open_bout(snapshot)
-	_check(resumed.fighters[0].casts == 4, "Replaying a saved death match should spend the recorded cast only once")
+	var etching: Dictionary = data.items.ember_etching
+	var enchanted: Dictionary = data.fighter("Enchanter", stats, {"weapon": "sword", "spells": ["ember_etching"]})
+	var training: Dictionary = enemy.duplicate(true)
+	training.max_hp = 999
+	training.hp = 999
+	var weapon := Duel.new(data, enchanted, training, 42, 1, {"rules": rules})
+	_check(weapon.act(Duel.slot_action(0)).get("utility") == "enchant" and weapon.fighters[0].enchant_damage == etching.power,
+		"Ember Etching should grant its starting bonus when cast")
+	var ranks := {"stats": {"Magic": int(etching.minimum) + 20}}
+	_check(Duel.enchant_bonus(etching, ranks) == etching.power + 2, "Ember Etching should improve across three ranks")
+	for remaining in [2, 1, 0]:
+		weapon.act("guard")
+		var hit := weapon.act("quick")
+		_check(hit.get("enchant_used", false) and weapon.fighters[0].enchant_hits == remaining, "A weapon hit should spend one enchantment hit")
+	_check(weapon.fighters[0].enchant_damage == 0, "The enchantment bonus should expire after the third weapon hit")
+	var miss_rules := rules.duplicate()
+	miss_rules.minimum_hit = 0.0
+	miss_rules.maximum_hit = 0.0
+	var fire: Dictionary = data.fighter("Caster", stats, {"spells": ["fireball"]})
+	var miss := Duel.new(data, fire, enemy, 42, 3, {"rules": miss_rules})
+	_check(miss.act(Duel.slot_action(0)).miss and Duel.spell_charges(miss.fighters[0], Duel.slot_action(0)) == 0,
+		"A missed damage cast should still spend its slot")
+	var fresh := Duel.new(data, fire, enemy, 42, 3)
+	_check(Duel.spell_charges(fresh.fighters[0], Duel.slot_action(0)) == 1, "A new fight should refresh all prepared slots")
 
-func _check_reserve_spell(data: RefCounted) -> void:
-	var campaign := Campaign.new(data)
-	var stats: Dictionary = data.stats_empty()
-	var threshold := int(data.rules.reserve_spell_magic)
-	stats.Magic = threshold - 1
-	campaign.create(0, "Spell specialist", 0, 0, stats)
-	campaign.state.level = int(data.rules.arena_caps.front())
-	campaign.state.gold = 100
-	_check(campaign.purchase(data.items.fireball).is_empty(), "The main spell should equip normally")
-	_check(not campaign.purchase(data.items.storm, true).is_empty(), "Reserve spells should require the Magic threshold")
-	campaign.state.stats.Magic = threshold
-	_check(not campaign.purchase(data.items.fireball, true).is_empty(), "The same spell should not occupy both slots")
-	_check(campaign.purchase(data.items.storm, true).is_empty(), "A specialist should be able to buy a distinct reserve spell")
-	var regular := campaign.start_bout(false, 42)
-	_check(regular.fighters[0].reserve_casts == 1 and regular.fighters[0].casts == 4,
-		"Regular bouts should transfer one bonus cast to the reserve spell")
-	campaign.settle(0)
-	var snapshot := campaign.start_bout(true, 42)
-	var duel: RefCounted = campaign.open_bout(snapshot)
-	_check(duel.fighters[0].casts == 4 and duel.fighters[0].reserve_casts == 1
-		and snapshot.equipment.has("storm"), "A reserve spell should have the same one cast in death matches")
-	var cast: Dictionary = duel.act("cast_reserve")
-	_check(cast.get("title") == data.items.storm.name and cast.get("spell_art") == int(data.items.storm.art)
-		and cast.get("energy_cost") == int(data.items.storm.energy), "The reserve spell should use its own effect and cost")
-	campaign.record_turn("cast_reserve", -2)
-	var resumed: RefCounted = campaign.open_bout(snapshot)
-	_check(resumed.fighters[0].reserve_casts == 0 and resumed.fighters[0].casts == 4,
-		"Resuming a saved reserve cast should preserve the main spell's charges")
+func _check_previous_save_version(data: RefCounted) -> void:
+	var run := Campaign.new(data)
+	var slot := int(Time.get_unix_time_from_system() * 1000000)
+	run.create(slot, "Earlier alpha", 0, 0, data.stats_empty())
+	run.state.version = Campaign.SAVE_VERSION - 1
+	run.save()
+	var revision := run.slot_revision(slot)
+	var next := Campaign.new(data)
+	_check(next.read_slot(slot).get("incompatible", false) and not next.resume(slot)
+		and next.slot_revision(slot) == revision, "An earlier alpha save should be flagged without rewriting it")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(run.path(slot)))
 
 func _check_saved_bout(data: RefCounted) -> void:
 	var campaign := Campaign.new(data)
@@ -1035,7 +1112,7 @@ func _check_scouting(data: RefCounted) -> void:
 			"Only the Crucible champion should open the Bastion")
 	var crucible_champion: Dictionary = data.generate_opponent(12, 2, 20, glass_rounds - 1)
 	_check(crucible_champion == data.generate_opponent(12, 2, 99, glass_rounds - 1)
-		and not crucible_champion.spell.is_empty(), "The mage champion should have a fixed build and a spell")
+		and not Duel.spell_actions(crucible_champion).is_empty(), "The mage champion should have a fixed build and a spell")
 	_check(campaign.state.pending and campaign.state.xp >= data.rules.xp_levels[12], "The Bastion should grant level 13 eligibility")
 	campaign.state.level = 16
 	campaign.state.xp = data.rules.xp_levels[15]
@@ -1058,6 +1135,8 @@ func _check_previous_arena_completion(data: RefCounted) -> void:
 	legacy.rules.arena_caps = legacy.rules.arena_caps.slice(0, 2)
 	legacy.rules.xp_levels = legacy.rules.xp_levels.slice(0, 8)
 	legacy.rules.xp_levels[7] = 410
+	legacy.rules.erase("health_vitality_point_fraction")
+	legacy.rules.erase("health_per_excess_vitality")
 	legacy.items = legacy.items.filter(func(item: Dictionary) -> bool: return item.level <= 8)
 	var path := "user://legacy-iron-profile.json"
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -1068,8 +1147,10 @@ func _check_previous_arena_completion(data: RefCounted) -> void:
 	var extended := Data.new()
 	_check(extended.load_profile(path).is_empty() and extended.max_level() == 16
 		and extended.rules.xp_levels[7] == 410 and extended.rules.xp_levels[8] > 410
+		and extended.rules.health_vitality_point_fraction == 1.0
+		and extended.rules.health_per_excess_vitality == legacy.rules.health_per_vitality
 		and extended.items.has("pocket_anvil") and extended.items.has("sunseal"),
-		"Earlier balance profiles should keep custom thresholds and gain the new arena and stock")
+		"Earlier balance profiles should keep their XP thresholds and health scaling and gain the new arena and stock")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	var campaign := Campaign.new(data)
 	campaign.create(0, "Iron winner", 0, 0, data.build_stats("weapon", 80))
@@ -1101,7 +1182,7 @@ func _check_previous_arena_completion(data: RefCounted) -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(campaign.path(2)))
 
 func _check_defeats(data: RefCounted) -> void:
-	var campaign := Campaign.new(data)
+	var campaign := Campaign.new(data, false)
 	var stats: Dictionary = data.build_stats("weapon", 10)
 	campaign.create(0, "Gladiator", 0, 0, stats)
 	campaign.state.gold = 3
@@ -1159,7 +1240,7 @@ func _check_saved_spell_faceoff(data: RefCounted) -> void:
 		return
 	_check(save.purchase(data.items.fireball).is_empty(), "The caster should equip a spell")
 	var offer := save.scout_bout(false, 42)
-	_check(offer.rival.spell.is_empty(), "The face-off fixture should have a rival without a spell")
+	_check(Duel.spell_actions(offer.rival).is_empty(), "The face-off fixture should have a rival without a spell")
 	var ui = Game.instantiate()
 	root.add_child(ui)
 	ui.sound.enabled = false
@@ -1169,7 +1250,8 @@ func _check_saved_spell_faceoff(data: RefCounted) -> void:
 	var fight := _find_button(ui, "Fight")
 	if _check(fight != null, "A reloaded caster should be able to open a face-off against a rival without a spell"):
 		fight.pressed.emit()
-		_check(ui.current_screen == "battle" and ui.fight.bout.fighters[0].spell.id == "fireball",
+		_check(ui.current_screen == "battle" and Duel.spell_for_action(ui.fight.bout.fighters[0], Duel.slot_action(0)).get("id") == "fireball"
+			and ui.fight.hud.pack.visible and ui.fight.hud.charges[Duel.slot_action(0)].text == "1",
 			"Starting the reloaded bout should keep the player's equipped spell")
 	ui.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(save.path(number)))
@@ -1188,18 +1270,20 @@ func _check_shop_requirements() -> void:
 		ui.shop_entries.warden_sword.pressed.emit()
 		var shown := {}
 		for label in ui.shop_requirements.find_children("*", "Label", true, false):
-			shown[label.text] = label.accessibility_name.get_slice(". ", 3)
+			shown[label.text] = label.accessibility_name
 		var level_met: bool = entry[0] == 8
 		var strength_met: bool = entry[1] == 11
-		_check(ui.shop_requirements.visible and shown.get("Level %d / 8" % entry[0]) == ("Met" if level_met else "Locked")
-			and shown.get("Strength %d / 11" % entry[1]) == ("Met" if strength_met else "Locked"),
-			"The Warden blade should show current and required stats with each requirement's status")
+		var level_label := "Level 8" if level_met else "Level 5 / 8"
+		var strength_label := "Strength 11" if strength_met else "Strength 5 / 11"
+		_check(ui.shop_requirements.visible and shown.get(level_label) == "Level. You have %d. Requires 8. %s" % [entry[0], "Met" if level_met else "Locked"]
+			and shown.get(strength_label) == "Strength. You have %d. Requires 11. %s" % [entry[1], "Met" if strength_met else "Locked"],
+			"The Warden blade should shorten met requirements and show both values for unmet requirements")
 		var can_buy := level_met and strength_met
-		_check(ui.shop_buy.text == ("Buy" if can_buy else "Locked") and ui.shop_buy.disabled != can_buy,
+		_check(ui.shop_buy.accessibility_name.begins_with("Buy & equip" if can_buy else "Locked") and ui.shop_buy.disabled != can_buy,
 			"The Buy button should unlock when both requirements are met")
 	ui.game.state.gold = warden_price - 1
 	ui._preview_item("warden_sword")
-	_check(ui.shop_buy.disabled and ui.shop_buy.text == "Not enough gold", "The shop should explain affordability separately")
+	_check(ui.shop_buy.disabled and ui.spell_slot_notice.text == "Not enough gold", "The shop should explain affordability separately")
 	ui.shop_entries.sword.pressed.emit()
 	_check(not ui.shop_requirements.visible and not ui.shop_buy.disabled, "The starter sword should hide the requirements row")
 	ui.queue_free()
@@ -1215,16 +1299,18 @@ func _check_equipped_shop_selection() -> void:
 	ui._enter_shop("weapon")
 	var sword: Button = ui.shop_entries.sword
 	var highlight: StyleBoxFlat = sword.get_theme_stylebox("normal")
-	_check(ui.selected_item == "sword" and highlight.border_color == ui.SAND and ui.shop_buy.disabled,
+	_check(ui.selected_item == "sword" and highlight.border_color == ui.shop_view.GOLD and ui.shop_buy.disabled,
 		"The Weaponsmith should open with the equipped weapon highlighted")
 	ui.shop_entries.mace.pressed.emit()
 	_check(ui.selected_item == "mace" and sword.accessibility_description == "Equipped"
-		and sword.get_children().any(func(child: Node) -> bool: return child is Label and child.text == "Equipped"),
+		and sword.find_children("*", "Label", true, false).any(func(label: Label) -> bool: return label.text == "Equipped"),
 		"Browsing weapons should keep the equipped weapon marked")
+	_check(_find_button(ui.shop_view.kit, "Short sword") != null and ui.shop_stage.left_loadout.weapon == "mace",
+		"The Weaponsmith should keep the equipped weapon in the comparison panel when trying another weapon")
 	ui.shop_entries.dagger.pressed.emit()
-	ui.shop_buy.pressed.emit()
+	_press_key(KEY_P)
 	_check(ui.selected_item == "dagger" and ui.shop_entries.dagger.accessibility_description == "Equipped"
-		and ui.shop_entries.sword.accessibility_description.is_empty(),
+		and ui.shop_entries.sword.accessibility_description.is_empty() and _find_button(ui.shop_view.kit, "Dagger") != null,
 		"Equipping another weapon should move the equipped marker")
 
 	ui._enter_shop("armor")
@@ -1237,6 +1323,93 @@ func _check_equipped_shop_selection() -> void:
 	_check(ui.selected_item == "leather_helmet" and ui.shop_entries.leather_helmet.accessibility_description.is_empty(),
 		"An empty armor slot should show the first item without an equipped marker")
 	ui.queue_free()
+
+func _check_equipment_shop_controls() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.sound.enabled = false
+	ui.game.create(0, "Shop test", 0, 0, ui.data.build_stats("weapon", 10))
+	ui.game.state.level = 16
+	ui.game.state.gold = 300
+	ui.game.state.stats.Magic = 17
+	ui.show_town()
+	_press_key(KEY_A)
+	_press_key(KEY_4)
+	_check(ui.current_screen == "shop" and ui.armor_slot == "shoes" and ui.shop_entries.has("leather_shoes"),
+		"Town and armor category shortcuts should open the requested stock")
+	_press_key(KEY_C)
+	_check(ui.current_screen == "character" and ui.find_children("*", "Label", true, false).any(
+		func(label: Label) -> bool: return label.text == "Shop test"), "Character should show the current gladiator")
+	_press_escape()
+	_check(ui.current_screen == "shop" and ui.shop_type == "armor" and ui.armor_slot == "shoes",
+		"Closing Character should return to the same armor category")
+	_press_key(KEY_M)
+	_press_key(KEY_2)
+	_check(ui.magic_category == "Utility" and ui.shop_entries.has("magic_shield"),
+		"Magic should use its own numbered tabs")
+	ui.shop_entries.magic_shield.pressed.emit()
+	var preview: Control = ui.shop_stage
+	_check(preview._spell_preview_casting(), "Selecting a spell should start its preview automatically")
+	preview._process(4.99)
+	_check(not preview._spell_preview_casting(), "The preview should rest before the next cast")
+	preview._process(.02)
+	_check(preview._spell_preview_casting() and is_equal_approx(preview.elapsed, .01),
+		"The preview should cast again five seconds after the first cast started")
+	_press_key(KEY_P)
+	_check(ui._spell_at(0) == "magic_shield", "Buying a spell should use the first open slot")
+	var slot_tile: Button = ui.shop_view.kit.get_child(0)
+	var slot_labels: Array[Node] = slot_tile.find_children("*", "Label", true, false)
+	_check(slot_tile.accessibility_name == "Slot 1, Magic Shield" and slot_labels.size() == 2
+		and slot_labels[0].text == "1" and slot_labels[1].text == "Magic Shield",
+		"A prepared spell tile should show its number and name without repeating its stats")
+	ui._select_spell_slot(2)
+	_press_key(KEY_1)
+	ui.shop_entries.fireball.pressed.emit()
+	_check(ui.shop_spell_slot == 2, "A chosen empty spell slot should stay selected while browsing")
+	ui._select_spell_slot(0)
+	var gold: int = ui.game.state.gold
+	_press_key(KEY_P)
+	_check(ui.spell_checkout == ui.SpellCheckout.PICK_SLOT and ui.game.state.gold == gold and ui._spell_at(0) == "magic_shield",
+		"An occupied spell slot should open the loadout picker before spending gold")
+	_press_key(KEY_DOWN)
+	_check(ui.spell_checkout_slot == 1 and _find_button(ui.shop_view.kit_footer, "Prepare") != null,
+		"The picker should offer a free slot as an alternative to replacement")
+	_press_escape()
+	_check(ui.spell_checkout == ui.SpellCheckout.CLOSED and ui.current_screen == "shop" and ui.selected_item == "fireball"
+		and ui._spell_at(0) == "magic_shield" and ui.game.state.gold == gold, "Back should cancel checkout and keep the current shop selection")
+	_press_key(KEY_P)
+	_press_key(KEY_DOWN)
+	_press_key(KEY_P)
+	_check(ui._spell_at(0) == "magic_shield" and ui._spell_at(1) == "fireball"
+		and ui.game.state.gold == gold - int(ui.data.items.fireball.price), "Preparing in the alternative slot should preserve other spells")
+
+	_check(ui.game.purchase(ui.data.items.push, 2).is_empty(), "The replacement fixture should fill the remaining slot")
+	ui.show_shop()
+	ui.shop_entries.pocket_anvil.pressed.emit()
+	gold = int(ui.game.state.gold)
+	_press_key(KEY_P)
+	_press_key(KEY_DOWN)
+	_press_key(KEY_DOWN)
+	_press_key(KEY_UP)
+	_check(ui.spell_checkout_slot == 1 and _find_button(ui.shop_view.kit_footer, "Replace") != null,
+		"Both arrows should move the replacement target within the prepared loadout")
+	_press_key(KEY_P)
+	_check(ui._spell_at(0) == "magic_shield" and ui._spell_at(1) == "pocket_anvil" and ui._spell_at(2) == "push"
+		and ui.game.state.gold == gold - int(ui.data.items.pocket_anvil.price), "Confirming should replace only the highlighted spell and charge once")
+	_press_key(KEY_DELETE)
+	_check(ui.spell_checkout == ui.SpellCheckout.CLEAR and ui._spell_at(1) == "pocket_anvil",
+		"Clearing a prepared spell should wait for in-panel confirmation")
+	_find_button(ui.shop_view.kit_footer, "Cancel").pressed.emit()
+	_check(ui.spell_checkout == ui.SpellCheckout.CLOSED and ui._spell_at(1) == "pocket_anvil", "Cancel should preserve the prepared spell")
+	_press_key(KEY_DELETE)
+	_press_key(KEY_P)
+	_check(ui._spell_at(1).is_empty(), "Confirming Clear slot should remove the prepared spell")
+	_press_key(KEY_3)
+	ui.shop_entries.armor_potion.pressed.emit()
+	_press_key(KEY_P)
+	_check(ui.game.state.loadout.draught == "armor_potion" and ui._spell_at(1).is_empty(),
+		"Potions should equip in the pouch without taking a spell slot")
+	ui.free()
 
 func _check_game_buttons() -> void:
 	var ui = Game.instantiate()
@@ -1254,25 +1427,28 @@ func _check_game_buttons() -> void:
 	_find_button(ui, "Iron mace").pressed.emit()
 	_check(ui.shop_stage.left_loadout.weapon == "mace" and ui.game.state.loadout.weapon == ui.data.rules.starter_weapon,
 		"The locked mace should appear in the preview without changing the equipped weapon")
-	_check(ui.shop_buy.disabled and ui.shop_buy.text == "Locked" and ui.shop_requirements.visible,
+	_check(ui.shop_buy.disabled and ui.shop_buy.accessibility_name.begins_with("Locked") and ui.shop_requirements.visible,
 		"The mace's unlock requirement should be visible")
 	_press_escape()
 	_check(ui.current_screen == "town", "Escape should return from a shop to town")
 	_press_escape()
 	if _check(is_instance_valid(ui.settings_popup), "Escape in town should open the pause menu"):
-		_check(_find_button(ui.settings_popup, "Settings") != null and _find_button(ui.settings_popup, "Audio") != null
-			and _find_button(ui.settings_popup, "Quit") != null, "Pause should offer settings, audio, and quit")
+		_check(_find_button(ui.settings_popup, "Settings") != null and _find_button(ui.settings_popup, "Audio") == null
+			and _find_button(ui.settings_popup, "Quit") != null, "Pause should offer Settings and Quit, with Audio inside Settings")
 		_find_button(ui.settings_popup, "Resume").pressed.emit()
 	ui.game.state.xp = int(ui.data.rules.xp_levels[1]) - 1
 	ui.show_arena()
-	_find_button(ui, "Scout rival").pressed.emit()
+	_press_key(KEY_U)
+	_check(ui.current_screen == "arena" and ui.game.scouted_bout(true).is_empty(),
+		"The tournament shortcut should respect the level requirement")
+	_press_key(KEY_R)
 	_check(ui.current_screen == "scout" and not ui.game.has_active_bout(), "Scouting should open the face-off before combat")
 	var offer: Dictionary = ui.game.scouted_bout().duplicate(true)
 	_find_button(ui, "Back").pressed.emit()
 	_check(ui.current_screen == "arena", "Players should be able to leave the face-off")
 	_find_button(ui, offer.rival.name).pressed.emit()
 	_check(ui.game.scouted_bout() == offer, "Reopening the face-off should keep its opponent")
-	_find_button(ui, "Fight").pressed.emit()
+	_press_key(KEY_F)
 	_check(ui.current_screen == "battle" and not ui.shell.visible and _find_button(ui, "Leave bout") == null,
 		"Combat must occupy the game view and offer no way back during the bout")
 	_press_escape()
@@ -1290,13 +1466,6 @@ func _check_game_buttons() -> void:
 	_check(ui.fight.hud.action_buttons.jump_back.accessibility_description.contains("3 spaces away") and not ui.fight.hud.action_buttons.jump_back.disabled,
 		"The backward leap should be available at the starting position")
 	var player: Dictionary = ui.fight.bout.fighters[0]
-	player.spell = ui.data.items.fireball
-	player.casts = 2
-	player.potions = 1
-	player.loadout.potion = true
-	ui.fight.refresh()
-	_check(ui.fight.hud.pack.visible and ui.fight.hud.charges.cast.text == "2" and ui.fight.hud.charges.potion.text == "1",
-		"Equipped spells and potions should appear in the Pack with use counts")
 	var rival_start: int = ui.fight.bout.positions[1]
 	var original_stamina := int(player.stats.Stamina)
 	player.stats.Stamina = 10
@@ -1407,7 +1576,7 @@ func _check_tournament_navigation() -> void:
 	ui.game.state.level = 4
 	ui.game.state.xp = ui.data.rules.xp_levels[3]
 	ui.show_arena()
-	_find_button(ui, "Scout tournament rival").pressed.emit()
+	_press_key(KEY_U)
 	_check(_find_button(ui, "Back") != null and not ui.game.tournament_in_progress(), "Scouting should leave the first tournament optional")
 	_find_button(ui, "Fight to the death").pressed.emit()
 	_check(ui.current_screen == "battle" and ui.game.tournament_in_progress(), "Entering the first round should lock the tournament")
@@ -1423,6 +1592,14 @@ func _check_tournament_navigation() -> void:
 	_check(ui.current_screen == "scout" and _find_button(ui, "Back") == null and _find_button(ui, "Title screen") == null,
 		"Next Match should open a locked face-off")
 	var next_offer: Dictionary = ui.game.scouted_bout(true)
+	_press_key(KEY_C)
+	_check(ui.current_screen == "character" and _find_button(ui, "Title screen") == null,
+		"The shared header should offer read-only character access during a tournament")
+	_press_key(KEY_A)
+	_check(ui.current_screen == "character", "A locked character sheet should block shop navigation")
+	_press_escape()
+	_check(ui.current_screen == "scout" and ui.game.scouted_bout(true) == next_offer,
+		"Leaving Character should return to the same locked face-off")
 	ui._resume(3)
 	var restored_offer: Dictionary = ui.game.scouted_bout(true)
 	_check(ui.current_screen == "scout" and not restored_offer.is_empty()
@@ -1436,6 +1613,36 @@ func _check_tournament_navigation() -> void:
 	ui.fight.finished.emit(outcome)
 	_check(not ui.game.tournament_in_progress() and _find_button(ui.fight, "Spend level-up points") != null,
 		"Beating the champion should release the lock and offer the required level-up")
+	ui.free()
+
+func _check_tournament_practice() -> void:
+	var ui = Game.instantiate()
+	root.add_child(ui)
+	ui.game.create(0, "Practice contender", 0, 0, ui.data.build_stats("weapon", 40))
+	ui.game.state.level = 4
+	ui.game.state.xp = ui.data.rules.xp_levels[3]
+	var snapshot: Dictionary = ui.game.start_bout(true, 42)
+	var gold: int = ui.game.state.gold
+	ui._open_bout(snapshot)
+	_check(snapshot.rewards.lethal_defeat and not ui.fight.bout.regular_bout,
+		"Practice should keep tournament combat rules and the saved bout's original conditions")
+	ui.fight.bout.winner = 1
+	var outcome: Dictionary = ui.game.record_turn("attack", 1)
+	ui.fight.finished.emit(outcome)
+	if not OS.is_debug_build():
+		_check(outcome.fallen and not outcome.practice_defeat, "Release defeats should end the career")
+		ui.free()
+		return
+	_check(outcome.practice_defeat and not outcome.fallen and not ui.game.has_active_bout()
+		and ui.game.state.gold == gold and ui.game.state.tournament == 0,
+		"Debug defeats should automatically preserve the career, gold, and tournament round")
+	var next := _find_button(ui.fight, "Next Match")
+	if _check(next != null, "A first-round practice defeat should offer the next tournament match"):
+		next.pressed.emit()
+		var offer: Dictionary = ui.game.scouted_bout(true)
+		_check(ui.current_screen == "scout" and offer.get("round") == 0
+			and offer.get("opponent_seed") == snapshot.opponent_seed,
+			"Continuing after a practice defeat should scout the same tournament rival")
 	ui.free()
 
 func _check_fight_turn_flow() -> void:
@@ -1533,15 +1740,36 @@ func _check_control_settings() -> void:
 	var ui = Game.instantiate()
 	root.add_child(ui)
 	ui.game.create(0, "Controls test", 0, 0, ui.data.build_stats("weapon", 10))
+	var legacy := ConfigFile.new()
+	legacy.set_value("controls", "armor_helmet", KEY_1)
+	legacy.set_value("controls", "magic_damage", KEY_G)
+	legacy.set_value("controls", "armor_pants", KEY_H)
+	legacy.set_value("controls", "magic_potions", KEY_L)
+	ui._load_key_bindings(legacy)
+	_check(ui.key_bindings.shop_tab_1 == KEY_G and ui.key_bindings.shop_tab_3 == KEY_H,
+		"Shared shop tabs should keep a customized legacy key, preferring Armory if both keys were customized")
+	ui._load_key_bindings(ConfigFile.new())
 	ui.show_town()
-	ui._show_settings()
-	_find_button(ui.settings_popup, "Controls").pressed.emit()
-	var choices := {"Back": KEY_B, "Return to town": KEY_J, "Next bout or match": KEY_M}
+	ui._show_pause()
+	_find_button(ui.settings_popup, "Settings").pressed.emit()
+	_check(paused and ui.settings_shade.visible and not ui.content.can_process() and ui.settings_popup.can_process(),
+		"Settings should dim and freeze the screen while its controls stay active")
+	_check(_find_button(ui.settings_popup, "Display") != null and _find_button(ui.settings_popup, "Town music") != null,
+		"Controls should be shown alongside display and audio settings")
+	var choices := {"Back / Pause": KEY_B, "Return to town": KEY_J, "Next bout or match": KEY_M, "Tab 2 · Chest / Utility": KEY_5}
 	for caption in choices:
 		_find_button(ui.settings_popup, "Rebind " + caption).pressed.emit()
 		_press_key(choices[caption])
 	_press_key(KEY_B)
-	_check(ui.settings_popup == null, "The new Back key should close the settings popup")
+	_check(ui.settings_popup == null and not paused and not ui.settings_shade.visible,
+		"The new Back key should close Settings, lift the shade, and resume the game")
+	ui._enter_shop("armor")
+	_press_key(KEY_4)
+	_press_key(KEY_5)
+	_check(ui.armor_slot == "chest", "The shared key should select Chest in the Armory")
+	ui._enter_shop("spell")
+	_press_key(KEY_5)
+	_check(ui.magic_category == "Utility", "The shared key should select Utility in the Magic shop")
 	ui.show_arena()
 	_press_escape()
 	_check(ui.current_screen == "arena", "The old Back key should stop navigating after a rebind")
@@ -1569,11 +1797,13 @@ func _check_control_settings() -> void:
 	ui.free()
 	var reloaded = Game.instantiate()
 	root.add_child(reloaded)
-	_check(reloaded.key_bindings == {"back": KEY_B, "town": KEY_J, "next": KEY_M}, "All three bindings should survive restarting the game")
+	_check(reloaded.key_bindings.back == KEY_B and reloaded.key_bindings.town == KEY_J and reloaded.key_bindings.next == KEY_M,
+		"Changed navigation and result bindings should survive restarting the game")
+	_check(reloaded.key_bindings.shop_tab_2 == KEY_5 and reloaded.key_bindings.shop_tab_5 == KEY_2,
+		"Shared shop tabs and their swapped keys should survive restarting the game")
 	reloaded._show_settings()
-	_find_button(reloaded.settings_popup, "Controls").pressed.emit()
 	_find_button(reloaded.settings_popup, "Reset defaults").pressed.emit()
-	_check(reloaded.key_bindings == reloaded.DEFAULT_KEYS, "Reset should restore all three shortcut defaults")
+	_check(reloaded.key_bindings == reloaded.DEFAULT_KEYS, "Reset should restore every shortcut default")
 	reloaded.free()
 
 func _find_button(node: Node, caption: String) -> Button:

@@ -4,6 +4,7 @@ extends RefCounted
 const Data = preload("res://game/catalog/data.gd")
 const WEAPON_ACTIONS: Array[String] = ["quick", "attack", "power", "lunge"]
 const SPELL_ACTIONS: Array[String] = ["cast", "cast_reserve"]
+const PREPARED_PREFIX := "cast_slot_"
 const MOVEMENT: Array[String] = ["advance", "retreat", "jump", "jump_back"]
 const ACTIONS: Array[String] = MOVEMENT + WEAPON_ACTIONS + SPELL_ACTIONS + ["guard", "sleep", "taunt", "potion"]
 const LABELS := {
@@ -93,10 +94,64 @@ static func spell_resistance(rule: Dictionary, magic: float) -> float:
 	return magic * float(rule.get("spell_resistance_per_magic", 0.0))
 
 static func spell_for_action(fighter: Dictionary, action: String) -> Dictionary:
+	if fighter.has("prepared"):
+		var index := slot_index(action)
+		return fighter.prepared[index] if index >= 0 and index < fighter.prepared.size() else {}
+	if action not in SPELL_ACTIONS:
+		return {}
 	return fighter.get("reserve_spell" if action == "cast_reserve" else "spell", {})
 
 static func spell_charges(fighter: Dictionary, action: String) -> int:
+	if fighter.has("prepared"):
+		return int(not spell_for_action(fighter, action).is_empty() and slot_index(action) not in fighter.spent_slots)
+	if action not in SPELL_ACTIONS:
+		return 0
 	return int(fighter.get("reserve_casts" if action == "cast_reserve" else "casts", 0))
+
+static func slot_action(index: int) -> String:
+	return PREPARED_PREFIX + str(index)
+
+static func slot_index(action: String) -> int:
+	if action.begins_with(PREPARED_PREFIX) and action.trim_prefix(PREPARED_PREFIX).is_valid_int():
+		var index := int(action.trim_prefix(PREPARED_PREFIX))
+		if action == slot_action(index):
+			return index
+	return -1
+
+static func is_spell_action(action: String) -> bool:
+	return action in SPELL_ACTIONS or slot_index(action) >= 0
+
+static func spell_actions(fighter: Dictionary) -> Array[String]:
+	if not fighter.has("prepared"):
+		return SPELL_ACTIONS
+	var actions: Array[String] = []
+	for index in fighter.prepared.size():
+		if not fighter.prepared[index].is_empty():
+			actions.append(slot_action(index))
+	return actions
+
+static func _fighter_actions(fighter: Dictionary) -> Array[String]:
+	if not fighter.has("prepared"):
+		return ACTIONS
+	return ACTIONS.filter(func(action: String) -> bool: return action not in SPELL_ACTIONS) + spell_actions(fighter)
+
+static func potion_amount(rule: Dictionary, fighter: Dictionary) -> int:
+	if not fighter.has("draught"):
+		return int(rule.heal)
+	if fighter.draught == "armor_potion":
+		return ceili(int(fighter.max_armor) * float(rule.armor_potion_fraction))
+	return int(rule.health_potion_base) + floori(float(fighter.stats.Vitality) * float(rule.health_potion_per_vitality))
+
+static func potion_missing(fighter: Dictionary) -> int:
+	if fighter.get("draught", "") == "armor_potion":
+		return int(fighter.max_armor - fighter.armor)
+	return int(fighter.max_hp - fighter.hp)
+
+static func enchant_rank(spell: Dictionary, fighter: Dictionary) -> int:
+	return 1 + clampi(floori((float(fighter.stats.Magic) - float(spell.minimum)) / 10.0), 0, 2)
+
+static func enchant_bonus(spell: Dictionary, fighter: Dictionary) -> int:
+	return int(spell.power) + enchant_rank(spell, fighter) - 1
 
 static func strength_damage_threshold(rule: Dictionary, stats: Dictionary) -> float:
 	if not rule.has("strength_damage_floor"):
@@ -132,6 +187,8 @@ static func taunt_damage(rule: Dictionary, charisma: float) -> int:
 
 func cost(action: String, side: int = -1) -> int:
 	var fighter: Dictionary = fighters[active if side < 0 else side]
+	if is_spell_action(action):
+		return int(spell_for_action(fighter, action).get("energy", 0))
 	match action:
 		"attack": return int(fighter.weapon.energy)
 		"quick": return _quick_cost(fighter)
@@ -141,7 +198,6 @@ func cost(action: String, side: int = -1) -> int:
 			if action == "rush" and not rules.has("lunge_base_cost"):
 				return int(fighter.weapon.energy) + int(moves.jump)
 			return _lunge_cost(fighter, distance())
-		"cast", "cast_reserve": return int(spell_for_action(fighter, action).get("energy", 0))
 		"jump_back": return int(moves.jump)
 	return int(moves.get(action, 0))
 
@@ -196,7 +252,9 @@ func restore_history(actions: Array) -> bool:
 func chance(action: String) -> float:
 	var fighter: Dictionary = fighters[active]
 	var target: Dictionary = fighters[1 - active]
-	var accuracy := hit_chance(rules, fighter.stats, action in SPELL_ACTIONS, target.exposed, threatens_cast(target))
+	if is_spell_action(action) and spell_for_action(fighter, action).get("effect", "damage") != "damage":
+		return 1.0
+	var accuracy := hit_chance(rules, fighter.stats, is_spell_action(action), target.exposed, threatens_cast(target))
 	match action:
 		"lunge":
 			var extra := maxi(0, lunge_spaces() - int(rules.get("lunge_max_spaces", 2)))
@@ -224,16 +282,16 @@ func yield_health(target: Dictionary) -> int:
 	return clampi(ceili(boundary / 100.0) - 1, 0, int(target.max_hp) - 1)
 
 func health_damage(action: String, damage: int, target: Dictionary) -> int:
-	if action in SPELL_ACTIONS and spell_armor_only(target):
+	if is_spell_action(action) and spell_armor_only(target):
 		return 0
 	var hp := int(target.hp)
 	var threshold := yield_health(target)
 	var remaining := int(first_blood or threshold > 0)
 	if (regular_bout and not first_blood and hp == int(target.max_hp) and distance() > int(target.weapon.reach)
-			and (action in SPELL_ACTIONS or action == "taunt")):
+			and (is_spell_action(action) or action == "taunt")):
 		# A full-health rival survives the first ranged spell or taunt in a regular bout.
 		remaining = threshold + 1
-	return mini(maxi(0, hp - remaining), maxi(0, damage - int(target.armor)))
+	return mini(maxi(0, hp - remaining), maxi(0, damage - int(target.armor) - int(target.get("magic_shield", 0))))
 
 func health_hit_wins(target: Dictionary, loss: int) -> bool:
 	return loss > 0 if first_blood else int(target.hp) - loss <= yield_health(target)
@@ -244,8 +302,18 @@ func _spell_reason(action: String, fighter: Dictionary, target: Dictionary, gap:
 		return "Equip a spell"
 	if spell_charges(fighter, action) <= 0:
 		return "Spell uses spent"
-	if (distance() if gap < 0 else gap) > spell.reach:
+	var reach := int(spell.get("reach", 0))
+	if reach > 0 and (distance() if gap < 0 else gap) > reach:
 		return "Out of spell range"
+	var effect: String = spell.get("effect", "damage")
+	match effect:
+		"shield": return "Magic shield is already active" if fighter.get("magic_shield", 0) > 0 else ""
+		"enchant": return "Weapon is already enchanted" if fighter.get("enchant_hits", 0) > 0 else ""
+		"push", "pull":
+			var side := 0 if is_same(fighter, fighters[0]) else 1
+			if spell_displacement(spell, side) > 0:
+				return ""
+			return "Rival is already next to you" if effect == "pull" else "Rival is at the arena edge"
 	if spell_armor_only(target, gap) and target.armor <= 0:
 		return "Get within the rival's weapon reach to draw first blood"
 	return ""
@@ -254,7 +322,7 @@ func _spell_reason(action: String, fighter: Dictionary, target: Dictionary, gap:
 func reason(action: String, ignore_provoke: bool = false) -> String:
 	if winner != -2:
 		return "Bout finished"
-	if action not in ACTIONS and not (_restoring_history and action == "rush"):
+	if action not in ACTIONS and not is_spell_action(action) and not (_restoring_history and action == "rush"):
 		return "Unknown action"
 	if action in ["quick", "power"] and not has_attack_styles():
 		return "Unavailable in this saved bout"
@@ -265,6 +333,10 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 			demanded = "sleep"
 		if action != demanded:
 			return "Provoked. Choose %s." % LABELS[demanded]
+	if is_spell_action(action):
+		var blocked := _spell_reason(action, fighter, fighters[1 - active])
+		if not blocked.is_empty():
+			return blocked
 	match action:
 		"quick", "attack", "power":
 			if not in_weapon_reach():
@@ -279,10 +351,6 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 				return "Use Attack at this distance"
 			if fighter.weapon.reach < 1 or (not rules.has("lunge_base_cost") and distance() > fighter.weapon.reach + distances.jump):
 				return "Too far to lunge"
-		"cast", "cast_reserve":
-			var blocked := _spell_reason(action, fighter, fighters[1 - active])
-			if not blocked.is_empty():
-				return blocked
 		"taunt":
 			if fighter.energy < rules.taunt_minimum:
 				return "Needs %d current stamina" % rules.taunt_minimum
@@ -293,12 +361,12 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 			if positions[active] == (0 if active == 0 else int(rules.arena_size)):
 				return "At the arena edge"
 		"potion":
-			if regular_bout:
-				return "Potions are for death matches"
 			if fighter.potions <= 0:
 				return "No draught available"
-			if fighter.hp == fighter.max_hp:
-				return "Health is full"
+			if potion_amount(rules, fighter) <= 0:
+				return "No armor to repair"
+			if potion_missing(fighter) <= 0:
+				return "Armor is full" if fighter.get("draught", "") == "armor_potion" else "Health is full"
 	var stamina_cost := cost(action)
 	if fighter.energy < stamina_cost:
 		return "Needs %d stamina" % stamina_cost
@@ -307,7 +375,7 @@ func reason(action: String, ignore_provoke: bool = false) -> String:
 func must_sleep() -> bool:
 	if not reason("sleep").is_empty():
 		return false
-	for action in ACTIONS:
+	for action in _fighter_actions(fighters[active]):
 		if action != "sleep" and reason(action).is_empty():
 			return false
 	return true
@@ -320,7 +388,7 @@ func act(action: String) -> Dictionary:
 	var side := active
 	var fighter: Dictionary = fighters[side]
 	var enemy: Dictionary = fighters[1 - side]
-	var spell_action := action in SPELL_ACTIONS
+	var spell_action := is_spell_action(action)
 	var title: String = spell_for_action(fighter, action).name if spell_action else LABELS[action]
 	var event := {"valid": true, "side": side, "action": action, "title": title, "damage": 0, "armor_hit": 0,
 		"critical": false, "blocked": false, "miss": false, "turn": turn + 1, "energy_cost": cost(action),
@@ -330,6 +398,8 @@ func act(action: String) -> Dictionary:
 	fighter.guarding = false
 	fighter.exposed = false
 	fighter.provoked = false
+	if spell_action:
+		_cast(action, fighter, enemy, event)
 	match action:
 		"advance", "jump", "retreat", "jump_back":
 			var toward := 1 if side == 0 else -1
@@ -343,18 +413,15 @@ func act(action: String) -> Dictionary:
 			fighter.exposed = true
 			event.message = "%s recovers %d stamina and is exposed." % [fighter.name, fighter.energy - before]
 		"potion":
-			var before: int = fighter.hp
-			fighter.hp = mini(fighter.max_hp, before + int(rules.heal))
+			var armor_draught: bool = fighter.get("draught", "") == "armor_potion"
+			var restored := mini(potion_missing(fighter), potion_amount(rules, fighter))
+			fighter["armor" if armor_draught else "hp"] += restored
 			fighter.potions -= 1
-			event.message = "%s restores %d health." % [fighter.name, fighter.hp - before]
-		"quick", "attack", "power", "lunge", "rush", "cast", "cast_reserve":
+			event.message = "%s restores %d %s." % [fighter.name, restored, "armor" if armor_draught else "health"]
+		"quick", "attack", "power", "lunge", "rush":
 			# Lunge accuracy depends on the starting gap. Compute it before moving the attacker.
 			var accuracy := chance(action)
-			if spell_action:
-				var charges := "reserve_casts" if action == "cast_reserve" else "casts"
-				fighter[charges] -= 1
-				event.spell_art = int(spell_for_action(fighter, action).get("art", 0))
-			elif action in ["lunge", "rush"]:
+			if action in ["lunge", "rush"]:
 				positions[side] += (1 if side == 0 else -1) * lunge_spaces()
 			_strike(action, fighter, enemy, event, accuracy)
 			if action == "power" and not event.miss and not event.blocked and not _decisive_hit(enemy, event):
@@ -392,8 +459,49 @@ func act(action: String) -> Dictionary:
 	event.health = [fighters[0].hp, fighters[1].hp]
 	event.armor = [fighters[0].armor, fighters[1].armor]
 	event.energy = [fighters[0].energy, fighters[1].energy]
+	if fighters[0].has("prepared") or fighters[1].has("prepared"):
+		event.wards = [fighters[0].get("magic_shield", 0), fighters[1].get("magic_shield", 0)]
+		event.enchantments = [fighters[0].get("enchant_hits", 0), fighters[1].get("enchant_hits", 0)]
 	history.append(event)
 	return event
+
+func spell_displacement(spell: Dictionary, side: int) -> int:
+	var gap := distance()
+	var pull: bool = spell.effect == "pull"
+	var room := gap - 1 if pull else (int(rules.arena_size) - positions[1] if side == 0 else positions[0])
+	# An already-started bout replays with the range and displacement it originally saved.
+	var travel_limit := int(spell.power)
+	if rules.get("distance_based_spell_movement", false):
+		travel_limit = gap - 1 if pull else gap
+	return mini(room, travel_limit)
+
+func _cast(action: String, fighter: Dictionary, enemy: Dictionary, event: Dictionary) -> void:
+	var spell := spell_for_action(fighter, action)
+	if fighter.has("prepared"):
+		fighter.spent_slots.append(slot_index(action))
+	else:
+		var charges := "reserve_casts" if action == "cast_reserve" else "casts"
+		fighter[charges] -= 1
+	event.spell_art = int(spell.get("art", 0))
+	var effect: String = spell.get("effect", "damage") if fighter.has("prepared") else "damage"
+	if effect == "damage":
+		_strike(action, fighter, enemy, event, chance(action))
+		return
+	event.utility = effect
+	match effect:
+		"shield":
+			fighter.magic_shield = int(spell.power)
+			event.message = "%s raises a magic shield for %d damage." % [fighter.name, spell.power]
+		"enchant":
+			fighter.enchant_hits = 3
+			fighter.enchant_damage = enchant_bonus(spell, fighter)
+			event.message = "%s enchants their weapon for three hits." % fighter.name
+		"push", "pull":
+			var shift := spell_displacement(spell, active)
+			var direction := 1 if active == 0 else -1
+			# Utility movement stops at the arena edge and never crosses the other fighter.
+			positions[1 - active] += shift * direction * (-1 if effect == "pull" else 1)
+			event.message = "%s moves %s %d spaces." % [spell.name, enemy.name, shift]
 
 func _decisive_hit(enemy: Dictionary, event: Dictionary) -> bool:
 	return enemy.hp <= yield_health(enemy) or event.get("first_blood", false)
@@ -404,7 +512,7 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 		event.message = "%s misses with %s." % [fighter.name, event.title.to_lower()]
 		return
 	# The saved seed reproduces this roll order. Spells skip the melee crit roll and exposure skips blocking.
-	var spell := action in SPELL_ACTIONS
+	var spell := is_spell_action(action)
 	var damage := action_damage(action, fighter, enemy)
 	if not spell and random.randf() < crit_chance(rules, fighter.stats.Attack):
 		event.critical = true
@@ -413,13 +521,20 @@ func _strike(action: String, fighter: Dictionary, enemy: Dictionary, event: Dict
 		event.blocked = true
 		damage *= rules.guard_damage_factor
 	_injure(maxi(1, roundi(damage)), enemy, event)
+	if not spell and fighter.get("enchant_hits", 0) > 0:
+		event.enchant_used = true
+		fighter.enchant_hits -= 1
+		if fighter.enchant_hits == 0:
+			fighter.enchant_damage = 0
 	var marker := " Critical hit." if event.critical else ""
 	if event.blocked:
 		marker += " Blocked in part."
+	if event.has("shield_absorbed"):
+		marker += " Shield absorbed %d." % event.shield_absorbed
 	event.message = "%s uses %s.%s %s" % [fighter.name, event.title.to_lower(), marker, _impact(event)]
 
 func action_damage(action: String, fighter: Dictionary, target: Dictionary = {}) -> float:
-	var spell := action in SPELL_ACTIONS
+	var spell := is_spell_action(action)
 	var damage := strike_damage(rules, fighter, spell, regular_bout, action)
 	if spell and not target.is_empty():
 		return maxf(1.0, damage - spell_resistance(rules, target.stats.Magic))
@@ -442,9 +557,13 @@ func _knock_back(enemy: Dictionary, event: Dictionary) -> void:
 		event.message += " %s is pushed back %d." % [enemy.name, steps]
 
 func _injure(damage: int, target: Dictionary, event: Dictionary) -> void:
+	if target.get("magic_shield", 0) > 0:
+		event.shield_absorbed = mini(damage, int(target.magic_shield))
+		damage -= int(event.shield_absorbed)
+		target.magic_shield = 0
 	event.armor_hit = mini(damage, int(target.armor))
 	event.damage = health_damage(event.action, damage, target)
-	if first_blood and damage > event.armor_hit and not (event.action in SPELL_ACTIONS and spell_armor_only(target)):
+	if first_blood and damage > event.armor_hit and not (is_spell_action(event.action) and spell_armor_only(target)):
 		event.first_blood = true
 	target.armor -= event.armor_hit
 	target.hp -= event.damage
@@ -455,16 +574,22 @@ func _impact(event: Dictionary) -> String:
 func choose(profile: String) -> String:
 	if profile == "fast_melee":
 		profile = "melee_hunter"
+	elif fighters[active].has("prepared"):
+		if profile == "mage":
+			profile = "keepaway_mage"
+		elif profile == "hybrid":
+			profile = "adaptive_hybrid"
 	var fighter: Dictionary = fighters[active]
 	var enemy: Dictionary = fighters[1 - active]
 	var legal: Array[String] = []
-	for action in ACTIONS:
+	for action in _fighter_actions(fighter):
 		if reason(action).is_empty():
 			legal.append(action)
 	if profile == "duelist" and turn == 1 and history[0].action in ["guard", "sleep"] and "taunt" in legal:
 		return "taunt"
-	if "potion" in legal and fighter.hp <= fighter.max_hp - int(rules.heal):
-		return "potion"
+	if "potion" in legal and potion_missing(fighter) >= potion_amount(rules, fighter):
+		if not fighter.has("draught") or _potion_creates_time(fighter, enemy):
+			return "potion"
 	if profile == "charisma" and "taunt" in legal:
 		return "taunt"
 	var cast := _preferred_cast(fighter, enemy)
@@ -476,6 +601,9 @@ func choose(profile: String) -> String:
 		var finish := action_damage("attack", fighter) < protection and action_damage("power", fighter) >= protection
 		if power_push() > _edge_distance() or (finish and chance("power") >= .50):
 			return "power"
+	var utility := _choose_utility(fighter, enemy, legal, cast)
+	if not utility.is_empty():
+		return utility
 	if profile in ["keepaway_mage", "melee_hunter", "adaptive_hybrid"] and not fighter.provoked:
 		var tactic := _choose_tactic(profile, fighter, enemy, legal, cast, enemy_cast)
 		if not tactic.is_empty():
@@ -500,7 +628,8 @@ func choose(profile: String) -> String:
 	if regular_bout and "guard" in legal and _can_guard_against_cast(fighter, enemy, enemy_cast):
 		return "guard"
 	if "lunge" in legal and not enemy.guarding:
-		return "lunge"
+		if profile != "keepaway_mage" or (cast.is_empty() and (fighter.energy >= cost("lunge") + 2 * cost("attack") or enemy.exposed)):
+			return "lunge"
 	if "jump" in legal:
 		var step_gap := distance() - travel("advance")
 		var jump_gap := distance() - travel("jump")
@@ -515,6 +644,58 @@ func choose(profile: String) -> String:
 	if fighter.energy == fighter.max_energy and "taunt" in legal:
 		return "taunt"
 	return "sleep"
+
+func _potion_creates_time(fighter: Dictionary, enemy: Dictionary) -> bool:
+	if reason("attack").is_empty():
+		if health_hit_wins(enemy, health_damage("attack", roundi(action_damage("attack", fighter)), enemy)):
+			return false
+	if not threatens_cast(enemy):
+		return true
+	var damage := roundi(action_damage("attack", enemy))
+	var restored := potion_amount(rules, fighter)
+	var health_after_hit := damage - int(fighter.armor) - int(fighter.get("magic_shield", 0))
+	return damage <= restored or (health_hit_wins(fighter, health_after_hit)
+		and not health_hit_wins(fighter, health_after_hit - restored))
+
+func _choose_utility(fighter: Dictionary, enemy: Dictionary, legal: Array[String], cast: String) -> String:
+	if ("attack" in legal and health_hit_wins(enemy, health_damage("attack", roundi(action_damage("attack", fighter)), enemy))
+			or not cast.is_empty() and health_hit_wins(enemy, health_damage(cast, roundi(action_damage(cast, fighter, enemy)), enemy))):
+		return ""
+	var gap := distance()
+	for action in spell_actions(fighter):
+		if action not in legal:
+			continue
+		var spell := spell_for_action(fighter, action)
+		match str(spell.get("effect", "")):
+			"shield":
+				# Use an otherwise quiet turn to protect the next exchange. Trading a hit
+				# for a ward while already cornered usually loses more than it absorbs.
+				if cast.is_empty() and gap > fighter.weapon.reach and gap > enemy.weapon.reach:
+					return action
+				var next_hit := roundi(action_damage("attack", enemy))
+				if threatens_cast(enemy) and health_hit_wins(fighter, health_damage("attack", next_hit, fighter)):
+					if not health_hit_wins(fighter, health_damage("attack", next_hit - int(spell.power), fighter)):
+						return action
+			"push":
+				if not cast.is_empty() and threatens_cast(enemy) and fighter.energy >= cost(action) + cost(cast):
+					var space := gap + spell_displacement(spell, active)
+					if space <= spell_for_action(fighter, cast).reach and not _melee_threat_at(enemy, space):
+						return action
+			"pull":
+				var space := gap - spell_displacement(spell, active)
+				if gap <= fighter.weapon.reach or space > fighter.weapon.reach or fighter.energy < cost(action) + cost("attack"):
+					continue
+				# Pull is especially useful when a short-reach fighter cannot close in one move.
+				var can_close: bool = ("lunge" in legal or ("jump" in legal and gap - travel("jump") <= fighter.weapon.reach)
+					or ("advance" in legal and gap - travel("advance") <= fighter.weapon.reach))
+				var prefers_melee := cast.is_empty() and _expected_strike(fighter, enemy, "attack") > _expected_strike(enemy, fighter, "attack")
+				if not threatens_cast(enemy, space) or (not can_close and prefers_melee):
+					return action
+			"enchant":
+				if (not _melee_threat_at(enemy, gap) and int(enemy.hp) + int(enemy.armor) > 2 * action_damage("attack", fighter)
+						and fighter.energy >= cost(action) + 2 * cost("attack")):
+					return action
+	return ""
 
 func _choose_tactic(profile: String, fighter: Dictionary, enemy: Dictionary, legal: Array[String], cast: String, enemy_cast: String) -> String:
 	if profile != "melee_hunter" and not cast.is_empty() and not in_weapon_reach():
@@ -539,8 +720,8 @@ func _keepaway(fighter: Dictionary, enemy: Dictionary, legal: Array[String], cas
 	if not _melee_threat_at(enemy, distance()):
 		if cast.is_empty() and enemy_cast.is_empty() and "sleep" in legal:
 			var rested := mini(int(fighter.max_energy), int(fighter.energy) + recovery(rules, fighter.stats.Stamina))
-			for spell_action in SPELL_ACTIONS:
-				if _spell_reason(spell_action, fighter, enemy).is_empty() and rested >= cost(spell_action):
+			for spell_action in spell_actions(fighter):
+				if spell_for_action(fighter, spell_action).get("effect", "damage") == "damage" and _spell_reason(spell_action, fighter, enemy).is_empty() and rested >= cost(spell_action):
 					return "sleep"
 		return ""
 	# Repeated retreats give away turns while a pursuer follows. Spend the next turn fighting.
@@ -560,8 +741,8 @@ func _keepaway(fighter: Dictionary, enemy: Dictionary, legal: Array[String], cas
 			continue
 		if not enemy_cast.is_empty() and _spell_reason(enemy_cast, enemy, fighter, gap).is_empty():
 			continue
-		for spell_action in SPELL_ACTIONS:
-			if _spell_reason(spell_action, fighter, enemy, gap).is_empty() and fighter.energy >= cost(move) + cost(spell_action):
+		for spell_action in spell_actions(fighter):
+			if spell_for_action(fighter, spell_action).get("effect", "damage") == "damage" and _spell_reason(spell_action, fighter, enemy, gap).is_empty() and fighter.energy >= cost(move) + cost(spell_action):
 				return move
 	return ""
 
@@ -588,8 +769,9 @@ func _preferred_cast(fighter: Dictionary, target: Dictionary) -> String:
 		return ""
 	var best := ""
 	var damage := -1.0
-	for action in SPELL_ACTIONS:
-		if not _spell_reason(action, fighter, target).is_empty() or fighter.energy < spell_for_action(fighter, action).energy:
+	for action in spell_actions(fighter):
+		var spell := spell_for_action(fighter, action)
+		if spell.get("effect", "damage") != "damage" or not _spell_reason(action, fighter, target).is_empty() or fighter.energy < spell.energy:
 			continue
 		var expected := _expected_strike(fighter, target, action)
 		if expected > damage:
@@ -611,7 +793,7 @@ func _should_close(fighter: Dictionary, enemy: Dictionary, cast: String, enemy_c
 
 # Estimate the damage for a tactical comparison without consuming combat RNG.
 func _expected_strike(fighter: Dictionary, enemy: Dictionary, action: String) -> float:
-	var spell := action in SPELL_ACTIONS
+	var spell := is_spell_action(action)
 	var damage := action_damage(action, fighter, enemy)
 	if spell:
 		if spell_armor_only(enemy):

@@ -5,6 +5,14 @@ const BALANCE_PATH := "res://content/balance.json"
 const ARENA_DIR := "res://content/arenas"
 const ARMOR_DIR := "res://content/gear/armor"
 const WEAPON_DIR := "res://content/gear/weapons"
+const MAGIC_ICONS := {
+	"magic_shield": preload("res://content/spells/magic-shield/icon.webp"),
+	"push": preload("res://content/spells/push/icon.webp"),
+	"pull": preload("res://content/spells/pull/icon.webp"),
+	"ember_etching": preload("res://content/spells/ember-etching/icon.webp"),
+	"potion": preload("res://content/gear/potions/health-potion/icon.webp"),
+	"armor_potion": preload("res://content/gear/potions/armor-potion/icon.webp"),
+}
 
 static var _arena_definitions: Array[Dictionary] = []
 static var _armor_definitions: Dictionary = {}

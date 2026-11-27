@@ -20,6 +20,10 @@ XDG_DATA_HOME="$test_data" godot --headless --path . --script tests/playtest.gd
 
 For the same isolated checks on GitHub, use the [Desktop release workflow](desktop-builds.md#build-on-github). For manual play on any platform, use a throwaway save slot.
 
+## Practice tournament rounds
+
+Tournament practice is automatic when you run the game from the Godot editor or a debug export. After a defeat, **Next Match** scouts the same tournament round. Your gladiator survives and keeps their gold. Only a win advances the bracket. Release exports and campaign simulations use the standard tournament rules.
+
 ## Test a new arena
 
 1. **Enter from the previous league.** Win the preceding tournament, or open a test save that finished it. Check the new arena unlocks, the correct point allocation appears, and a regular rival can be scouted at the opening level.
@@ -33,7 +37,7 @@ For the same isolated checks on GitHub, use the [Desktop release workflow](deskt
 | Changed area | Check |
 | --- | --- |
 | Turn rules or AI | Replay the same recorded actions and verify legal moves, stamina, and outcomes. Compare before and after with fixed seeds to explain balance changes. |
-| Save data or catalog | Open an older career and an unfinished bout. Check that the saved turns, gear, and rewards survive. Inspect the new content in a packaged build when changing discovery or resource paths. |
+| Save data or catalog | Resume an unfinished bout from the current save version and check its turns, gear, and rewards. If the save version changes, verify that an earlier slot can be replaced. Inspect the new content in a packaged build when changing discovery or resource paths. |
 | Fight screen, HUD, art, or audio | Play a full bout in the game. Confirm that actions unlock after the response, meters update on impact, and the result appears once. Check both window modes if layout changed. |
 | Pages or screenshots | Preview the Markdown, follow the links, and check that the screenshots remain legible at README width. Keep screenshots under `docs/assets/`. |
 

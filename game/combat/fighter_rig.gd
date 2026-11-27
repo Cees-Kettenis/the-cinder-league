@@ -11,6 +11,7 @@ class Pose:
 	var off_arm := Vector3.ZERO
 	var rear_leg := Vector3.ZERO
 	var lead_leg := Vector3.ZERO
+	var rigid_feet := false
 
 enum {PELVIS, SPINE, NECK, HEAD, WEAPON_SHOULDER, WEAPON_ELBOW, WEAPON_WRIST,
 	OFF_SHOULDER, OFF_ELBOW, OFF_WRIST, REAR_HIP, REAR_KNEE, REAR_ANKLE, LEAD_HIP, LEAD_KNEE, LEAD_ANKLE}
@@ -59,6 +60,7 @@ static var _body_indices := PackedInt32Array()
 static var _arm_indices := PackedInt32Array()
 static var _without_arm_indices := PackedInt32Array()
 static var _bindings := PackedVector3Array()
+static var _rigid_feet_bindings := PackedVector3Array()
 static var _tint_weights := PackedVector2Array()
 static var _starter_shoe_vertices := PackedInt32Array()
 static var _tunic_hem_vertices := PackedInt32Array()
@@ -114,7 +116,7 @@ static func _solve_chain(upper: Vector2, lower: Vector2, target: Vector2, end_an
 static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, hair: int,
 		firm_weapon_arm: bool = false, part: SkinPart = SkinPart.WHOLE, tint: Color = Color.WHITE,
 		wearing_boots: bool = false, wearing_pants: bool = false, closed_helmet: bool = false,
-		sleeve_tint: Color = Color.WHITE) -> void:
+		sleeve_tint: Color = Color.WHITE, rigid_feet: bool = false) -> void:
 	if _points.is_empty():
 		_build_mesh()
 	var vertices := PackedVector2Array()
@@ -123,9 +125,10 @@ static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, 
 	if firm_weapon_arm:
 		for bone in [WEAPON_SHOULDER, WEAPON_ELBOW, WEAPON_WRIST]:
 			weapon_turns.append(angle_difference(bones[PARENTS[bone]].get_rotation(), bones[bone].get_rotation()))
+	var bindings := _rigid_feet_bindings if rigid_feet else _bindings
 	for index in _points.size():
 		var point := _points[index]
-		var binding := _bindings[index]
+		var binding := bindings[index]
 		var joint := int(binding.y)
 		if firm_weapon_arm and binding.z > 0.0 and binding.z < 1.0 and joint >= WEAPON_SHOULDER and joint <= WEAPON_WRIST:
 			# Rotate blended vertices around the hinge so the bend doesn't pinch the painted arm.
@@ -162,9 +165,18 @@ static func draw_skin(canvas: CanvasItem, bones: Array[Transform2D], skin: int, 
 	RenderingServer.canvas_item_add_triangle_array(canvas.get_canvas_item(), indices, vertices, colors, _uv,
 		PackedInt32Array(), PackedFloat32Array(), _sprite.get_rid())
 
-static func bend_armor(point: Vector2, bones: Array[Transform2D], side: int) -> Vector2:
+static func bend_armor(point: Vector2, bones: Array[Transform2D], side: int, rigid_feet: bool = false) -> Vector2:
 	var source := (point - ORIGIN) / PIXEL_SCALE
-	return _deform(point, _leg_binding(source, side), bones)
+	var binding := _leg_binding(source, side)
+	return _deform(point, _rigid_foot_binding(source.y, binding) if rigid_feet else binding, bones)
+
+static func _rigid_foot_binding(source_y: float, binding: Vector3) -> Vector3:
+	var ankle := int(binding.y)
+	if ankle == REAR_ANKLE or ankle == LEAD_ANKLE:
+		# Blend across the lower shin and leave the shape of the shoe attached to the ankle.
+		var y: float = PIVOTS[ankle].y
+		return Vector3(binding.x, binding.y, smoothstep(y - 72.0, y, source_y))
+	return binding
 
 static func _deform(point: Vector2, binding: Vector3, bones: Array[Transform2D]) -> Vector2:
 	var first := bones[int(binding.x)] * point
@@ -197,6 +209,7 @@ static func _build_mesh() -> void:
 				_points.append(local(pixel))
 				_uv.append(pixel / extent)
 				_bindings.append(binding)
+				_rigid_feet_bindings.append(_rigid_foot_binding(y, binding))
 				# Color sampling is baked into the cached mesh for skin and hair tinting.
 				var color := image.get_pixel(mini(int(pixel.x), image.get_width() - 1), mini(int(pixel.y), image.get_height() - 1))
 				# Hide the head and trailing hair, preserving the neck and shirt under a closed helmet.

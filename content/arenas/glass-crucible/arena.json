@@ -18,23 +18,23 @@
         "name": "Dara Holt",
         "style": "mage",
         "tactics": "keepaway_mage",
-        "point_multiplier": 1.43
+        "point_multiplier": 1.46
       },
       {
         "name": "Finn Ash",
         "style": "fast_melee",
-        "point_multiplier": 1.45
+        "point_multiplier": 1.5
       },
       {
         "name": "Iona Reed",
         "style": "hybrid",
         "tactics": "adaptive_hybrid",
-        "point_multiplier": 1.48
+        "point_multiplier": 1.54
       },
       {
         "name": "Rook Briar",
         "style": "guard",
-        "point_multiplier": 1.47
+        "point_multiplier": 1.28
       }
     ],
     "tournament": [
@@ -47,13 +47,13 @@
         "name": "Sera Glass",
         "style": "guard",
         "tactics": "duelist",
-        "point_multiplier": 1.16
+        "point_multiplier": 1.14
       },
       {
         "name": "Kestrel Vane",
         "style": "hybrid",
         "tactics": "adaptive_hybrid",
-        "point_multiplier": 1.22
+        "point_multiplier": 1.24
       },
       {
         "name": "Veyra Ashglass",
@@ -61,15 +61,15 @@
         "tactics": "keepaway_mage",
         "boss": true,
         "stats": {
-          "Attack": 15,
+          "Attack": 16,
           "Strength": 16,
-          "Defence": 8,
-          "Magic": 41,
-          "Vitality": 18,
+          "Defence": 10,
+          "Magic": 33,
+          "Vitality": 21,
           "Stamina": 14,
           "Charisma": 0
         },
-        "armor_level": 7
+        "armor_level": 9
       }
     ]
   }

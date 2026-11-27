@@ -11,7 +11,11 @@ const Foley = preload("res://game/audio/foley.gd")
 const FightScreen = preload("res://game/combat/fight_screen.tscn")
 const Content = preload("res://game/catalog/content_catalog.gd")
 const BackdropArt = preload("res://game/screens/backdrop_art.gd")
+const ShopView = preload("res://game/screens/shops/shop_view.gd")
+const CharacterView = preload("res://game/screens/character/character_view.gd")
+const ArenaView = preload("res://game/screens/arena/arena_view.gd")
 const Symbol = preload("res://game/screens/ui_symbol.gd")
+const TITLE_LOGO = preload("res://game/screens/title/league-logo.webp")
 const TITLE_THEME = preload("res://game/audio/music/title-theme.ogg")
 const TOWN_THEME = preload("res://game/audio/music/town-theme.ogg")
 const SHOP_THEMES := {
@@ -32,16 +36,48 @@ const PANEL := Color("#1a2223")
 const BORDER := Color("#343f3d")
 const GREEN := Color("#96d4ad")
 const RED := Color("#e38d79")
-const SLOTS := {"helmet": "Helmet", "chest": "Chest plate", "pants": "Pants", "shoes": "Shoes", "shield": "Shield"}
+const PAGE_INSET_X := 20
+const PAGE_INSET_Y := 14
+const PAGE_GAP := 9
+const SHOP_NAV_HEIGHT := 60
 const STAT_ICONS := {"Attack": "attack", "Strength": "strength", "Defence": "armor", "Magic": "cast",
 	"Vitality": "health", "Stamina": "stamina", "Charisma": "taunt"}
 const USER_BALANCE := "user://balance.override.json"
 const USER_SETTINGS := "user://settings.cfg"
-const DEFAULT_KEYS := {"back": KEY_ESCAPE, "town": KEY_T, "next": KEY_N}
-const CONTROL_NAMES := {"back": "Back", "town": "Return to town", "next": "Next bout or match"}
+const DEFAULT_KEYS := {
+	"back": KEY_ESCAPE, "town": KEY_T, "next": KEY_N, "character": KEY_C, "settings": KEY_K,
+	"armory": KEY_A, "weaponsmith": KEY_W, "magic_shop": KEY_M, "arena": KEY_B,
+	"scout_regular": KEY_R, "scout_tournament": KEY_U, "fight_confirm": KEY_F,
+	"shop_up": KEY_UP, "shop_down": KEY_DOWN, "shop_buy": KEY_P,
+	"shop_tab_1": KEY_1, "shop_tab_2": KEY_2, "shop_tab_3": KEY_3, "shop_tab_4": KEY_4, "shop_tab_5": KEY_5,
+	"magic_clear": KEY_DELETE,
+}
+const NAVIGATION_CONTROLS := {
+	"back": "Back / Pause", "town": "Return to town", "next": "Next bout or match", "character": "Character", "settings": "Settings",
+	"armory": "Armory", "weaponsmith": "Weaponsmith", "magic_shop": "Magic shop", "arena": "Arena",
+}
+const ARENA_CONTROLS := {"scout_regular": "Regular bout", "scout_tournament": "Tournament", "fight_confirm": "Confirm fight"}
+const SHOP_CONTROLS := {
+	"shop_up": "Previous item", "shop_down": "Next item", "shop_buy": "Buy or equip",
+	"magic_clear": "Clear prepared spell",
+}
+const SHOP_TAB_CONTROLS := {
+	"shop_tab_1": "Tab 1 · Helmet / Damage", "shop_tab_2": "Tab 2 · Chest / Utility",
+	"shop_tab_3": "Tab 3 · Legs / Potions", "shop_tab_4": "Tab 4 · Boots", "shop_tab_5": "Tab 5 · Shield",
+}
+const LEGACY_SHOP_TAB_BINDINGS := {
+	"shop_tab_1": ["armor_helmet", "magic_damage"], "shop_tab_2": ["armor_chest", "magic_utility"],
+	"shop_tab_3": ["armor_pants", "magic_potions"], "shop_tab_4": ["armor_shoes"], "shop_tab_5": ["armor_shield"],
+}
+const ARMOR_FILTERS := {"helmet": "shop_tab_1", "chest": "shop_tab_2", "pants": "shop_tab_3", "shoes": "shop_tab_4", "shield": "shop_tab_5"}
+const ARMOR_TAB_NAMES := {"helmet": "Helmet", "chest": "Chest", "pants": "Legs", "shoes": "Boots", "shield": "Shield"}
+const MAGIC_FILTERS := {"Damage": "shop_tab_1", "Utility": "shop_tab_2", "Potions": "shop_tab_3"}
+const SHOP_FILTERS := {"armor": ARMOR_FILTERS, "spell": MAGIC_FILTERS}
+const SHOP_KIT_TITLES := {"armor": "Equipped armor", "weapon": "Equipped weapon", "spell": "Prepared loadout"}
 
 # Keep the stored IDs for existing windowed and fullscreen preferences. ID 1 was fullscreen for fights.
 enum DisplayMode { WINDOWED = 0, FULLSCREEN = 2 }
+enum SpellCheckout { CLOSED, PICK_SLOT, CLEAR }
 
 var data := Data.new()
 var game: RefCounted
@@ -73,18 +109,30 @@ var name_input: LineEdit
 var creation_stage: Control
 var level_mode := false
 var shop_type := "armor"
+var shop_view: ShopView
+var shop_backdrop: Control
+var magic_category := "Damage"
+var shop_spell_slot := 0
+var spell_slot_chosen := false
+var character_return := "town"
+var faceoff_tournament := false
+var arena_actions: Dictionary = {}
+var shortcut_labels: Array[Dictionary] = []
 var armor_slot := "chest"
 var selected_item := ""
 var shop_stage: Control
 var shop_title: Label
 var shop_requirements: HFlowContainer
-var shop_stats: HFlowContainer
+var shop_stats: Container
 var shop_buy: Button
 var shop_entries: Dictionary = {}
 var fight: Control
 var display_mode: int = DisplayMode.WINDOWED
 var window_mode_before_fullscreen := Window.MODE_WINDOWED
 var settings_popup: PopupPanel
+var settings_shade: ColorRect
+var _paused_for_settings := false
+var _was_paused_before_settings := false
 var key_bindings := DEFAULT_KEYS.duplicate()
 var binding_buttons: Dictionary = {}
 var binding_action := ""
@@ -95,11 +143,11 @@ var balance_editor: TextEdit
 var balance_notice: Label
 var sim_output: TextEdit
 var sound := Foley.new()
-var spell_preview_button: Button
-var reserve_row: HBoxContainer
-var reserve_label: Label
-var reserve_button: Button
-var clear_reserve_button: Button
+var spell_slot_notice: Label
+var clear_spell_button: Button
+var spell_checkout := SpellCheckout.CLOSED
+var spell_checkout_slot := -1
+var spell_checkout_prompt: Label
 
 func _ready() -> void:
 	_make_theme()
@@ -118,6 +166,8 @@ func _ready() -> void:
 	venue_music_enabled = bool(settings.get_value("audio", "venue_music", town_music_enabled))
 	_load_key_bindings(settings)
 	_apply_back_binding()
+	music_player.process_mode = Node.PROCESS_MODE_ALWAYS
+	fading_music.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(music_player)
 	add_child(fading_music)
 	if get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]:
@@ -135,13 +185,37 @@ func _ready() -> void:
 	title_art.hide()
 	add_child(title_art)
 	title_art.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	var fade := Gradient.new()
+	fade.set_color(0, Color("#0e0b11", .55))
+	fade.set_color(1, Color("#0e0b11", 0.0))
+	fade.set_offset(1, .65)
+	fade.add_point(.34, Color("#0e0b11", .36))
+	var shade := GradientTexture2D.new()
+	shade.gradient = fade
+	shade.width = 256
+	shade.height = 2
+	var title_shade := TextureRect.new()
+	title_shade.texture = shade
+	title_shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	title_shade.mouse_filter = MOUSE_FILTER_IGNORE
+	title_art.add_child(title_shade)
+	title_shade.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	get_window().size_changed.connect(_sync_title_art)
+	shop_backdrop = Control.new()
+	shop_backdrop.mouse_filter = MOUSE_FILTER_IGNORE
+	shop_backdrop.hide()
+	add_child(shop_backdrop)
+	shop_backdrop.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	var margin := MarginContainer.new()
 	add_child(margin)
 	margin.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 20 if side in ["left", "right"] else 14)
-	shell = _column(margin, 9)
+	shell = _column(margin, PAGE_GAP)
+	settings_shade = ColorRect.new()
+	settings_shade.color = Color(0, 0, 0, .55)
+	settings_shade.z_index = 10
+	settings_shade.hide()
+	add_child(settings_shade)
+	settings_shade.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	var profile_path := USER_BALANCE if FileAccess.file_exists(USER_BALANCE) else Data.DEFAULT_FILE
 	# Fall back to bundled balance if a saved custom profile is invalid.
 	var err := data.load_profile(profile_path)
@@ -155,8 +229,15 @@ func _ready() -> void:
 	simulations = Simulator.new(data)
 	show_menu()
 
+func _exit_tree() -> void:
+	_restore_pause_state()
+
 func _input(event: InputEvent) -> void:
 	if is_instance_valid(settings_popup):
+		return
+	if spell_checkout != SpellCheckout.CLOSED:
+		if _spell_checkout_input(event):
+			get_viewport().set_input_as_handled()
 		return
 	if current_screen == "result" and _plain_key_press(event):
 		if event.keycode == key_bindings.town and is_instance_valid(result_town_button):
@@ -168,6 +249,8 @@ func _input(event: InputEvent) -> void:
 			result_next_button.pressed.emit()
 			return
 	if not event.is_action_pressed("ui_cancel", false, true):
+		if _plain_key_press(event) and _navigation_shortcut(event.keycode):
+			get_viewport().set_input_as_handled()
 		return
 	var focused := get_viewport().gui_get_focus_owner()
 	if event is InputEventKey and event.keycode != KEY_ESCAPE and (focused is LineEdit or focused is TextEdit):
@@ -176,7 +259,11 @@ func _input(event: InputEvent) -> void:
 		"menu", "town": _show_pause()
 		"slots", "hall": show_menu()
 		"create": _show_title(true)
-		"shop", "arena", "scout", "result":
+		"character": _close_character()
+		"scout":
+			if not game.tournament_in_progress():
+				show_arena()
+		"shop", "arena", "result":
 			if not game.tournament_in_progress():
 				show_town()
 		_: return
@@ -271,12 +358,13 @@ func _icon_button(parent: Node, symbol: String, caption: String, on_pressed: Cal
 	Symbol.on_button(button, symbol, 26, caption)
 	return button
 
-func _town_destination(stage: Control, building: Rect2, symbol: String, caption: String, on_pressed: Callable) -> void:
+func _town_destination(stage: Control, palette: ShopView, building: Rect2, symbol: String,
+		caption: String, on_pressed: Callable, action: String) -> void:
 	var button := _button(stage, "", on_pressed)
 	button.accessibility_name = caption
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
-	var highlight := _style(Color(1.0, .77, .4, .14), SAND, 0)
+	var highlight := palette.frame(Color(palette.edge, .15), Color(palette.edge.lightened(.25), .8), 0)
 	button.add_theme_stylebox_override("hover", highlight)
 	button.add_theme_stylebox_override("pressed", highlight)
 	var sign_position := CenterContainer.new()
@@ -285,14 +373,15 @@ func _town_destination(stage: Control, building: Rect2, symbol: String, caption:
 	sign_position.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sign_panel := PanelContainer.new()
 	sign_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	sign_panel.add_theme_stylebox_override("panel", _style(Color("#342620"), Color("#c18c57"), 8))
+	sign_panel.add_theme_stylebox_override("panel", palette.frame(
+		Color(palette.base.darkened(.20), .95), palette.edge, 7))
 	sign_position.add_child(sign_panel)
 	var contents := _row(sign_panel)
 	contents.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	contents.add_child(Symbol.make(symbol, 25))
-	var label := _label(contents, caption, 17)
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	contents.add_child(Symbol.make(symbol, 22))
+	palette.label(contents, caption, 16).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var keycap := palette.keycap(contents, _key_name(action))
+	_track_shortcut(button, caption, action, keycap)
 	# Map the source-art hitbox onto the painted building as the window resizes.
 	var place := func() -> void:
 		var art: Rect2 = stage.town_art_rect()
@@ -337,39 +426,76 @@ func _sync_title_art() -> void:
 		title_art.texture = load(path)
 
 # Normal screens rebuild the shared shell. Battle has a separate scene and results stay in that scene.
-func _page(key: String, heading: String) -> void:
+func _page(key: String, heading: String, palette: ShopView = null) -> void:
 	_remove_battle()
 	shell.show()
 	current_screen = key
+	var full_bleed := key in ["town", "arena", "scout", "tournament"]
+	var margin: MarginContainer = shell.get_parent()
+	if palette == null:
+		_page_insets(margin)
+	else:
+		_page_insets(margin, 0, 0, 0)
+	shell.add_theme_constant_override("separation", 0 if full_bleed else PAGE_GAP)
+	spell_checkout = SpellCheckout.CLOSED
 	title_art.visible = key in ["menu", "slots"]
 	_sync_title_art()
 	_sync_audio.call_deferred()
 	_clear(shell)
+	_reset_shortcuts_and_backdrop()
+	var body := shell
+	if palette == null:
+		_page_header(key, heading)
+	else:
+		palette.backdrop(shop_backdrop)
+		shop_backdrop.show()
+		# The shared status bar spans the window. Only the shop and character bodies are inset.
+		_status_bar(shell, palette)
+		if not full_bleed:
+			var body_margin := MarginContainer.new()
+			shell.add_child(body_margin)
+			_page_insets(body_margin, PAGE_INSET_X, 0)
+			_fill(body_margin, true)
+			body = _column(body_margin, PAGE_GAP)
+	if not page_notice.is_empty():
+		_wrapped(body, page_notice, 14, SAND)
+		page_notice = ""
+	if not game.save_error.is_empty():
+		_wrapped(body, game.save_error, 14, RED)
+	content = _column(body, 0 if full_bleed else 10)
+	_fill(content, true)
+
+func _page_insets(margin: MarginContainer, horizontal: int = PAGE_INSET_X, top: int = PAGE_INSET_Y,
+		bottom: int = PAGE_INSET_Y) -> void:
+	margin.add_theme_constant_override("margin_left", horizontal)
+	margin.add_theme_constant_override("margin_right", horizontal)
+	margin.add_theme_constant_override("margin_top", top)
+	margin.add_theme_constant_override("margin_bottom", bottom)
+
+func _reset_shortcuts_and_backdrop() -> void:
+	shortcut_labels.clear()
+	arena_actions.clear()
+	shop_backdrop.hide()
+	_clear(shop_backdrop)
+
+func _page_header(key: String, heading: String) -> void:
 	var nav := _row(shell, 8)
 	if not heading.is_empty():
 		_title(nav, heading, 32)
 	_space(nav)
-	if not game.state.is_empty() and key in ["town", "arena", "scout", "shop"]:
-		var gold := str(int(game.state.gold))
-		_token(nav, "coin", gold + " gold" if key == "shop" else gold, "Gold")
 	if key in ["menu", "town"]:
 		_icon_button(nav, "settings", "Pause menu", _show_pause)
 	else:
 		_icon_button(nav, "settings", "Settings", _show_settings)
 	if key not in ["menu", "allocate"] and not game.tournament_in_progress():
 		_icon_button(nav, "home", "Title screen", show_menu)
-	if not page_notice.is_empty():
-		_wrapped(shell, page_notice, 14, SAND)
-		page_notice = ""
-	if not game.save_error.is_empty():
-		_wrapped(shell, game.save_error, 14, RED)
-	content = _column(shell, 10)
-	_fill(content, true)
 
 func _show_pause() -> void:
 	_show_popup("Paused")
 
 func _show_settings() -> void:
+	if spell_checkout != SpellCheckout.CLOSED:
+		_cancel_spell_checkout()
 	_show_popup("Settings")
 
 func _show_popup(section: String, back: String = "") -> void:
@@ -379,88 +505,176 @@ func _show_popup(section: String, back: String = "") -> void:
 		_clear(settings_popup)
 	else:
 		settings_popup = PopupPanel.new()
-		settings_popup.theme = theme
 		settings_popup.transient = true
 		settings_popup.exclusive = true
+		settings_popup.process_mode = Node.PROCESS_MODE_ALWAYS
 		add_child(settings_popup)
 		settings_popup.window_input.connect(_popup_input)
-		settings_popup.popup_hide.connect(func() -> void:
-			settings_popup.queue_free()
-			settings_popup = null
-			binding_action = ""
-			binding_buttons.clear()
-			if is_instance_valid(fight):
-				fight.set_input_blocked(false))
+		settings_popup.popup_hide.connect(_close_settings_popup)
+		# Freeze the game under both menu pages while keeping the modal controls responsive.
+		_was_paused_before_settings = get_tree().paused
+		_paused_for_settings = true
+		get_tree().paused = true
+		settings_shade.show()
 	if is_instance_valid(fight):
 		fight.set_input_blocked(true)
-	var menu := _card(settings_popup, 12)
+	var palette := ShopView.new("amber-ring") if game.state.is_empty() else _arena_palette()
+	settings_popup.theme = _settings_theme(palette)
+	var menu := palette.card(settings_popup, 12)
 	var panel: Control = menu.get_parent()
 	panel.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	_title(menu, section, 30)
+	var popup_size := Vector2i(360, 0)
 	var primary: Button
 	match section:
 		"Paused":
-			primary = _button(menu, "Resume", settings_popup.hide, true)
+			primary = _button(menu, "Resume", settings_popup.hide)
 			_button(menu, "Settings", _show_popup.bind("Settings", section))
-			_button(menu, "Audio", _show_popup.bind("Audio", section))
 			_button(menu, "Quit", _quit_game)
 		"Settings":
-			_display_settings(menu)
-			_button(menu, "Controls", _show_popup.bind("Controls", section))
-			if back.is_empty():
-				_button(menu, "Audio", _show_popup.bind("Audio", section))
-			if current_screen in ["menu", "slots"]:
-				_button(menu, "Simulator", func() -> void:
-					settings_popup.hide()
-					show_simulator())
-				_button(menu, "Playtest balance", func() -> void:
-					settings_popup.hide()
-					show_balance())
-		"Audio":
-			_audio_settings(menu)
-		"Controls":
-			_control_settings(menu)
+			var scroll := _settings_contents(menu, palette)
+			var footer := _row(menu, 12)
+			_button(footer, "Reset defaults", _reset_control_bindings)
+			_space(footer)
+			primary = _settings_close_button(footer, back)
+			var available := get_viewport_rect().size - Vector2(32, 32)
+			# Fit the control groups before scrolling, with room for the footer to stay visible.
+			var columns: Control = scroll.get_child(0)
+			var height := panel.get_combined_minimum_size().y + columns.get_combined_minimum_size().y
+			height -= scroll.get_combined_minimum_size().y
+			popup_size = Vector2i(minf(1024.0, available.x), ceilf(minf(height + 12.0, available.y)))
 	if primary == null:
-		primary = _button(menu, "Done" if back.is_empty() else "Back", settings_popup.hide if back.is_empty() else _show_popup.bind(back), true)
-	settings_popup.popup_centered(Vector2i(360, ceili(panel.get_combined_minimum_size().y)))
+		primary = _settings_close_button(menu, back)
+	palette.style_button(primary, true)
+	popup_size.y = maxi(popup_size.y, ceili(panel.get_combined_minimum_size().y))
+	settings_popup.popup_centered(popup_size)
 	primary.grab_focus()
+
+func _close_settings_popup() -> void:
+	settings_popup.queue_free()
+	settings_popup = null
+	binding_action = ""
+	binding_buttons.clear()
+	settings_shade.hide()
+	_restore_pause_state()
+	if is_instance_valid(fight):
+		fight.set_input_blocked(false)
+
+func _restore_pause_state() -> void:
+	if _paused_for_settings:
+		_paused_for_settings = false
+		get_tree().paused = _was_paused_before_settings
+
+func _settings_close_button(parent: Control, back: String) -> Button:
+	return _button(parent, "Done" if back.is_empty() else "Back",
+		settings_popup.hide if back.is_empty() else _show_popup.bind(back))
+
+func _settings_theme(palette: ShopView) -> Theme:
+	var themed := theme.duplicate() as Theme
+	themed.set_stylebox("panel", "PopupPanel", StyleBoxEmpty.new())
+	themed.set_stylebox("panel", "PopupMenu", palette.frame(palette.base.darkened(.32), palette.edge, 6))
+	themed.set_stylebox("hover", "PopupMenu", palette.frame(palette.base.lightened(.12), palette.edge, 6))
+	for type in ["Button", "OptionButton", "CheckButton"]:
+		themed.set_stylebox("normal", type, palette.frame(palette.base, palette.edge.darkened(.22), 8))
+		themed.set_stylebox("hover", type, palette.frame(palette.base.lightened(.12), palette.edge, 8))
+		themed.set_stylebox("pressed", type, palette.frame(palette.base.lightened(.18), ShopView.GOLD, 8))
+		themed.set_stylebox("hover_pressed", type, palette.frame(palette.base.lightened(.20), ShopView.GOLD, 8))
+		themed.set_stylebox("focus", type, palette.frame(Color.TRANSPARENT, ShopView.GOLD, 0))
+	return themed
 
 func _popup_input(event: InputEvent) -> void:
 	if not binding_action.is_empty() and event is InputEventKey and event.pressed:
 		settings_popup.set_input_as_handled()
 		if _plain_key_press(event) and event.keycode not in [KEY_NONE, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_META]:
-			var other = key_bindings.find_key(event.keycode)
-			if other != null:
-				key_bindings[other] = key_bindings[binding_action]
-			key_bindings[binding_action] = event.keycode
+			var code: int = event.keycode
+			var conflicts := _key_conflicts(binding_action, code, key_bindings)
+			var updated := key_bindings.duplicate()
+			updated[binding_action] = code
+			if conflicts.size() == 1:
+				# Preserve the existing swap behavior when the old key fits the other action.
+				var other := conflicts[0]
+				var old_code: int = key_bindings[binding_action]
+				if _key_conflicts(other, old_code, updated).is_empty():
+					updated[other] = old_code
+			if not _key_conflicts(binding_action, code, updated).is_empty():
+				var action := conflicts[0]
+				var caption := _binding_caption(action)
+				binding_notice.text = "Already assigned to %s. Choose another key." % caption
+				binding_notice.show()
+				return
+			key_bindings = updated
 			binding_action = ""
 			_apply_back_binding()
 			_refresh_control_settings()
+			binding_notice.text = "Settings could not be saved."
 			binding_notice.visible = not _save_settings()
 		return
 	if event.is_action_pressed("ui_cancel", false, true):
 		settings_popup.set_input_as_handled()
 		settings_popup.hide()
 
-func _control_settings(menu: VBoxContainer) -> void:
-	for action in CONTROL_NAMES:
-		var row := _row(menu, 12)
-		_label(row, CONTROL_NAMES[action]).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+func _settings_contents(menu: VBoxContainer, palette: ShopView) -> ScrollContainer:
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
+	menu.add_child(scroll)
+	_fill(scroll, true)
+	var columns := _row(scroll, 10)
+	_fill(columns)
+	var general := palette.card(columns, 9)
+	_fill(general.get_parent())
+	general.get_parent().size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_title(general, "Display", 23)
+	_display_settings(general)
+	_title(general, "Audio", 23)
+	_audio_settings(general)
+	_binding_group(general, "Arena shortcuts", ARENA_CONTROLS)
+	if current_screen in ["menu", "slots"]:
+		_title(general, "Playtesting", 23)
+		_button(general, "Simulator", func() -> void:
+			settings_popup.hide()
+			show_simulator())
+		_button(general, "Playtest balance", func() -> void:
+			settings_popup.hide()
+			show_balance())
+	var navigation := palette.card(columns, 7)
+	_fill(navigation.get_parent())
+	_binding_group(navigation, "Navigation", NAVIGATION_CONTROLS)
+	var shops := palette.card(columns, 7)
+	_fill(shops.get_parent())
+	_binding_group(shops, "Shops", SHOP_CONTROLS)
+	_binding_group(shops, "Shop tabs", SHOP_TAB_CONTROLS)
+	binding_notice = _settings_notice(menu)
+	_refresh_control_settings()
+	return scroll
+
+func _binding_group(list: VBoxContainer, heading: String, actions: Dictionary) -> void:
+	_title(list, heading, 23)
+	for action in actions:
+		var row := _row(list, 9)
+		_label(row, actions[action], 15).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_space(row)
 		var button := _button(row, "", func() -> void:
 			binding_action = "" if binding_action == action else action
+			binding_notice.hide()
 			_refresh_control_settings())
-		button.custom_minimum_size.x = 132
-		button.accessibility_name = "Rebind " + CONTROL_NAMES[action]
+		button.custom_minimum_size = Vector2(94, 36)
+		button.accessibility_name = "Rebind " + actions[action]
 		binding_buttons[action] = button
-	_button(menu, "Reset defaults", func() -> void:
-		key_bindings = DEFAULT_KEYS.duplicate()
-		binding_action = ""
-		_apply_back_binding()
-		_refresh_control_settings()
-		binding_notice.visible = not _save_settings())
-	binding_notice = _settings_notice(menu)
+
+func _binding_caption(action: String) -> String:
+	for group in [NAVIGATION_CONTROLS, ARENA_CONTROLS, SHOP_CONTROLS, SHOP_TAB_CONTROLS]:
+		if action in group:
+			return group[action]
+	return action
+
+func _reset_control_bindings() -> void:
+	key_bindings = DEFAULT_KEYS.duplicate()
+	binding_action = ""
+	_apply_back_binding()
 	_refresh_control_settings()
+	binding_notice.text = "Settings could not be saved."
+	binding_notice.visible = not _save_settings()
 
 func _refresh_control_settings() -> void:
 	for action in binding_buttons:
@@ -470,14 +684,151 @@ func _refresh_control_settings() -> void:
 	if is_instance_valid(result_next_button):
 		result_next_button.tooltip_text = "Shortcut · " + OS.get_keycode_string(key_bindings.next)
 
+	for entry in shortcut_labels:
+		_update_shortcut_label(entry)
+	if current_screen == "shop" and shop_view != null and selected_item in shop_entries:
+		_set_shop_buy_caption(data.items[selected_item])
+
+# The last two tabs are Armory-only. The first three are shared by both shops.
+func _control_scope(action: String) -> String:
+	if action in ["shop_tab_4", "shop_tab_5"]:
+		return "armor"
+	if action == "magic_clear":
+		return "magic"
+	return "global"
+
+func _key_conflicts(action: String, code: int, bindings: Dictionary) -> Array[String]:
+	var conflicts: Array[String] = []
+	for other in bindings:
+		if other == action or bindings[other] != code:
+			continue
+		# Next bout is only active on results. Town and Back also work there.
+		if action == "next" or other == "next":
+			if action not in ["town", "back"] and other not in ["town", "back"]:
+				continue
+		var scope := _control_scope(action)
+		var other_scope := _control_scope(other)
+		if scope == "global" or other_scope == "global" or scope == other_scope:
+			conflicts.append(other)
+	return conflicts
+
 func _load_key_bindings(settings: ConfigFile) -> void:
 	var choices := {}
+	# Keep existing player choices when introducing new shortcut defaults.
 	for action in DEFAULT_KEYS:
-		var code = settings.get_value("controls", action, DEFAULT_KEYS[action])
-		if not code is int or code == KEY_NONE or OS.get_keycode_string(code).is_empty() or code in choices.values():
-			return
+		var candidates := [settings.get_value("controls", action, KEY_NONE)]
+		# Prefer a customized legacy binding to a default. Armory wins when both tabs had different custom keys.
+		for legacy in LEGACY_SHOP_TAB_BINDINGS.get(action, []):
+			var previous = settings.get_value("controls", legacy, KEY_NONE)
+			if previous != DEFAULT_KEYS[action]:
+				candidates.append(previous)
+		for code in candidates:
+			if code is int and code != KEY_NONE and not OS.get_keycode_string(code).is_empty() and _key_conflicts(action, code, choices).is_empty():
+				choices[action] = code
+				break
+	for action in DEFAULT_KEYS:
+		if action in choices:
+			continue
+		var code: int = DEFAULT_KEYS[action]
+		while not _key_conflicts(action, code, choices).is_empty():
+			code = KEY_F1 if code < KEY_F1 or code > KEY_F35 else code + 1
 		choices[action] = code
 	key_bindings = choices
+
+func _key_name(action: String) -> String:
+	match int(key_bindings[action]):
+		KEY_UP: return "↑"
+		KEY_DOWN: return "↓"
+		KEY_LEFT: return "←"
+		KEY_RIGHT: return "→"
+		KEY_PAGEUP: return "PgUp"
+		KEY_PAGEDOWN: return "PgDn"
+		KEY_ENTER, KEY_KP_ENTER: return "↵"
+		KEY_DELETE: return "Del"
+		KEY_ESCAPE: return "Esc"
+		KEY_BACKSPACE: return "⌫"
+	return OS.get_keycode_string(key_bindings[action])
+
+func _shortcut_caption(caption: String, action: String) -> String:
+	return "%s  (%s)" % [caption, _key_name(action)]
+
+func _track_shortcut(target: Control, caption: String, action: String, keycap: Label = null) -> void:
+	shortcut_labels.append({"target": target, "caption": caption, "action": action, "keycap": keycap})
+	_update_shortcut_label(shortcut_labels.back())
+
+func _update_shortcut_label(entry: Dictionary) -> void:
+	var target: Control = entry.target
+	if is_instance_valid(entry.keycap):
+		entry.keycap.text = _key_name(entry.action)
+	target.tooltip_text = _shortcut_caption(entry.caption, entry.action)
+
+func _navigation_shortcut(code: int) -> bool:
+	if current_screen not in ["town", "shop", "character", "arena", "scout", "tournament"]:
+		return false
+	if code == key_bindings.character:
+		if current_screen == "character":
+			_close_character()
+		else:
+			show_character()
+		return true
+	if code == key_bindings.settings and current_screen != "town":
+		_show_settings()
+		return true
+	if code == key_bindings.settings:
+		_show_popup("Settings", "Paused")
+		return true
+	if code == key_bindings.town and current_screen != "town":
+		if not game.tournament_in_progress():
+			show_town()
+		return true
+	if code == key_bindings.arena and current_screen == "town":
+		show_arena()
+		return true
+	if current_screen in ["arena", "scout", "tournament"]:
+		for action in arena_actions:
+			if code == key_bindings[action]:
+				var button: Button = arena_actions[action]
+				if not button.disabled:
+					button.pressed.emit()
+				return true
+		return false
+	if game.tournament_in_progress():
+		return false
+	for entry in [["armory", "armor"], ["weaponsmith", "weapon"], ["magic_shop", "spell"]]:
+		if code == key_bindings[entry[0]]:
+			if current_screen != "shop" or shop_type != entry[1]:
+				_enter_shop(entry[1])
+			return true
+	return current_screen == "shop" and shop_view != null and _equipment_shortcut(code)
+
+func _equipment_shortcut(code: int) -> bool:
+	var filters: Dictionary = SHOP_FILTERS.get(shop_type, {})
+	for filter in filters:
+		if code == key_bindings[filters[filter]]:
+			if shop_type == "armor":
+				_select_armor(filter)
+			else:
+				_select_magic(filter)
+			return true
+	if code == key_bindings.shop_buy:
+		# Return and Space keep their usual behavior when a button has keyboard focus.
+		if code in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE] and get_viewport().gui_get_focus_owner() is BaseButton:
+			return false
+		if shop_buy.visible and not shop_buy.disabled:
+			_buy_item()
+		return true
+	if code == key_bindings.shop_up or code == key_bindings.shop_down:
+		var stock := shop_entries.keys()
+		var index := stock.find(selected_item)
+		if index >= 0:
+			var target = stock[clampi(index + (-1 if code == key_bindings.shop_up else 1), 0, stock.size() - 1)]
+			if target != selected_item:
+				_select_stock_item(target)
+		return true
+	if shop_type == "spell" and code == key_bindings.magic_clear and clear_spell_button.visible:
+		_clear_spell()
+		return true
+	return false
 
 func _apply_back_binding() -> void:
 	for input in InputMap.action_get_events("ui_cancel"):
@@ -493,15 +844,12 @@ func _settings_notice(menu: VBoxContainer) -> Label:
 	return notice
 
 func _display_settings(menu: VBoxContainer) -> void:
-	var display_row := _row(menu, 12)
-	_label(display_row, "Display").size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var display := OptionButton.new()
 	display.accessibility_name = "Display"
 	display.add_item("Windowed", DisplayMode.WINDOWED)
 	display.add_item("Fullscreen", DisplayMode.FULLSCREEN)
 	display.select(display.get_item_index(display_mode))
-	display_row.add_child(display)
-	_fill(display)
+	menu.add_child(display)
 	var save_notice := _settings_notice(menu)
 	display.item_selected.connect(func(index: int) -> void:
 		display_mode = display.get_item_id(index)
@@ -546,7 +894,12 @@ func _audio_settings(menu: VBoxContainer) -> void:
 		save_notice.visible = not _save_settings())
 
 func _music_for_screen() -> AudioStream:
-	if town_music_enabled and current_screen in ["town", "allocate"]:
+	if current_screen == "character":
+		match character_return:
+			"shop": return SHOP_THEMES.get(shop_type) if venue_music_enabled else null
+			"arena": return ARENA_LOBBY_THEME if venue_music_enabled else null
+			"scout", "tournament": return PRE_FIGHT_THEME if venue_music_enabled else null
+	if town_music_enabled and current_screen in ["town", "allocate", "character"]:
 		return TOWN_THEME
 	if music_enabled and current_screen in ["menu", "slots", "hall", "create"]:
 		return TITLE_THEME
@@ -584,7 +937,8 @@ func _sync_audio() -> void:
 	music_player = incoming
 	fading_music = outgoing
 	var fade_time := .18 if current_screen == "result" else (.28 if current_screen == "battle" else .55)
-	music_transition = create_tween().set_parallel()
+	# Audio settings can change the music even while the game animation clock is paused.
+	music_transition = music_player.create_tween().set_parallel()
 	music_transition.tween_property(incoming, "volume_linear", db_to_linear(-5.0) if wanted != null else 0.0, fade_time)
 	music_transition.tween_property(outgoing, "volume_linear", 0.0, fade_time)
 	music_transition.finished.connect(func() -> void:
@@ -626,39 +980,36 @@ func _save_settings() -> bool:
 	if settings.has_section_key("display", "fullscreen_bouts"):
 		settings.erase_section_key("display", "fullscreen_bouts")
 	settings.set_value("display", "mode", display_mode)
+	if settings.has_section_key("controls", "magic_preview"):
+		settings.erase_section_key("controls", "magic_preview")
+	for legacy_keys in LEGACY_SHOP_TAB_BINDINGS.values():
+		for legacy in legacy_keys:
+			if settings.has_section_key("controls", legacy):
+				settings.erase_section_key("controls", legacy)
 	for action in key_bindings:
 		settings.set_value("controls", action, key_bindings[action])
 	return settings.save(USER_SETTINGS) == OK
 
-func _show_progress(parent: Node) -> void:
-	var status := _row(parent, 10)
+func _xp_bar(parent: Node, palette: ShopView) -> void:
 	var level := int(game.state.level)
-	var xp := int(game.state.xp)
-	var cap := int(game.arena().cap)
-	if game.state.complete:
-		_token(status, "trophy", "League champion", "Tournament winner")
-	elif game.state.pending:
-		_token(status, "xp", "Level %d" % (level + 1), "Level up")
-	elif level >= cap:
-		_token(status, "trophy", "Tournament ready", "Tournament")
-	else:
-		var threshold := int(data.rules.xp_levels[level])
-		_token(status, "xp", "Level %d" % level, "Experience")
-		var bar := ProgressBar.new()
-		bar.max_value = threshold
-		bar.min_value = int(data.rules.xp_levels[level - 1])
-		bar.value = xp
-		bar.show_percentage = false
-		bar.custom_minimum_size.y = 8
-		bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		bar.add_theme_stylebox_override("background", _style(BG, BORDER, 2))
-		bar.add_theme_stylebox_override("fill", _style(SAND, SAND, 2))
-		status.add_child(bar)
-		_fill(bar)
+	var bar := ProgressBar.new()
+	bar.max_value = int(data.rules.xp_levels[level])
+	bar.min_value = int(data.rules.xp_levels[level - 1])
+	bar.value = int(game.state.xp)
+	bar.show_percentage = false
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	parent.add_child(bar)
+	bar.custom_minimum_size = Vector2(90, 6)
+	bar.add_theme_stylebox_override("background", palette.frame(palette.base.darkened(.38), palette.edge, 0))
+	bar.add_theme_stylebox_override("fill", palette.frame(SAND, SAND, 0))
+	bar.mouse_filter = Control.MOUSE_FILTER_PASS
+	bar.tooltip_text = "%d / %d XP toward level %d" % [bar.value - bar.min_value, bar.max_value - bar.min_value, level + 1]
+	bar.accessibility_name = bar.tooltip_text
 
-func _stage(parent: Node, kind: String, height: int = 205) -> Control:
+func _stage(parent: Node, kind: String, height: int = 205, arena: int = 0) -> Stage:
 	var stage := Stage.new()
 	stage.kind = kind
+	stage.arena = arena
 	stage.data = data
 	stage.custom_minimum_size.y = height
 	parent.add_child(stage)
@@ -675,25 +1026,41 @@ func show_menu() -> void:
 func _show_title(selecting_slot: bool) -> void:
 	_page("slots" if selecting_slot else "menu", "")
 	var hero := Control.new()
+	hero.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(hero)
 	_fill(hero, true)
-	var lockup := _column(hero, 20)
-	lockup.anchor_left = .06
-	lockup.anchor_top = .29
-	var nameplate := _title(lockup, "The Cinder\nLeague", 86)
-	nameplate.add_theme_color_override("font_color", Color("#ffe2ad"))
-	nameplate.add_theme_color_override("font_shadow_color", Color("#150f14"))
-	nameplate.add_theme_constant_override("shadow_offset_y", 4)
-	nameplate.add_theme_constant_override("line_spacing", -12)
+	var lockup := _column(hero, 16)
+	lockup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lockup.anchor_left = .025
+	lockup.anchor_right = .51
+	lockup.anchor_bottom = .92
+	lockup.alignment = BoxContainer.ALIGNMENT_CENTER
+	var logo := TextureRect.new()
+	logo.texture = TITLE_LOGO
+	logo.custom_minimum_size.y = 196 if not selecting_slot else 168
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	logo.accessibility_name = "The Cinder League"
+	lockup.add_child(logo)
 	if not selecting_slot:
 		var play := _button(lockup, "Play", _show_title.bind(true), true)
-		play.custom_minimum_size = Vector2(186, 56)
-		play.size_flags_horizontal = SIZE_SHRINK_BEGIN
+		play.custom_minimum_size = Vector2(244, 60)
+		play.size_flags_horizontal = SIZE_SHRINK_CENTER
 		play.add_theme_font_size_override("font_size", 23)
+		play.add_theme_color_override("font_color", Color("#ffe8bc"))
+		play.add_theme_stylebox_override("normal", _style(Color("#4c301d"), Color("#ca9a59"), 10))
+		play.add_theme_stylebox_override("hover", _style(Color("#664426"), Color("#f3c780"), 10))
+		play.add_theme_stylebox_override("pressed", _style(Color("#352016"), Color("#e8b875"), 10))
+		play.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		play.grab_focus()
 		var hall := _button(lockup, "Hall of Fame", show_hall_of_fame)
-		hall.custom_minimum_size = Vector2(186, 43)
-		hall.size_flags_horizontal = SIZE_SHRINK_BEGIN
+		hall.custom_minimum_size = Vector2(244, 46)
+		hall.size_flags_horizontal = SIZE_SHRINK_CENTER
+		hall.add_theme_color_override("font_color", Color("#dec7a8"))
+		hall.add_theme_stylebox_override("normal", _style(Color("#1c1819", .94), Color("#705742"), 9))
+		hall.add_theme_stylebox_override("hover", _style(Color("#382a23"), SAND, 9))
+		hall.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		return
 	var slots := _row(content)
 	for number in range(1, Campaign.SLOT_COUNT + 1):
@@ -702,7 +1069,7 @@ func _show_title(selecting_slot: bool) -> void:
 		var saved: Dictionary = game.read_slot(number)
 		if saved.get("invalid", false):
 			_title(card, "Slot %d" % number, 21)
-			_label(card, "Save could not be opened", 17, RED)
+			_label(card, "Previous alpha save" if saved.get("incompatible", false) else "Save could not be opened", 17, RED)
 			_button(card, "Replace save", _confirm_replace.bind(number))
 		elif saved.is_empty():
 			_title(card, "Slot %d" % number, 21)
@@ -896,10 +1263,11 @@ func _update_point_total() -> void:
 		stat_labels.Strength.tooltip_text += ". Strength adds less damage above %s points." % String.num(
 			Duel.strength_damage_threshold(rule, values), 2)
 	stat_labels.Defence.tooltip_text = "%d%% block chance" % roundi(Duel.block_chance(rule, values.Defence) * 100)
-	stat_labels.Magic.tooltip_text = "+%.1f spell damage · %.1f spell resistance\n+%d casts · One more every %d Magic\nReserve spell at %d Magic" % [
+	stat_labels.Magic.tooltip_text = "+%.1f spell damage · %.1f spell resistance\n%d prepared slots · One more every %d Magic" % [
 		values.Magic * rule.damage_per_magic, Duel.spell_resistance(rule, values.Magic),
-		data.bonus_spell_casts(int(values.Magic)), int(rule.magic_per_extra_cast), int(rule.reserve_spell_magic)]
-	stat_labels.Vitality.tooltip_text = "Health and recovery"
+		data.spell_slots(int(values.Magic)), int(rule.magic_per_extra_cast)]
+	stat_labels.Vitality.tooltip_text = "%d max health · %d HP recovered after your turn" % [
+		projected.max_hp, Duel.regeneration(rule, values.Vitality)]
 	var stamina := int(values.Stamina)
 	var move_bonus := Duel.stamina_move_bonus(rule, stamina)
 	var leap_bonus := Duel.stamina_move_bonus(rule, stamina, true)
@@ -955,16 +1323,92 @@ func show_town() -> void:
 	if game.tournament_in_progress():
 		show_arena()
 		return
-	_page("town", "Town square")
-	_show_progress(content)
+	var palette := _arena_palette()
+	_page("town", "", palette)
 	var map := _stage(content, "town", 350)
-	_town_destination(map, Rect2(44, 375, 345, 414), "attack", "Weaponsmith", _enter_shop.bind("weapon"))
-	_town_destination(map, Rect2(397, 383, 309, 301), "helmet", "Armory", _enter_shop.bind("armor"))
-	_town_destination(map, Rect2(779, 410, 390, 266), "cast", "Magic shop", _enter_shop.bind("spell"))
-	_town_destination(map, Rect2(1231, 291, 282, 356), "trophy", "Arena", show_arena)
+	_town_destination(map, palette, Rect2(44, 375, 345, 414), "attack", "Weaponsmith", _enter_shop.bind("weapon"), "weaponsmith")
+	_town_destination(map, palette, Rect2(397, 383, 309, 301), "helmet", "Armory", _enter_shop.bind("armor"), "armory")
+	_town_destination(map, palette, Rect2(779, 410, 390, 266), "cast", "Magic shop", _enter_shop.bind("spell"), "magic_shop")
+	_town_destination(map, palette, Rect2(1231, 291, 282, 356), "trophy", "Arena", show_arena, "arena")
+
+func _arena_palette() -> ShopView:
+	return ShopView.new(str(Content.arena(game.arena_index()).get("id", "")))
+
+func _status_bar(parent: Control, palette: ShopView) -> void:
+	var town := current_screen == "town"
+	var inset := MarginContainer.new()
+	inset.name = "StatusBar"
+	_page_insets(inset, PAGE_INSET_X, 4, 4)
+	parent.add_child(inset)
+	var lane := _row(inset, 8)
+	var level := "Character · Lv. %d" % game.state.level
+	var toggle: Callable = _close_character if current_screen == "character" else show_character
+	var character := _button(lane, "", toggle)
+	character.accessibility_name = "Character"
+	palette.style_button(character, current_screen == "character")
+	_track_shortcut(character, level, "character", palette.button_copy(character, level, _key_name("character")))
+	_token(lane, "coin", str(int(game.state.gold)), "Gold")
+	var tournament_ready: bool = game.state.level >= game.arena().cap
+	if not game.state.complete and not tournament_ready:
+		var progress := _row(lane, 5)
+		palette.label(progress, "XP", 13, ShopView.MUTED)
+		_xp_bar(progress, palette)
+	_space(lane)
+	_label(lane, game.arena().name, 16, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if game.state.complete or tournament_ready:
+		_league_status(lane, palette, "League champion" if game.state.complete else "Tournament ready")
+	var gear := _icon_button(lane, "settings", "Settings", _show_pause if town else _show_settings)
+	_track_shortcut(gear, "Settings", "settings")
+	gear.custom_minimum_size = Vector2(38, 35)
+	palette.style_button(gear)
+	if not game.tournament_in_progress():
+		var home := _icon_button(lane, "home", "Title screen", show_menu)
+		home.custom_minimum_size = Vector2(38, 35)
+		palette.style_button(home)
+
+func _league_status(parent: Control, palette: ShopView, caption: String) -> void:
+	var line := _row(parent, 4)
+	line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.add_child(Symbol.make("trophy", 16))
+	palette.label(line, caption, 14, SAND)
+
+func show_character() -> void:
+	if current_screen not in ["shop", "town", "arena", "scout", "tournament"]:
+		return
+	character_return = current_screen
+	var palette := _arena_palette()
+	_page("character", "", palette)
+	var heading := _row(content)
+	_title(heading, game.state.name, 34)
+	_space(heading)
+	var back := _button(heading, "", _close_character)
+	back.accessibility_name = "Back"
+	palette.style_button(back)
+	_track_shortcut(back, "Back", "back", palette.button_copy(back, "Back", _key_name("back")))
+	var view := CharacterView.new(palette, serif)
+	var figure := view.build(content, data, game.state, STAT_ICONS, _item_icon)
+	var portrait := _stage(figure, "avatar", 275)
+	portrait.open_preview = true
+
+func _close_character() -> void:
+	match character_return:
+		"shop": show_shop()
+		"arena": show_arena()
+		"scout": _scout_bout(faceoff_tournament)
+		"tournament": _scout_bout(true)
+		_: show_town()
+
 
 func _enter_shop(kind: String) -> void:
 	var entering := current_screen != "shop" or shop_type != kind
+	if kind == "spell" and entering:
+		magic_category = "Damage"
+		shop_spell_slot = 0
+		spell_slot_chosen = false
+		for id in game.state.loadout.spells:
+			if not str(id).is_empty():
+				magic_category = _spell_shop_category(data.items[id])
+				break
 	shop_type = kind
 	selected_item = ""
 	show_shop()
@@ -978,117 +1422,529 @@ func show_shop() -> void:
 	if game.state.pending:
 		_allocate_level()
 		return
-	var title: String = {"armor": "Armory", "weapon": "Weaponsmith", "spell": "Magic shop"}[shop_type]
-	_page("shop", title)
-	var nav := _row(content)
-	_button(nav, "Town square", show_town)
-	_space(nav)
-	for pair in [["Armory", "armor"], ["Weaponsmith", "weapon"], ["Magic shop", "spell"]]:
-		_button(nav, pair[0], _enter_shop.bind(pair[1]), shop_type == pair[1])
-	var row := _row(content, 10)
-	_fill(row, true)
-	var rail := _card(row)
-	rail.get_parent().custom_minimum_size.x = 400
-	if shop_type == "armor":
-		var tabs := _row(rail, 4)
-		for part in Data.SLOTS:
-			var tab := _icon_button(tabs, part, SLOTS[part], _select_armor.bind(part), armor_slot == part)
-			_fill(tab)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	rail.add_child(scroll)
-	_fill(scroll, true)
-	var list := _column(scroll, 7)
-	_fill(list)
+	shop_view = _arena_palette()
+	_page("shop", "", shop_view)
+	var doors := _row(content, 6)
+	_shop_tab(doors, "Town", "town", show_town, false, SHOP_NAV_HEIGHT)
+	_shop_tab(doors, "Armory", "armory", _enter_shop.bind("armor"), shop_type == "armor", SHOP_NAV_HEIGHT)
+	_shop_tab(doors, "Weaponsmith", "weaponsmith", _enter_shop.bind("weapon"), shop_type == "weapon", SHOP_NAV_HEIGHT)
+	_shop_tab(doors, "Magic shop", "magic_shop", _enter_shop.bind("spell"), shop_type == "spell", SHOP_NAV_HEIGHT)
+	var filters: Dictionary = SHOP_FILTERS.get(shop_type, {})
+	shop_view.build(content, not filters.is_empty(), .45 if shop_type == "weapon" else .43)
+	var armor := shop_type == "armor"
+	for filter in filters:
+		var caption: String = ARMOR_TAB_NAMES[filter] if armor else filter
+		var action: Callable = _select_armor.bind(filter) if armor else _select_magic.bind(filter)
+		_shop_tab(shop_view.tabs, caption, filters[filter], action, filter == (armor_slot if armor else magic_category))
+	var columns := _stock_columns()
+	shop_view.headings.add_theme_constant_override("separation", 5)
+	var name_heading := shop_view.label(shop_view.headings, "Item", 14, ShopView.MUTED)
+	_fill(name_heading)
+	for column in columns:
+		shop_view.column_cell(shop_view.headings, column[0], column[1], 14, ShopView.MUTED)
+	shop_view.column_cell(shop_view.headings, "Price", _stock_price_width(), 14, ShopView.MUTED)
 	shop_entries.clear()
-	var equipped_id := ""
+	var stock: Array[Dictionary] = []
 	for item in data.items.values():
-		if item.kind != shop_type and not (shop_type == "spell" and item.kind in ["potion", "enchant"]):
-			continue
-		if shop_type == "armor" and item.slot != armor_slot:
-			continue
-		var locked: String = data.lock_reason(game.state, item)
-		var button := _button(list, item.name, _preview_item.bind(item.id))
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.custom_minimum_size.y = 58
-		button.icon = _item_icon(item)
-		button.expand_icon = true
-		button.add_theme_constant_override("icon_max_width", 49)
-		if not locked.is_empty():
-			button.tooltip_text = locked
-		if shop_type != "spell" and _equipped(item):
+		if _shop_stocks(item):
+			stock.append(item)
+	if shop_type != "weapon":
+		stock.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return left.level < right.level)
+	var equipped_id := ""
+	for item in stock:
+		_add_stock_row(item, columns)
+		if equipped_id.is_empty() and _equipped(item):
 			equipped_id = item.id
-			button.accessibility_description = "Equipped"
-			var badge := _label(button, "Equipped", 14, GREEN)
-			badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			badge.set_anchors_preset(PRESET_CENTER_RIGHT)
-			var badge_size := badge.get_combined_minimum_size()
-			badge.offset_left = -12 - badge_size.x
-			badge.offset_right = -12
-			badge.offset_top = -badge_size.y * .5
-			badge.offset_bottom = badge_size.y * .5
-		elif not locked.is_empty():
-			var lock_icon := Symbol.make("lock", 23)
-			button.add_child(lock_icon)
-			lock_icon.set_anchors_preset(PRESET_CENTER_RIGHT)
-			lock_icon.offset_left = -33
-			lock_icon.offset_right = -10
-			lock_icon.offset_top = -11.5
-			lock_icon.offset_bottom = 11.5
-			for color in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color"]:
-				button.add_theme_color_override(color, Color("#161616"))
-		shop_entries[item.id] = button
-	var right := _column(row, 9)
-	_fill(right, true)
-	var display := _card(right, 5)
-	_fill(display.get_parent(), true)
-	shop_stage = _stage(display, "avatar", 305)
-	var detail := _card(right, 10)
-	var checkout := _row(detail)
-	shop_title = _title(checkout, "", 23)
-	shop_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_space(checkout)
-	spell_preview_button = _icon_button(checkout, "play", "Replay spell preview", _replay_spell)
-	spell_preview_button.hide()
-	shop_buy = _button(checkout, "Buy & equip", _buy_item, true)
-	shop_buy.add_theme_color_override("font_disabled_color", MUTED)
+	shop_stage = _stage(shop_view.preview, "avatar", 180)
+	shop_stage.open_preview = true
+	var kit_header := _title(shop_view.kit_panel, SHOP_KIT_TITLES[shop_type], 24)
+	shop_view.kit_panel.move_child(kit_header, 0)
+	var magic_shop := shop_type == "spell"
+	if magic_shop:
+		spell_checkout_prompt = _wrapped(shop_view.kit_panel, "", 15, ShopView.TEXT)
+		shop_view.kit_panel.move_child(spell_checkout_prompt, 1)
+		spell_checkout_prompt.hide()
+	var header := _row(shop_view.details, 12)
+	var title_area := _column(header, 2)
+	_fill(title_area)
+	shop_title = _title(title_area, "", 24)
+	shop_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	shop_requirements = HFlowContainer.new()
-	shop_requirements.add_theme_constant_override("h_separation", 14)
-	detail.add_child(shop_requirements)
+	shop_requirements.add_theme_constant_override("h_separation", 9)
+	title_area.add_child(shop_requirements)
+	var actions := _column(header, 3)
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	var buttons := _row(actions, 6)
+	buttons.alignment = BoxContainer.ALIGNMENT_END
+	var notice_parent: BoxContainer = title_area if magic_shop else actions
+	spell_slot_notice = shop_view.label(notice_parent, "", 14, ShopView.MUTED)
+	if not magic_shop:
+		spell_slot_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	clear_spell_button = _button(buttons, "", _clear_spell)
+	_style_shop_action(clear_spell_button, "Clear slot", "magic_clear")
+	shop_buy = _button(buttons, "", _buy_item)
+	shop_buy.custom_minimum_size.y = 38
+	shop_stats = _row(shop_view.details, 7)
+	shop_view.style_button(shop_buy, true, true)
+	clear_spell_button.hide()
+	shop_buy.hide()
 	shop_requirements.hide()
-	shop_stats = HFlowContainer.new()
-	shop_stats.add_theme_constant_override("h_separation", 24)
-	shop_stats.add_theme_constant_override("v_separation", 8)
-	detail.add_child(shop_stats)
-	reserve_row = _row(detail)
-	reserve_label = _label(reserve_row, "", 15, SAND)
-	_space(reserve_row)
-	reserve_button = _button(reserve_row, "Equip as reserve", _buy_item.bind(true))
-	clear_reserve_button = _button(reserve_row, "Clear reserve", _clear_reserve_spell)
-	reserve_row.hide()
 	if shop_entries.is_empty():
-		shop_buy.disabled = true
 		shop_title.text = "No stock available"
+		_refresh_shop_kit()
 		return
 	if selected_item not in shop_entries:
-		selected_item = equipped_id if not equipped_id.is_empty() else str(shop_entries.keys().front())
+		selected_item = equipped_id if not equipped_id.is_empty() else stock[0].id
 	_preview_item(selected_item)
-	if not equipped_id.is_empty():
-		scroll.ensure_control_visible.call_deferred(shop_entries[selected_item])
+
+func _shop_tab(parent: Control, caption: String, action: String, callback: Callable, active: bool = false,
+		height: int = 44) -> void:
+	var tab := _button(parent, "", callback)
+	_fill(tab)
+	var keycap := shop_view.shortcut(tab, caption, _key_name(action), active, height)
+	_track_shortcut(tab, caption, action, keycap)
+
+func _shop_stocks(item: Dictionary) -> bool:
+	match shop_type:
+		"weapon": return item.kind == "weapon"
+		"armor": return item.kind == "armor" and item.slot == armor_slot
+	return (data.is_prepared_spell(item) or item.kind == "potion") and _spell_shop_category(item) == magic_category
+
+func _stock_columns() -> Array:
+	match shop_type:
+		"armor": return [["Armor", 48], ["Level", 43], ["Defence", 63]]
+		"weapon": return [["Damage", 53], ["Stamina", 56], ["Reach", 40]]
+	match magic_category:
+		"Damage": return [["Damage", 53], ["Stamina", 56], ["Level", 38], ["Magic", 39]]
+		"Utility": return [["Stamina", 56], ["Level", 38], ["Magic", 39]]
+	return []
+
+func _stock_price_width() -> int:
+	return 82 if shop_type == "armor" else 76
+
+func _add_stock_row(item: Dictionary, columns: Array) -> void:
+	var button := _button(shop_view.stock, "", _select_stock_item.bind(item.id))
+	button.accessibility_name = item.name
+	var locked: String = data.lock_reason(game.state, item)
+	button.tooltip_text = locked
+	button.custom_minimum_size.y = 54
+	button.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var line := shop_view.inset_row(button)
+	shop_view.icon(line, _item_icon(item), 34)
+	var name_parent: Control = line
+	var show_weapon_lock: bool = item.kind == "weapon" and not locked.is_empty()
+	if item.kind == "potion" or show_weapon_lock:
+		name_parent = _column(line, 3)
+		name_parent.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_fill(name_parent)
+	var item_name := shop_view.label(name_parent, item.name, 17 if item.kind == "weapon" else 18)
+	item_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_fill(item_name)
+	if item.kind == "potion" or show_weapon_lock:
+		var secondary := _weapon_lock(item) if show_weapon_lock else _magic_effect(item)
+		var secondary_color := RED if show_weapon_lock else ShopView.MUTED
+		var note := shop_view.label(name_parent, secondary, 14, secondary_color)
+		note.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	for column in columns:
+		var value := _stock_value(item, column[0])
+		var color := ShopView.TEXT
+		if column[0] == "Level" and game.state.level < item.level:
+			color = RED
+		if column[0] in ["Magic", "Defence"] and game.state.stats[column[0]] < item.minimum:
+			color = RED
+		shop_view.column_cell(line, value, column[1], 16, color)
+	var price_width := _stock_price_width()
+	if _equipped(item):
+		button.accessibility_description = "Equipped"
+		shop_view.column_cell(line, "Prepared" if data.is_prepared_spell(item) else "Equipped", price_width, 14, GREEN)
+	elif item.id in game.state.owned and not data.is_prepared_spell(item):
+		shop_view.column_cell(line, "Owned", price_width, 14, ShopView.MUTED)
+	else:
+		shop_view.price(line, int(item.price), price_width)
+	shop_view.ignore_mouse(line)
+	shop_entries[item.id] = button
+
+func _select_stock_item(id: String) -> void:
+	var item: Dictionary = data.items[id]
+	if data.is_prepared_spell(item) and _equipped(item):
+		spell_slot_chosen = false
+	_preview_item(id)
+
+func _stock_value(item: Dictionary, column: String) -> String:
+	match column:
+		"Armor": return str(int(item.armor))
+		"Damage": return _weapon_damage(item) if item.kind == "weapon" else _spell_damage(item)
+		"Stamina": return str(int(item.energy))
+		"Reach": return str(int(item.reach))
+		"Level": return str(int(item.level))
+	return str(int(item.minimum))
+
+func _weapon_lock(item: Dictionary) -> String:
+	var missing := PackedStringArray()
+	if game.state.level < item.level:
+		missing.append("Lv. %d" % item.level)
+	if game.state.stats.Strength < item.minimum:
+		missing.append("%d Str." % item.minimum)
+	return "Needs " + " · ".join(missing)
+
+func _weapon_damage(weapon: Dictionary) -> String:
+	# Show a normal attack using the current build, before temporary buffs and rival defenses.
+	var fighter := {"weapon": weapon, "stats": game.state.stats}
+	return String.num(Duel.strike_damage(data.rules, fighter, false), 1)
+
+func _style_shop_action(button: Button, caption: String, action: String) -> void:
+	shop_view.style_button(button)
+	button.accessibility_name = caption
+	_track_shortcut(button, caption, action, shop_view.button_copy(button, caption, _key_name(action)))
+
+func _total_armor(loadout: Dictionary) -> int:
+	var total := 0
+	for id in loadout.armor.values():
+		total += int(data.items.get(id, {}).get("armor", 0))
+	return total
+
+func _refresh_shop_kit() -> void:
+	_clear(shop_view.kit)
+	_clear(shop_view.kit_footer)
+	var loadout: Dictionary = game.state.loadout
+	if shop_type == "weapon":
+		_show_equipped_weapon(data.items[loadout.weapon])
+		return
+	if shop_type == "armor":
+		for part in Data.SLOTS:
+			var id: String = loadout.armor.get(part, "")
+			var piece: Dictionary = data.items.get(id, {})
+			var armor := str(int(piece.armor)) if not piece.is_empty() else ""
+			_kit_row(ARMOR_TAB_NAMES[part], piece, armor, part == armor_slot, _select_armor.bind(part))
+		_kit_row("Weapon", data.items.get(loadout.weapon, {}))
+		shop_view.label(shop_view.kit_footer, "Total armor  %d" % _total_armor(loadout), 15)
+		_space(shop_view.kit_footer)
+		shop_view.label(shop_view.kit_footer, "Defence  %d" % game.state.stats.Defence, 15)
+		return
+	var choosing := spell_checkout != SpellCheckout.CLOSED
+	spell_checkout_prompt.visible = choosing
+	if spell_checkout == SpellCheckout.PICK_SLOT:
+		spell_checkout_prompt.text = "Choose a slot for %s.\n%s / %s to move." % [
+			shop_title.text, _key_name("shop_up"), _key_name("shop_down")]
+	elif spell_checkout == SpellCheckout.CLEAR:
+		spell_checkout_prompt.text = "Clear %s from slot %d?" % [shop_title.text, spell_checkout_slot + 1]
+	var active_slot := spell_checkout_slot if choosing else shop_spell_slot
+	for index in data.spell_slots(int(game.state.stats.Magic)):
+		var prepared: Dictionary = data.items.get(_spell_at(index), {})
+		var active := index == active_slot and magic_category != "Potions"
+		var tile := _magic_loadout_tile(prepared, active, _select_spell_slot.bind(index), index + 1)
+		if spell_checkout == SpellCheckout.CLEAR:
+			if active:
+				tile.add_theme_stylebox_override("disabled", tile.get_theme_stylebox("normal"))
+			tile.disabled = true
+		elif choosing and active:
+			_focus_spell_slot(tile)
+	if choosing:
+		_show_spell_checkout_actions()
+		return
+	var potion: Dictionary = data.items.get(loadout.get("draught", ""), {})
+	_magic_loadout_tile(potion, magic_category == "Potions", _select_potion_pouch)
+	shop_view.label(shop_view.kit_footer, "Your Magic  %d" % game.state.stats.Magic, 16)
+
+func _magic_loadout_tile(item: Dictionary, active: bool, action: Callable, number: int = 0) -> Button:
+	var tile := _button(shop_view.kit, "", action)
+	shop_view.style_button(tile, active)
+	tile.custom_minimum_size.y = 82
+	tile.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var caption := "Slot %d" % number if number > 0 else "Potion pouch"
+	var title: String = item.get("name", "Empty")
+	tile.accessibility_name = "%s, %s" % [caption, title]
+	var row := shop_view.inset_row(tile)
+	if number > 0:
+		var index_label := shop_view.label(row, str(number), 20, SAND)
+		index_label.custom_minimum_size.x = 28
+		index_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		var divider := VSeparator.new()
+		var rule := StyleBoxLine.new()
+		rule.vertical = true
+		rule.color = shop_view.edge.darkened(.25)
+		divider.add_theme_stylebox_override("separator", rule)
+		divider.custom_minimum_size.y = 40
+		divider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(divider)
+	var caption_box := _column(row, 3)
+	_fill(caption_box)
+	caption_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	if not item.is_empty():
+		var icon := shop_view.icon(caption_box, _item_icon(item), 44)
+		icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var name_label := shop_view.label(caption_box, title, 16, ShopView.TEXT if not item.is_empty() else ShopView.MUTED)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	shop_view.ignore_mouse(row)
+	return tile
+
+func _focus_spell_slot(tile: Button) -> void:
+	tile.grab_focus()
+	# The new row has its final position after the containers finish laying out.
+	await get_tree().process_frame
+	if is_instance_valid(tile) and tile.is_inside_tree() and tile.has_focus():
+		shop_view.kit_scroll.ensure_control_visible(tile)
+
+func _show_spell_checkout_actions() -> void:
+	var footer := _column(shop_view.kit_footer, 6)
+	_fill(footer)
+	var previous := _spell_at(spell_checkout_slot)
+	var clearing := spell_checkout == SpellCheckout.CLEAR
+	if not previous.is_empty():
+		_wrapped(footer, "%s must be bought again to prepare it." % data.item_name(previous), 14, ShopView.MUTED)
+	var action := "Clear slot"
+	if not clearing:
+		action = "Prepare" if previous.is_empty() else "Replace"
+		var price := _row(footer, 4)
+		shop_view.label(price, "Cost", 14, ShopView.MUTED)
+		_space(price)
+		shop_view.price(price, int(data.items[selected_item].price))
+	var confirm := _button(footer, "", _confirm_spell_checkout)
+	confirm.accessibility_name = action
+	confirm.custom_minimum_size.y = 38
+	shop_view.style_button(confirm, false, true)
+	shop_view.button_copy(confirm, action, _key_name("shop_buy"))
+	var cancel := _button(footer, "", _cancel_spell_checkout)
+	cancel.accessibility_name = "Cancel"
+	shop_view.style_button(cancel)
+	shop_view.button_copy(cancel, "Cancel", _key_name("back"))
+	if clearing:
+		cancel.grab_focus()
+
+func _show_equipped_weapon(weapon: Dictionary) -> void:
+	var art := shop_view.icon(shop_view.kit, _item_icon(weapon))
+	art.custom_minimum_size = Vector2(0, 120)
+	art.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var inspect := _button(shop_view.kit, weapon.name, _select_stock_item.bind(weapon.id))
+	shop_view.style_button(inspect, selected_item == weapon.id)
+	inspect.tooltip_text = "Select equipped weapon"
+	_weapon_kit_metric("attack", "Damage", _weapon_damage(weapon))
+	_weapon_kit_metric("stamina", "Stamina", str(int(weapon.energy)))
+	_weapon_kit_metric("advance", "Reach", str(int(weapon.reach)))
+	shop_view.label(shop_view.kit_footer, "Your Strength  %d" % game.state.stats.Strength, 16)
+
+func _weapon_kit_metric(symbol: String, caption: String, value: String) -> void:
+	var line := _row(shop_view.kit, 8)
+	line.custom_minimum_size.y = 32
+	line.add_child(Symbol.make(symbol, 24))
+	_label(line, caption, 17).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_space(line)
+	_label(line, value, 17, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+func _kit_row(caption: String, item: Dictionary, value: String = "", active: bool = false, callback: Callable = Callable()) -> void:
+	var line: HBoxContainer
+	var tile: Button
+	if callback.is_valid():
+		tile = _button(shop_view.kit, "", callback)
+		shop_view.style_button(tile, active)
+		tile.custom_minimum_size.y = 60
+		tile.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		tile.accessibility_name = caption + (", empty" if item.is_empty() else ", " + item.name)
+		line = shop_view.inset_row(tile)
+	else:
+		line = _row(shop_view.kit)
+		line.custom_minimum_size.y = 60
+		line.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if not item.is_empty():
+		shop_view.icon(line, _item_icon(item), 34)
+	var copy := _column(line, 1)
+	_fill(copy)
+	copy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	shop_view.label(copy, caption, 14, ShopView.MUTED)
+	var name := shop_view.label(copy, item.get("name", "Empty"), 16)
+	name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	if not value.is_empty():
+		shop_view.label(line, value, 16)
+	shop_view.ignore_mouse(line)
+
+func _spell_damage(item: Dictionary) -> String:
+	return String.num(item.damage + float(game.state.stats.Magic) * data.rules.damage_per_magic, 1)
+
+func _magic_effect(item: Dictionary) -> String:
+	if item.is_empty():
+		return ""
+	if item.kind == "potion":
+		var fighter: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout)
+		fighter.draught = item.id
+		var resource_name := "armor" if item.id == "armor_potion" else "health"
+		return "Restores up to %d %s" % [Duel.potion_amount(data.rules, fighter), resource_name]
+	match item.get("effect", "damage"):
+		"shield": return "Absorbs %d damage" % item.power
+		"push":
+			return "Doubles the gap up to the edge" if data.rules.distance_based_spell_movement else "Pushes up to %d spaces" % item.power
+		"pull":
+			return "Brings the rival next to you" if data.rules.distance_based_spell_movement else "Pulls up to %d spaces" % item.power
+		"enchant":
+			return "+%d damage on the next 3 hits" % Duel.enchant_bonus(item, {"stats": game.state.stats})
+	return ""
+
+func _select_magic(category: String) -> void:
+	if magic_category == category:
+		return
+	magic_category = category
+	selected_item = ""
+	show_shop()
+
+func _select_potion_pouch() -> void:
+	magic_category = "Potions"
+	selected_item = game.state.loadout.get("draught", "")
+	show_shop()
+
+func _select_spell_slot(index: int) -> void:
+	if spell_checkout == SpellCheckout.PICK_SLOT:
+		spell_checkout_slot = index
+		_refresh_shop_kit()
+		return
+	if spell_checkout != SpellCheckout.CLOSED:
+		return
+	shop_spell_slot = index
+	spell_slot_chosen = true
+	var id := _spell_at(index)
+	var browsing_spell: bool = (selected_item in data.items
+		and data.is_prepared_spell(data.items[selected_item]) and not _equipped(data.items[selected_item]))
+	if browsing_spell:
+		_refresh_equipment_detail(data.items[selected_item])
+		return
+	if not id.is_empty():
+		selected_item = id
+		magic_category = _spell_shop_category(data.items[id])
+	elif magic_category == "Potions":
+		magic_category = "Damage"
+		selected_item = ""
+	show_shop()
+
+func _refresh_equipment_detail(item: Dictionary) -> void:
+	for id in shop_entries:
+		shop_view.style_button(shop_entries[id], id == item.id)
+	shop_title.text = item.name
+	_clear(shop_requirements)
+	shop_requirements.hide()
+	_clear(shop_stats)
+	var locked: String = data.lock_reason(game.state, item)
+	var gear: bool = item.kind in ["armor", "weapon"]
+	var equipped := _equipped(item)
+	var prepared: bool = data.is_prepared_spell(item)
+	var owned: bool = item.id in game.state.owned and not prepared
+	var affordable: bool = owned or game.state.gold >= item.price
+	var choosing := spell_checkout != SpellCheckout.CLOSED
+	clear_spell_button.visible = prepared and equipped and not choosing
+	shop_buy.disabled = equipped or not locked.is_empty() or not affordable
+	var prepared_slot: int = game.state.loadout.spells.find(item.id) if prepared and equipped else -1
+	if prepared and not spell_slot_chosen:
+		if prepared_slot >= 0:
+			shop_spell_slot = prepared_slot
+		else:
+			# Prefer an empty slot until the player explicitly chooses a replacement target.
+			shop_spell_slot = 0
+			for index in data.spell_slots(int(game.state.stats.Magic)):
+				if _spell_at(index).is_empty():
+					shop_spell_slot = index
+					break
+	var replacing := prepared and not equipped and not _spell_at(shop_spell_slot).is_empty()
+	_set_shop_buy_caption(item)
+	spell_slot_notice.text = ""
+	spell_slot_notice.tooltip_text = ""
+	if prepared and equipped:
+		spell_slot_notice.text = "Prepared · Slot %d" % (prepared_slot + 1)
+	elif equipped:
+		spell_slot_notice.text = "Equipped"
+	elif locked.is_empty() and not affordable:
+		spell_slot_notice.text = "Not enough gold"
+	elif prepared and locked.is_empty() and not replacing and not choosing:
+		spell_slot_notice.text = "Prepare in slot %d" % (shop_spell_slot + 1)
+	spell_slot_notice.visible = not spell_slot_notice.text.is_empty()
+	var notice_color := ShopView.MUTED
+	if equipped:
+		notice_color = GREEN
+	elif not affordable:
+		notice_color = RED
+	spell_slot_notice.add_theme_color_override("font_color", notice_color)
+	if item.kind == "armor":
+		var current: Dictionary = data.items.get(game.state.loadout.armor.get(item.slot, ""), {})
+		var old := int(current.get("armor", 0))
+		var total := _total_armor(game.state.loadout)
+		_gear_comparison("armor", "Piece armor", str(old), str(int(item.armor)))
+		_gear_comparison("armor", "Total armor", str(total), str(total - old + int(item.armor)))
+	elif item.kind == "weapon":
+		var current: Dictionary = data.items[game.state.loadout.weapon]
+		_gear_comparison("attack", "Damage", _weapon_damage(current), _weapon_damage(item))
+		_gear_comparison("stamina", "Stamina", str(int(current.energy)), str(int(item.energy)), true)
+		_gear_comparison("advance", "Reach", str(int(current.reach)), str(int(item.reach)))
+	elif prepared and item.get("effect", "damage") == "damage":
+		_shop_stat("attack", "Damage", _spell_damage(item))
+		_shop_stat("stamina", "Stamina", str(int(item.energy)))
+	else:
+		var metric := _shop_metric("potion" if item.kind == "potion" else "cast", "Effect")
+		metric.get_parent().size_flags_stretch_ratio = 2.0
+		_wrapped(metric, _magic_effect(item), 16, ShopView.TEXT)
+		if prepared:
+			_shop_stat("stamina", "Stamina", str(int(item.energy)))
+	if gear or not locked.is_empty():
+		if game.state.level < item.level or (gear and item.level > 1):
+			_shop_requirement("Level", int(game.state.level), int(item.level))
+		var requirement: String = data.stat_requirement(item)
+		if not requirement.is_empty() and (game.state.stats[requirement] < item.minimum or (gear and item.minimum > 0)):
+			_shop_requirement(requirement, int(game.state.stats[requirement]), int(item.minimum))
+		shop_requirements.visible = shop_requirements.get_child_count() > 0
+	_refresh_shop_kit()
+	_reveal_shop_item(item.id, shop_view.stock_scroll)
+
+func _reveal_shop_item(id: String, scroll: ScrollContainer) -> void:
+	# A new shop or a change in the checkout height can resize the viewport after selection.
+	await get_tree().process_frame
+	if is_instance_valid(scroll) and scroll.is_inside_tree() and selected_item == id:
+		scroll.ensure_control_visible(shop_entries[id])
+
+func _set_shop_buy_caption(item: Dictionary) -> void:
+	var prepared: bool = data.is_prepared_spell(item)
+	var owned: bool = item.id in game.state.owned and not prepared
+	var equipped := _equipped(item)
+	var needs_slot := prepared and not _spell_at(shop_spell_slot).is_empty()
+	var has_price := not equipped and not owned and (not needs_slot or shop_buy.disabled)
+	var action := "Equip" if owned else ("Choose slot" if needs_slot else "Buy")
+	var caption := "Buy & equip" if action == "Buy" and item.kind in ["armor", "weapon"] else action
+	if equipped:
+		caption = "Prepared" if prepared else "Equipped"
+	elif not data.lock_reason(game.state, item).is_empty():
+		caption = "Locked"
+	elif not owned and game.state.gold < item.price:
+		caption = "Need"
+	shop_buy.visible = not equipped and spell_checkout == SpellCheckout.CLOSED
+	shop_view.style_button(shop_buy, true, not shop_buy.disabled)
+	var amount := " %d" % item.price if has_price else ""
+	shop_buy.accessibility_name = caption + amount
+	_clear(shop_buy)
+	if equipped:
+		shop_buy.text = caption
+		return
+	var key := "" if shop_buy.disabled else _key_name("shop_buy")
+	shop_view.button_copy(shop_buy, caption + amount, key, has_price)
 
 func _select_armor(part: String) -> void:
+	if armor_slot == part:
+		return
 	armor_slot = part
 	selected_item = ""
 	show_shop()
 
-func _item_icon(item: Dictionary) -> AtlasTexture:
+func _spell_shop_category(item: Dictionary) -> String:
+	if item.kind == "potion":
+		return "Potions"
+	return "Damage" if item.get("effect", "damage") == "damage" else "Utility"
+
+func _item_icon(item: Dictionary) -> Texture2D:
 	if item.kind == "weapon":
 		return Stage.weapon_icon(item)
-	var atlas := AtlasTexture.new()
+	var magic_icon: Texture2D = Content.MAGIC_ICONS.get(item.id)
+	if magic_icon != null:
+		return magic_icon
 	if item.kind == "potion":
-		atlas.atlas = Stage.STOCK
-		atlas.region = Stage._cell(Stage.STOCK, 3, 2, int(item.art))
-	elif item.kind in ["spell", "enchant"]:
+		return Content.MAGIC_ICONS.potion
+	var atlas := AtlasTexture.new()
+	if item.kind in ["spell", "enchant"]:
+		if item.get("effect", "damage") != "damage":
+			return null
 		match int(item.art):
 			4:
 				atlas.atlas = Stage.GLASSGUARD
@@ -1112,115 +1968,89 @@ func _item_icon(item: Dictionary) -> AtlasTexture:
 func _equipped(item: Dictionary) -> bool:
 	match item.kind:
 		"armor": return game.state.loadout.armor.get(item.slot, "") == item.id
-		"potion": return game.state.loadout.potion
+		"potion": return game.state.loadout.get("draught", "") == item.id
+		"spell", "enchant": return item.id in game.state.loadout.get("spells", [])
 	return game.state.loadout.get(item.kind, "") == item.id
 
 func _preview_item(id: String) -> void:
+	spell_checkout = SpellCheckout.CLOSED
 	selected_item = id
 	var item: Dictionary = data.items[id]
-	var lock: String = data.lock_reason(game.state, item)
 	# Try on the highlighted item in the preview without mutating the current loadout.
 	var preview: Dictionary = game.state.loadout.duplicate(true)
 	shop_stage.kind = "avatar"
-	shop_stage.demo = false
-	if item.kind == "spell":
+	var prepared: bool = data.is_prepared_spell(item)
+	if prepared:
 		shop_stage.kind = "spell"
+		shop_stage.preview_spell_effect = item.get("effect", "damage")
+		shop_stage.preview_spell_power = int(item.get("power", 0))
+		if shop_stage.preview_spell_effect == "enchant":
+			shop_stage.preview_etching_rank = Duel.enchant_rank(item, {"stats": game.state.stats})
 		shop_stage.spell_art = int(item.art)
+		shop_stage.preview_spell_icon = _item_icon(item)
 		shop_stage.elapsed = 0
-		shop_stage.demo = true
 	elif item.kind == "armor":
 		preview.armor[item.slot] = id
-	elif item.kind == "enchant":
-		preview.enchant = id
-		shop_stage.demo = true
 	elif item.kind == "weapon":
 		preview.weapon = id
 	shop_stage.left_loadout = preview
 	shop_stage.queue_redraw()
-	spell_preview_button.visible = item.kind == "spell"
-	for entry in shop_entries:
-		var button: Button = shop_entries[entry]
-		button.add_theme_stylebox_override("normal", _style(PANEL, SAND if entry == id else BORDER, 9))
-	shop_title.text = item.name
-	var requirement: String = data.stat_requirement(item)
-	var owned: bool = id in game.state.owned
-	shop_buy.text = "Equipped" if _equipped(item) else ("Equip" if owned else "Buy")
-	shop_buy.disabled = not lock.is_empty() or _equipped(item) or (not owned and game.state.gold < item.price)
-	if not lock.is_empty():
-		shop_buy.text = "Locked"
-	elif not owned and game.state.gold < item.price:
-		shop_buy.text = "Not enough gold"
-	_clear(shop_requirements)
-	var requires_stat: bool = not requirement.is_empty() and item.minimum > 0
-	shop_requirements.visible = item.level > 1 or requires_stat
-	if shop_requirements.visible:
-		_label(shop_requirements, "Requirements", 15, MUTED)
-		if item.level > 1:
-			_shop_requirement("Level", int(game.state.level), int(item.level))
-		if requires_stat:
-			_shop_requirement(requirement, int(game.state.stats[requirement]), int(item.minimum))
-	var reserve_id := str(game.state.loadout.get("reserve_spell", ""))
-	reserve_row.visible = item.kind == "spell" and data.has_reserve_slot(int(game.state.stats.Magic))
-	if reserve_row.visible:
-		reserve_label.text = "Reserve · " + data.item_name(reserve_id)
-		reserve_button.text = "Equip as reserve" if owned else "Buy for reserve"
-		reserve_button.disabled = (not lock.is_empty() or _equipped(item) or reserve_id == item.id
-			or game.state.loadout.spell.is_empty() or (not owned and game.state.gold < item.price))
-		clear_reserve_button.visible = not reserve_id.is_empty()
-	_clear(shop_stats)
-	if not owned:
-		_shop_stat("coin", "Price", "%d gold" % item.price)
-	match item.kind:
-		"armor":
-			var current: Dictionary = data.items.get(game.state.loadout.armor.get(item.slot, ""), {})
-			var points := int(current.get("armor", 0))
-			var new_points := int(item.armor)
-			_shop_stat("armor", "Armor points", "%d → %d" % [points, new_points])
-		"weapon", "spell":
-			var current: Dictionary = data.items.get(game.state.loadout.get(item.kind, ""), {})
-			var damage := String.num(item.damage, 2).trim_suffix(".0")
-			if not current.is_empty() and current.damage != item.damage:
-				damage = String.num(current.damage, 2).trim_suffix(".0") + " → " + damage
-			_shop_stat("attack", "Base damage", damage)
-			_shop_stat("advance", "Reach", "1 space" if item.reach == 1 else "%d spaces" % item.reach)
-			var action := "attack" if item.kind == "weapon" else "cast"
-			_shop_stat("stamina", "Stamina cost", "%d per %s" % [item.energy, action])
-			if item.kind == "spell":
-				var magic := int(game.state.stats.Magic)
-				var casts: int = data.spell_casts(item, magic, not reserve_id.is_empty())
-				_shop_stat("cast", "Main casts", str(casts))
-		"enchant":
-			var old := int(data.items.get(game.state.loadout.get("enchant", ""), {}).get("damage", 0))
-			_shop_stat("attack", "Extra weapon damage", "+%d → +%d" % [old, item.damage])
-		"potion":
-			_shop_stat("health", "Health restored", "+%d" % data.rules.heal)
-			_shop_stat("potion", "Uses per death match", str(int(data.rules.potion_uses)))
+	_refresh_equipment_detail(item)
+
+func _spell_at(index: int) -> String:
+	var equipped: Array = game.state.loadout.spells
+	return str(equipped[index]) if index >= 0 and index < equipped.size() else ""
 
 func _shop_requirement(caption: String, current: int, required: int) -> void:
-	var entry := _row(shop_requirements, 5)
 	var met := current >= required
-	entry.add_child(Symbol.make("check" if met else "lock", 18))
-	var label := _label(entry, "%s %d / %d" % [caption, current, required], 16, GREEN if met else SAND)
+	var entry := _row(shop_requirements, 4)
+	entry.add_child(Symbol.make("check" if met else "lock", 15))
+	var text := "%s %d" % [caption, required] if met else "%s %d / %d" % [caption, current, required]
+	var label := _label(entry, text, 14, GREEN if met else RED)
 	label.accessibility_name = "%s. You have %d. Requires %d. %s" % [caption, current, required, "Met" if met else "Locked"]
+	entry.tooltip_text = label.accessibility_name
+
+func _shop_metric(symbol: String, caption: String) -> VBoxContainer:
+	var tile := PanelContainer.new()
+	tile.add_theme_stylebox_override("panel", shop_view.frame(shop_view.base.darkened(.10), shop_view.edge.darkened(.38), 7))
+	shop_stats.add_child(tile)
+	_fill(tile)
+	var body := _column(tile, 2)
+	var heading := _row(body, 4)
+	heading.add_child(Symbol.make(symbol, 16))
+	shop_view.label(heading, caption, 14, ShopView.MUTED)
+	return body
+
+func _gear_comparison(symbol: String, caption: String, before: String, after: String, lower_is_better: bool = false) -> void:
+	var body := _shop_metric(symbol, caption)
+	var reading := _row(body, 5)
+	var color := SAND
+	if before != after:
+		shop_view.label(reading, before, 16, ShopView.MUTED)
+		shop_view.label(reading, "→", 15, ShopView.MUTED)
+		# Lower stamina cost is an improvement. Damage and reach favor higher values.
+		var delta := after.to_float() - before.to_float()
+		var improved := delta < 0.0 if lower_is_better else delta > 0.0
+		color = GREEN if improved else RED
+	shop_view.label(reading, after, 20, color)
+	body.get_parent().tooltip_text = "%s is %s with your equipped gear and %s with the selected item." % [caption, before, after]
 
 func _shop_stat(symbol: String, caption: String, value: String) -> void:
-	var stat := _column(shop_stats, 3)
-	_label(stat, caption, 15, MUTED)
-	var reading := _row(stat, 5)
-	reading.add_child(Symbol.make(symbol, 23))
-	_label(reading, value, 18, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	shop_view.label(_shop_metric(symbol, caption), value, 20, SAND)
 
-func _replay_spell() -> void:
-	shop_stage.elapsed = 0.0
-	shop_stage.queue_redraw()
-	sound.cast(shop_stage.spell_art)
-
-func _buy_item(reserve: bool = false) -> void:
-	if selected_item not in data.items:
+func _buy_item() -> void:
+	if selected_item not in data.items or shop_buy.disabled or spell_checkout != SpellCheckout.CLOSED:
 		return
 	var item: Dictionary = data.items[selected_item]
+	var index := shop_spell_slot if data.is_prepared_spell(item) else -1
+	if not _spell_at(index).is_empty():
+		_open_spell_checkout(SpellCheckout.PICK_SLOT, index)
+		return
+	_purchase_shop_item(item, index)
+
+func _purchase_shop_item(item: Dictionary, index: int) -> void:
 	var gold_before := int(game.state.gold)
-	var err: String = game.purchase(item, reserve)
+	var err: String = game.purchase(item, index)
 	if err.is_empty():
 		var paid := gold_before - int(game.state.gold)
 		sound.play("buy" if paid > 0 else "equip")
@@ -1228,9 +2058,59 @@ func _buy_item(reserve: bool = false) -> void:
 		page_notice = err
 	show_shop()
 
-func _clear_reserve_spell() -> void:
-	game.clear_reserve_spell()
+func _clear_spell() -> void:
+	var index: int = game.state.loadout.spells.find(selected_item)
+	if index >= 0 and spell_checkout == SpellCheckout.CLOSED:
+		_open_spell_checkout(SpellCheckout.CLEAR, index)
+
+func _clear_prepared_slot(index: int) -> void:
+	page_notice = game.clear_spell(index)
+	shop_spell_slot = index
+	spell_slot_chosen = true
 	show_shop()
+
+func _open_spell_checkout(mode: SpellCheckout, index: int) -> void:
+	# The candidate spell stays selected while the right panel browses its destination.
+	spell_checkout = mode
+	spell_checkout_slot = index
+	_refresh_equipment_detail(data.items[selected_item])
+
+func _cancel_spell_checkout() -> void:
+	var focus := clear_spell_button if spell_checkout == SpellCheckout.CLEAR else shop_buy
+	spell_checkout = SpellCheckout.CLOSED
+	_refresh_equipment_detail(data.items[selected_item])
+	focus.grab_focus()
+
+func _confirm_spell_checkout() -> void:
+	match spell_checkout:
+		SpellCheckout.PICK_SLOT:
+			spell_slot_chosen = false
+			_purchase_shop_item(data.items[selected_item], spell_checkout_slot)
+		SpellCheckout.CLEAR:
+			_clear_prepared_slot(spell_checkout_slot)
+
+func _spell_checkout_input(event: InputEvent) -> bool:
+	if event.is_action_pressed("ui_cancel", false, true):
+		_cancel_spell_checkout()
+		return true
+	if not _plain_key_press(event):
+		return false
+	var code: int = event.keycode
+	if code == key_bindings.shop_buy:
+		# Keep Enter or Space available for the focused footer button if either is rebound to Buy.
+		var focus := get_viewport().gui_get_focus_owner()
+		if code in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE] and focus is Button and shop_view.kit_footer.is_ancestor_of(focus):
+			return false
+		_confirm_spell_checkout()
+		return true
+	if spell_checkout == SpellCheckout.PICK_SLOT and code in [key_bindings.shop_up, key_bindings.shop_down]:
+		var direction := -1 if code == key_bindings.shop_up else 1
+		var last: int = data.spell_slots(int(game.state.stats.Magic)) - 1
+		var next := clampi(spell_checkout_slot + direction, 0, last)
+		if next != spell_checkout_slot:
+			_select_spell_slot(next)
+		return true
+	return false
 
 func show_arena() -> void:
 	if game.is_fallen():
@@ -1243,43 +2123,53 @@ func show_arena() -> void:
 		if not game.has_active_bout():
 			_scout_bout(true)
 		return
-	var arena: Dictionary = game.arena()
-	_page("arena", arena.name)
-	_show_progress(content)
-	var stage := _stage(content, "battle", 310)
-	stage.arena = game.arena_index()
-	stage.arena_width = int(data.rules.arena_size)
-	stage.positions = [1, int(data.rules.arena_size) - 1]
-	var regular_offer: Dictionary = game.scouted_bout()
-	var tournament_offer: Dictionary = game.scouted_bout(true)
-	var visible_offer := tournament_offer if regular_offer.is_empty() else regular_offer
-	stage.show_rival = not visible_offer.is_empty()
-	if stage.show_rival:
-		stage.set_rival(visible_offer.rival, int(game.state.get("level", 1)))
-	var cards := _row(content)
-	var regular := _card(cards)
-	_fill(regular.get_parent())
-	_title(regular, "Regular bout", 23)
-	var rewards := _row(regular, 10)
-	_token(rewards, "coin", str(game.win_gold(game.arena_index())), "Gold for a win")
-	_token(rewards, "xp", str(game.regular_win_xp()), "Experience for a win")
-	var regular_scout := _button(regular, "Scout rival", _scout_bout.bind(false), true)
-	if not regular_offer.is_empty():
-		regular_scout.text = regular_offer.rival.name
-	regular_scout.disabled = not game.can_scout(false)
-	var tournament := _card(cards)
-	_fill(tournament.get_parent())
-	_title(tournament, "Tournament", 20)
-	var round_total: int = arena.tournament.size()
-	var tournament_status: String = "League champion" if game.state.complete else (
-		"Round %d/%d" % [mini(int(game.state.tournament) + 1, round_total), round_total] if game.can_tournament() else "Level %d" % arena.cap)
-	_token(tournament, "trophy", tournament_status, "Tournament progress")
-	var tournament_button := _button(tournament, "Scout tournament rival", _scout_bout.bind(true), true)
-	if not tournament_offer.is_empty():
-		tournament_button.text = tournament_offer.rival.name
-	tournament_button.disabled = not game.can_scout(true)
-	var nav := _row(content)
-	_button(nav, "Town square", show_town)
+	var palette := _arena_palette()
+	_page("arena", "", palette)
+	var stage := _stage(content, "arena_preview", 350, game.arena_index())
+	stage.show_rival = false
+	var view := ArenaView.new(palette, serif)
+	var regular := view.lobby_choice(stage, .46)
+	var tournament := view.lobby_choice(stage, .72)
+	_arena_scout_choice(regular, palette, false)
+	_arena_scout_choice(tournament, palette, true)
+	_arena_button(view.corner(stage), palette, "Town square", "town", show_town)
+
+func _arena_scout_choice(card: VBoxContainer, palette: ShopView, tournament: bool) -> void:
+	var caption := "Tournament" if tournament else "Regular bout"
+	var action := "scout_tournament" if tournament else "scout_regular"
+	var offer: Dictionary = game.scouted_bout(tournament)
+	var button := _arena_button(card, palette, caption, action, _scout_bout.bind(tournament))
+	button.accessibility_name = offer.rival.name if not offer.is_empty() else (
+		"Scout tournament rival" if tournament else "Scout rival")
+	button.disabled = not game.can_scout(tournament)
+	if not offer.is_empty() and not button.disabled:
+		var name := palette.label(card, offer.rival.name, 14, ShopView.MUTED)
+		name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		return
+	if tournament:
+		var status := "League champion" if game.state.complete else (
+			"Round 1 of %d" % game.arena().tournament.size() if game.can_tournament() else "Level %d required" % game.arena().cap)
+		palette.label(card, status, 14, ShopView.MUTED).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	else:
+		var rewards := _row(card, 10)
+		rewards.alignment = BoxContainer.ALIGNMENT_CENTER
+		_token(rewards, "coin", "+%d" % game.win_gold(game.arena_index()), "Gold for a win")
+		if game.regular_win_xp() > 0:
+			_token(rewards, "xp", "+%d XP" % game.regular_win_xp(), "Experience for a win")
+
+func _arena_button(parent: Control, palette: ShopView, caption: String, action: String, callback: Callable,
+		primary: bool = false, lethal: bool = false) -> Button:
+	var button := _button(parent, "", callback)
+	button.accessibility_name = caption
+	button.custom_minimum_size.y = 54 if primary else 44
+	palette.style_button(button, false, primary and not lethal)
+	if lethal:
+		button.add_theme_stylebox_override("normal", palette.frame(Color("#774236"), palette.edge, 9))
+		button.add_theme_stylebox_override("hover", palette.frame(Color("#915346"), ShopView.GOLD, 9))
+		button.add_theme_stylebox_override("pressed", palette.frame(Color("#683a31"), ShopView.GOLD, 9))
+	_track_shortcut(button, caption, action, palette.button_copy(button, caption, _key_name(action), false, 19 if primary else 16))
+	arena_actions[action] = button
+	return button
 
 func _scout_bout(tournament: bool) -> void:
 	if game.has_active_bout():
@@ -1288,91 +2178,39 @@ func _scout_bout(tournament: bool) -> void:
 	if not offer.is_empty():
 		_show_faceoff(offer)
 	elif game.tournament_in_progress():
-		_page("tournament", "Tournament")
-		_button(content, "Next Match", _scout_bout.bind(true), true)
+		var palette := _arena_palette()
+		_page("tournament", "", palette)
+		var stage := _stage(content, "arena_preview", 350, game.arena_index())
+		stage.show_rival = false
+		var view := ArenaView.new(palette, serif)
+		_arena_button(view.lobby_choice(stage, .55), palette, "Next Match", "scout_tournament", _scout_bout.bind(true), true)
 	else:
 		show_arena()
 
 func _show_faceoff(offer: Dictionary) -> void:
 	var rival: Dictionary = offer.rival
 	var player: Dictionary = data.fighter(game.state.name, game.state.stats, game.state.loadout)
-	var heading := "Bout · Yield below %d%% HP" % int(data.rules.bout_yield_health_percent)
-	if offer.tournament:
-		heading = "Tournament · Round %d/%d" % [int(offer.round) + 1, int(offer.round_count)]
-	_page("scout", heading)
-	var names := _row(content, 22)
-	_title(names, "%s · Lv. %d" % [player.name, game.state.level], 24)
-	_space(names)
-	_title(names, "%s · Lv. %d" % [rival.name, rival.level], 24)
-	var stage := _stage(content, "battle", 200)
-	stage.arena = game.arena_index()
-	stage.arena_width = int(data.rules.arena_size)
-	stage.positions = [stage.arena_width * .2, stage.arena_width * .8]
-	stage.set_rival(rival, int(game.state.get("level", 1)))
-	var comparisons := _row(content, 14)
-	var stats := _card(comparisons, 5)
-	var kit := _card(comparisons, 5)
-	_fill(stats.get_parent())
-	_fill(kit.get_parent())
-	_compare_row(stats, "", "Your stats", "Rival stats", "")
-	_compare_row(kit, "", "Your kit", "Rival kit", "")
-	for stat in Data.STATS:
-		_compare_row(stats, stat, player.stats[stat], rival.stats[stat], STAT_ICONS[stat])
-	var player_stamina := int(player.stats.Stamina)
-	var rival_stamina := int(rival.stats.Stamina)
-	var step := int(data.distances.advance)
-	var leap := int(data.distances.jump)
-	_compare_row(stats, "Step travel", step + Duel.stamina_move_bonus(data.rules, player_stamina),
-		step + Duel.stamina_move_bonus(data.rules, rival_stamina), "advance")
-	_compare_row(stats, "Leap travel", leap + Duel.stamina_move_bonus(data.rules, player_stamina, true),
-		leap + Duel.stamina_move_bonus(data.rules, rival_stamina, true), "jump")
-	_compare_row(stats, "Lunge travel", Duel.lunge_range(data.rules, player_stamina), Duel.lunge_range(data.rules, rival_stamina), "lunge")
-	_compare_row(kit, "Health", player.max_hp, rival.max_hp, "health")
-	_compare_row(kit, "Armor", player.max_armor, rival.max_armor, "armor")
-	_compare_row(kit, "Energy", player.max_energy, rival.max_energy, "stamina")
-	_compare_row(kit, "Weapon", player.weapon.name, rival.weapon.name, "attack")
-	_compare_row(kit, "Weapon reach", player.weapon.reach, rival.weapon.reach, "advance")
-	_compare_row(kit, "Spell", player.spell.get("name", "None"), rival.spell.get("name", "None"), "cast")
-	_compare_row(kit, "Spell reach", player.spell.get("reach", "–"), rival.spell.get("reach", "–"), "advance")
-	_compare_row(kit, "Spell casts", player.casts, rival.casts, "cast")
-	var player_reserve: Dictionary = player.get("reserve_spell", {})
-	var rival_reserve: Dictionary = rival.get("reserve_spell", {})
-	if not player_reserve.is_empty() or not rival_reserve.is_empty():
-		_compare_row(kit, "Reserve · 1 cast", player_reserve.get("name", "–"), rival_reserve.get("name", "–"), "cast")
-	if offer.tournament:
-		_compare_row(kit, "Potions", player.potions, rival.potions, "potion")
-	var actions := _row(content, 10)
+	faceoff_tournament = offer.tournament
+	var palette := _arena_palette()
+	_page("scout", "", palette)
+	var stage := _stage(content, "arena_preview", 350, game.arena_index())
+	stage.set_rival(rival, int(game.state.level))
+	var view := ArenaView.new(palette, serif)
+	view.fighter_name(stage, 0, player, int(game.state.level))
+	view.fighter_name(stage, 1, rival, int(rival.level))
+	var caption := "Tournament · Round %d/%d" % [int(offer.round) + 1, int(offer.round_count)] if offer.tournament else "Regular bout"
+	var actions := view.faceoff(stage, caption, player, rival, data, STAT_ICONS, _item_icon)
+	var fight_caption := "Fight to the death" if offer.tournament else "Fight"
+	_arena_button(actions, palette, fight_caption, "fight_confirm", _new_bout.bind(offer.tournament), true, offer.tournament)
+	if not offer.tournament:
+		var stakes := _row(actions, 12)
+		stakes.alignment = BoxContainer.ALIGNMENT_CENTER
+		palette.label(stakes, "Yield below %d%% HP" % int(data.rules.bout_yield_health_percent), 14, ShopView.MUTED)
+		var loss_fee := mini(int(game.state.gold), int(data.rules.loss_gold))
+		if loss_fee > 0:
+			_token(stakes, "coin", "−%d on defeat" % loss_fee, "Gold lost on defeat")
 	if not game.tournament_in_progress():
-		_button(actions, "Back", show_arena)
-	_space(actions)
-	var loss_fee := mini(int(game.state.gold), int(data.rules.loss_gold))
-	if not offer.tournament and loss_fee > 0:
-		_token(actions, "coin", "−%d" % loss_fee, "Gold lost on defeat")
-	var fight := _button(actions, "Fight to the death" if offer.tournament else "Fight", _new_bout.bind(offer.tournament), true)
-	if offer.tournament:
-		fight.add_theme_stylebox_override("normal", _style(Color("#512d2a"), RED, 9))
-		fight.add_theme_stylebox_override("hover", _style(Color("#663833"), RED, 9))
-
-func _compare_row(parent: Control, caption: String, left: Variant, right: Variant, symbol: String) -> void:
-	var line := _row(parent, 8)
-	var player := _label(line, str(int(left)) if left is float else str(left), 15)
-	_fill(player)
-	player.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	player.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	var category := _row(line, 4)
-	category.custom_minimum_size.x = 132
-	category.alignment = BoxContainer.ALIGNMENT_CENTER
-	if not symbol.is_empty():
-		category.add_child(Symbol.make(symbol, 19))
-	_label(category, caption, 15, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var rival := _label(line, str(int(right)) if right is float else str(right), 15)
-	_fill(rival)
-	rival.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	if (left is int or left is float) and (right is int or right is float) and left != right:
-		if left > right:
-			player.add_theme_color_override("font_color", GREEN)
-		else:
-			rival.add_theme_color_override("font_color", GREEN)
+		_arena_button(view.corner(stage), palette, "Back", "back", show_arena)
 
 func _new_bout(tournament: bool) -> void:
 	var snapshot: Dictionary = game.start_bout(tournament, randi())
@@ -1444,6 +2282,9 @@ func _finish_bout(outcome: Dictionary) -> void:
 	var unlocked: bool = outcome.get("unlocked", false)
 	if unlocked:
 		_token(controls, "trophy", game.arena().name + " unlocked", "New arena")
+	var practice_defeat: bool = outcome.get("practice_defeat", false)
+	if practice_defeat:
+		_label(controls, "Tournament practice · Gladiator survives").size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_space(controls)
 	if outcome.get("fallen", false):
 		_button(controls, "Title screen", show_menu, true)
@@ -1453,8 +2294,9 @@ func _finish_bout(outcome: Dictionary) -> void:
 		var tournament_locked: bool = game.tournament_in_progress()
 		if not tournament_locked:
 			result_town_button = _button(controls, "Return to town", show_town)
-		result_next_button = _button(controls, "Next Match" if tournament_locked else "Next Bout",
-			_scout_bout.bind(tournament_locked), true)
+		var next_tournament := tournament_locked or practice_defeat
+		result_next_button = _button(controls, "Next Match" if next_tournament else "Next Bout",
+			_scout_bout.bind(next_tournament), true)
 		_refresh_control_settings()
 	var height := panel.get_combined_minimum_size().y
 	panel.offset_top = 8

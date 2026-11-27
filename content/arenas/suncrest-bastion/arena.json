@@ -17,37 +17,37 @@
       {
         "name": "Nera Flint",
         "style": "fast_melee",
-        "point_multiplier": 1.44
+        "point_multiplier": 1.27
       },
       {
         "name": "Tess Fen",
         "style": "mage",
         "tactics": "keepaway_mage",
-        "point_multiplier": 1.43
+        "point_multiplier": 1.45
       },
       {
         "name": "Hale Briar",
         "style": "guard",
-        "point_multiplier": 1.47
+        "point_multiplier": 1.89
       },
       {
         "name": "Soren Vale",
         "style": "hybrid",
         "tactics": "adaptive_hybrid",
-        "point_multiplier": 1.48
+        "point_multiplier": 1.18
       }
     ],
     "tournament": [
       {
         "name": "Orla Fen",
         "style": "fast_melee",
-        "point_multiplier": 1.13
+        "point_multiplier": 1.16
       },
       {
         "name": "Cassian Dusk",
         "style": "mage",
         "tactics": "keepaway_mage",
-        "point_multiplier": 1.06
+        "point_multiplier": 1.22
       },
       {
         "name": "Helia Moss",
@@ -58,7 +58,7 @@
       {
         "name": "Edric Vale",
         "style": "charisma",
-        "point_multiplier": 1.38
+        "point_multiplier": 1.83
       },
       {
         "name": "Garran Stoneward",
@@ -66,12 +66,12 @@
         "tactics": "duelist",
         "boss": true,
         "stats": {
-          "Attack": 23,
-          "Strength": 8,
-          "Defence": 33,
-          "Magic": 0,
-          "Vitality": 30,
-          "Stamina": 16,
+          "Attack": 25,
+          "Strength": 21,
+          "Defence": 35,
+          "Magic": 5,
+          "Vitality": 32,
+          "Stamina": 17,
           "Charisma": 0
         }
       }

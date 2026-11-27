@@ -21,16 +21,24 @@ Lunge drops normal accuracy by 20 percentage points, with another eight points o
 
 Strength adds 1.23 weapon damage per point up to the higher of 12 Strength or one quarter of your assigned points. Each point above that threshold adds 0.2 damage. Hover over **Strength** during point allocation to see the threshold for your build.
 
+You start with 44 base health. Vitality adds 4 max HP per point up to 15% of your assigned points and 1.75 max HP per point above that threshold. Hover over **Vitality** when allocating points to see your projected max health and the passive healing you get after each of your turns.
+
 The preview on an attack shows the hit chance, the rival’s block chance if hit, and the armor and health loss from an ordinary unblocked hit. Armor absorbs damage first.
 
 ## Spells and supplies
 
-- Each spell starts with two casts. Every 10 Magic adds one cast. The Magic shop lists the stamina cost per cast.
-- Each Magic point adds 0.8 spell damage and reduces incoming spell damage by 0.35 before armor.
-- At 30 Magic, **Equip as reserve** assigns one bonus cast to a different spell. **Ember Etching** uses its own enchantment slot.
-- Casting is less accurate in reach of a rival with enough stamina to attack. A miss spends the cast. Sleeping restores stamina.
-- A long-range hit against a full-health rival in a regular bout leaves them with at least 20% health.
-- Spell casts and healing draughts reset for each new bout. Draughts are available in death matches.
+You start with two slots, with one more for every 10 points in Magic. Each holds a different damage or utility spell and refreshes to one cast in every new bout. The shop shows the cost of replacing a prepared spell. A cleared or replaced spell must be bought again.
+
+A cast takes a turn and costs stamina. Each Magic point adds 0.4 damage to damage spells and reduces incoming spell damage by 0.35. Damage spells can miss or be partially blocked. Casting in reach of a rival who can attack reduces your accuracy. A miss spends the cast. A long-range hit against a full-health rival in a regular bout leaves them with at least 20% health.
+
+| Arena | Damage | Utility |
+| --- | --- | --- |
+| Amber Ring | Fireball hits at range | Magic Shield absorbs part of the next hit before armor |
+| Iron Court | Blue Hellfire hits harder at short range | Push doubles the distance to the rival, stopping at the arena edge |
+| Glass Crucible | Falling Ember strikes at long range | Pull brings the rival directly in front of you, one space away |
+| Suncrest Bastion | Pocket Anvil deals the largest hit and costs the most stamina | Ember Etching adds damage to the next three landed weapon hits. Its two higher ranks unlock at 26 and 36 Magic |
+
+Each bout allows one potion in a separate pouch. Drinking takes a turn. A **Health Potion** restores 12 HP plus half your Vitality, rounded down. An **Armor Potion** repairs 30% of the armor you started with, rounded up. Both stop at the missing amount. The pouch refills each bout.
 
 ## Rewards and progression
 
@@ -38,9 +46,9 @@ A regular bout ends when a fighter yields below 20% health. Defeat costs up to e
 
 | Arena | Champion | Selected unlocks |
 | --- | --- | --- |
-| Amber Ring | Idra Vale | Dagger at creation. A short sword costs 15 gold and deals 10 base damage, up from the dagger’s seven. At level 4, Forked Lightning and the first chainmail gear unlock. The chainmail chest and iron-rimmed shield require 5 Defence. |
-| Iron Court | Oren Voss | The remaining chainmail pieces arrive at level 5, followed by Court armor and weapons. |
-| Glass Crucible | Veyra Ashglass | Glass sabre, Prism Pop, and initial Glassguard gear at level 9. Pocket Anvil and heavier Glassguard pieces at 10. Bellringer and the rest of the set at 11. Royal Tantrum at 12. |
-| Suncrest Bastion | Garran Stoneward | Rampart blade, Dawnbolt, helmet, and pants at level 13. Chest and shield at 14. Gatebreaker and boots at 15. Sunseal at 16. |
+| Amber Ring | Idra Vale | Dagger at creation. A short sword costs 15 gold and deals 10 base damage, up from the dagger’s seven. Fireball and Magic Shield are available from level 1. The first chainmail gear unlocks at level 4. The chainmail chest and iron-rimmed shield require 5 Defence. |
+| Iron Court | Oren Voss | Blue Hellfire, Push, and the remaining chainmail pieces arrive at level 5, followed by Court armor and weapons. |
+| Glass Crucible | Veyra Ashglass | Falling Ember, Pull, Glass sabre, and initial Glassguard gear arrive at level 9. Heavier Glassguard pieces and Bellringer follow. |
+| Suncrest Bastion | Garran Stoneward | Pocket Anvil, Ember Etching, Rampart blade, helmet, and pants arrive at level 13. Chest and shield follow at 14, then Gatebreaker and boots at 15. |
 
 A saved career that completed a previously final arena can continue at the level-up gate for the next arena once that arena is available in the game.

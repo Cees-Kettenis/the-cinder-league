@@ -2,11 +2,11 @@
 
 ## Create a gladiator
 
-Choose **Play**, select a save slot, and give your gladiator a name. Spend all ten starting points to begin. **Strength** helps with melee damage and weapon requirements. **Defence** opens better armor. **Magic** opens spells, and **Stamina** helps you move and fight for longer. You can invest in several paths as you level up.
+Choose **Play**, select a save slot, and give your gladiator a name. Spend all ten starting points to begin. **Strength** helps with melee damage and weapon requirements. **Defence** opens better armor. **Magic** unlocks stronger spells and more prepared slots, and **Stamina** helps you move and fight for longer. You can invest in several paths as you level up.
 
 ## Find your way around town
 
-Click a building to visit it. The **Weaponsmith** and **Armory** show how the highlighted item looks and what it changes. The **Magic shop** lets you preview spell effects. Open the **Arena** when you’re ready to scout.
+Click a building to visit it. The **Weaponsmith** and **Armory** show how the highlighted item looks and what it changes. At the **Magic shop**, choose a damage or utility spell, preview it, then buy it into a slot. The slot picker shows what you’ll replace and the price. Clearing or replacing a spell means buying it again if you want it back. You can also equip one Health or Armor Potion for each bout. Open the **Arena** when you’re ready to scout.
 
 ![Town square with signs marking the Weaponsmith, Armory, Magic shop, and Arena.](assets/town-square.webp)
 
@@ -19,7 +19,7 @@ Your first purchase can be as simple as a short sword. Select a weapon to compar
 1. At the Arena, choose **Scout rival**. Read the face-off to see who has more reach and whether your rival can cast. You can head back to adjust your gear before choosing **Fight**.
 2. Use **Step in** or **Leap in** to get into range. **Step back** and **Leap back** can buy space for a spell or make an opponent spend a turn closing.
 3. Hover over an action or focus it with the keyboard. Its preview shows what the move costs, what a clean hit can do, and why a move is unavailable. In reach, **Quick** trades damage for accuracy, **Normal** uses the weapon’s usual stats, and **Power** hits harder and can push a rival back.
-4. Watch the three crests above each fighter. Armor takes damage before health. **Sleep** restores stamina and leaves you exposed for the reply. The **Pack** shows remaining casts when a spell is equipped, plus healing draughts in death matches.
+4. Watch the three crests above each fighter. An active Magic Shield absorbs part of the next hit, then armor takes damage before health. **Sleep** restores stamina and leaves you exposed for the reply. The bar at the bottom of the fight screen shows your spells and potion. Each supplies one use per bout. Hover over a spell or potion to see its effect.
 
 ![An Amber Ring bout with health, armor, and stamina crests above the fighters and movement and attack controls around the player.](assets/amber-ring.webp)
 
@@ -49,3 +49,5 @@ Each of the three slots saves separately and records resolved turns, so **Contin
 | **N** | Scout the next bout or tournament match from the results bar. |
 
 Use **Settings → Controls** to rebind these keys. **Settings** also offers Windowed and Fullscreen. **Audio** has separate switches for title music, town music, venue music, and game sounds.
+
+Careers created before prepared spells require a new gladiator. Use **Replace save** on an earlier alpha slot.

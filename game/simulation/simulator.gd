@@ -22,6 +22,9 @@ func batch(left: String, right: String, level: int, start_seed: int, count: int,
 	var right_stats: Dictionary = options.get("right_stats", data.build_stats(right_build, points))
 	var left_items: Dictionary = options.get("left_loadout", data.eligible_loadout(level, left_stats, left_build))
 	var right_items: Dictionary = options.get("right_loadout", data.eligible_loadout(level, right_stats, right_build))
+	for pair in [[left_stats, left_items], [right_stats, right_items]]:
+		if pair[1].has("spells") and pair[1].spells.size() > data.spell_slots(int(pair[0].Magic)):
+			return {"error": "Prepared loadout exceeds the Magic stat's slot capacity."}
 	var regular_bout: bool = not options.get("death_match", false)
 	var left_fighter: Dictionary = data.fighter(left.capitalize(), left_stats, left_items, left)
 	var right_fighter: Dictionary = data.fighter(right.capitalize(), right_stats, right_items, right)
@@ -55,7 +58,8 @@ func batch(left: String, right: String, level: int, start_seed: int, count: int,
 	return summary
 
 func campaign(style: String, seed_value: int, limit: int) -> Dictionary:
-	var run := Campaign.new(data)
+	# Campaign simulations measure the release rules even when run from the editor.
+	var run := Campaign.new(data, false)
 	var build: String = BUILD_PRESETS.get(style, style)
 	# Use slot zero to exercise campaign logic in memory without touching player saves.
 	run.create(0, style.capitalize(), 0, 0, data.build_stats(build, int(data.rules.starting_points)))
@@ -93,11 +97,28 @@ func campaign(style: String, seed_value: int, limit: int) -> Dictionary:
 
 func _shop(run: RefCounted, style: String) -> void:
 	var candidate: Dictionary = data.eligible_loadout(int(run.state.level), run.state.stats, style)
-	var choices: Array = [candidate.weapon, candidate.spell, candidate.enchant, "potion" if candidate.potion else ""]
+	var desired: Array = candidate.get("spells", [])
+	var choices: Array = [candidate.weapon]
+	# Spend on a build's core weapon and spells before armor upgrades and a potion.
+	choices.append_array(desired)
 	choices.append_array(candidate.armor.values())
+	choices.append(candidate.draught)
 	for id in choices:
-		if not id.is_empty() and data.items.has(id):
-			run.purchase(data.items[id])
+		if id.is_empty() or not data.items.has(id):
+			continue
+		var item: Dictionary = data.items[id]
+		var replace := -1
+		if id in desired:
+			var equipped: Array = run.state.loadout.spells
+			if id in equipped:
+				continue
+			if equipped.size() >= data.spell_slots(int(run.state.stats.Magic)) and "" not in equipped:
+				# Replace only a spell that the target loadout no longer needs.
+				for index in equipped.size():
+					if equipped[index] not in desired:
+						replace = index
+						break
+		run.purchase(item, replace)
 
 func _validate_scenario(options: Dictionary, level: int, points: int) -> String:
 	if options.has("death_match") and not options.death_match is bool:
@@ -106,7 +127,7 @@ func _validate_scenario(options: Dictionary, level: int, points: int) -> String:
 		if not options.actions is Array:
 			return "Scenario actions must be an array of action names."
 		for action in options.actions:
-			if action not in Duel.ACTIONS:
+			if not action is String or (action not in Duel.ACTIONS and not Duel.is_spell_action(action)):
 				return "Unknown scripted action: " + str(action)
 	if options.has("distance") and (not _whole_number(options.distance) or options.distance < 1 or options.distance > data.rules.arena_size):
 		return "Scenario distance must be a whole number within the arena."
@@ -136,6 +157,16 @@ func _validate_scenario(options: Dictionary, level: int, points: int) -> String:
 			if not reserve is String or (not reserve.is_empty() and (data.items.get(reserve, {}).get("kind") != "spell"
 					or reserve == loadout.get("spell", "") or str(loadout.get("spell", "")).is_empty())):
 				return "Reserve spell in %s must differ from the equipped main spell." % loadout_key
+			if loadout.has("spells"):
+				if not loadout.spells is Array:
+					return "%s.spells must be an array of prepared spell IDs." % loadout_key
+				var seen := {}
+				for id in loadout.spells:
+					if not id is String or (not id.is_empty() and (seen.has(id) or not data.is_prepared_spell(data.items.get(id, {})))):
+						return "%s.spells may only contain unique stocked spells and empty slots." % loadout_key
+					seen[id] = true
+			if loadout.get("draught", "") not in ["", "potion", "armor_potion"]:
+				return "%s.draught must be potion, armor_potion, or empty." % loadout_key
 			if loadout.has("potion") and not loadout.potion is bool:
 				return "The potion field must be true or false."
 			if loadout.has("armor"):

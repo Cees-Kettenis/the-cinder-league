@@ -7,18 +7,30 @@ signal turn_animation_finished
 const Symbol = preload("res://game/screens/ui_symbol.gd")
 const Armor = preload("res://game/combat/armor_art.gd")
 const Rig = preload("res://game/combat/fighter_rig.gd")
+const MagicEffects = preload("res://game/combat/magic_effects.gd")
 const Duel = preload("res://game/combat/duel.gd")
 const Data = preload("res://game/catalog/data.gd")
 const Content = preload("res://game/catalog/content_catalog.gd")
 const BackdropArt = preload("res://game/screens/backdrop_art.gd")
+const TownAmbience = preload("res://game/screens/town/town_ambience.gd")
 const SPELLS = preload("res://content/spells/shared/projectiles.png")
-const TOWN_DESIGN_SIZE := Vector2(1536, 1024)
-const STOCK = preload("res://game/screens/shops/stock.png")
+const TOWN_DESIGN_SIZE := TownAmbience.DESIGN_SIZE
+const TOWN_GROUND_HORIZON := 540.0
+const TOWN_BACKGROUND_GAP := 27.0
+const TOWN_WALK_STEP := 410.0
+const MAX_WALK_STEP := 490.0
 const GLASSGUARD = preload("res://content/spells/shared/glass-crucible-icons.png")
 const POCKET_ANVIL = preload("res://content/spells/pocket-anvil/icon.png")
 const BASTION_SPELLS := {7: preload("res://content/spells/dawnbolt/effect.webp"), 8: preload("res://content/spells/sunseal/effect.webp")}
 const RIVAL_PALETTES := [Color.WHITE, Color("#c5d5e5"), Color("#e1ac96"), Color("#a2b1ac"), Color("#d2bc9e")]
 const SPELL_CONTACT := .60
+const FIREBALL_ART := 0
+const FALLING_EMBER_ART := 2
+const FIREBALL_RELEASE := .28
+const SPELL_PREVIEW_DURATION := 1.9
+const SPELL_PREVIEW_INTERVAL := 5.0
+const MOVEMENT_PREVIEW_CONTACT := .43
+const MOVEMENT_PREVIEW_RESET := .72
 const SPELL_COLORS := [Color("#ffc378"), Color("#cf9eff"), Color("#ffb66e"), Color("#7cdfff"),
 	Color("#e59bff"), Color("#d5b4e9"), Color("#ff855d"), Color("#f6c558"), Color("#ffc55e")]
 const FIRE_CORES := {0: Color("#fff9bd"), 2: Color("#ffad65"), 3: Color("#c5f6ff"), 6: Color("#ffd777"), 8: Color("#fff0a6")}
@@ -64,7 +76,15 @@ var action_time := .54
 var impact_time := .24
 var idle_time := 0.0
 var spell_art := 0
-var demo := false
+# Shops can place the live preview directly on their own background.
+var open_preview := false
+var preview_spell_icon: Texture2D
+var preview_spell_effect := "damage"
+var preview_spell_power := 0
+var preview_etching_rank := 1
+var wards: Array = [0, 0]
+var enchantments: Array = [0, 0]
+var etching_ranks: Array[int] = [1, 1]
 var full_arena := false
 var lethal_bout := false
 var finisher := ""
@@ -82,11 +102,17 @@ var swing_trace: Array[Vector3] = []
 var result_winner := -2
 var celebration_time := 0.0
 var _backdrop: Texture2D
+var _town_ambience: TownAmbience
 var _armor_pieces: Dictionary = {}
 var _weapon_textures: Dictionary = {}
+var _weapon_halos: Dictionary = {}
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if kind == "town":
+		clip_contents = true
+		if data != null:
+			_town_ambience = TownAmbience.new(data)
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	resized.connect(queue_redraw)
 	get_window().size_changed.connect(_sync_backdrop)
@@ -96,7 +122,7 @@ func _sync_backdrop() -> void:
 	var stem := ""
 	match kind:
 		"town": stem = BackdropArt.TOWN
-		"battle": stem = Content.arena(arena).get("backdrop", "")
+		"battle", "arena_preview": stem = Content.arena(arena).get("backdrop", "")
 	if stem.is_empty():
 		return
 	var path := BackdropArt.texture_path(stem, get_window().size)
@@ -116,9 +142,24 @@ func set_rival(fighter: Dictionary, player_level: int) -> void:
 		look.build = legacy_build
 	rival_look = look
 
+func _spell_preview_casting() -> bool:
+	return open_preview and kind == "spell" and elapsed < SPELL_PREVIEW_DURATION
+
+func _movement_spell_preview() -> bool:
+	return preview_spell_effect in ["push", "pull"]
+
 func _process(delta: float) -> void:
-	if kind == "town" or demo:
+	if open_preview and kind == "spell":
+		var was_casting := _spell_preview_casting()
+		elapsed = fposmod(elapsed + delta, SPELL_PREVIEW_INTERVAL)
+		var resetting := _movement_spell_preview() and elapsed >= SPELL_PREVIEW_INTERVAL - MOVEMENT_PREVIEW_RESET
+		# Movement spells hold the result before the rival steps back to their mark.
+		if was_casting or _spell_preview_casting() or resetting:
+			queue_redraw()
+	elif kind == "town":
 		elapsed += delta
+		if _town_ambience != null:
+			_town_ambience.advance(elapsed)
 		queue_redraw()
 	elif full_arena:
 		idle_time += delta
@@ -180,7 +221,12 @@ func animate(change: Dictionary) -> void:
 			impact_time = .42
 			action_time = .98 if event.critical else .85
 		"cast":
-			action_time = .80
+			match str(event.get("utility", "")):
+				"shield": action_time = .69
+				"push": action_time = .76
+				"pull": action_time = .91
+				"enchant": action_time = .85
+				_: action_time = .88
 			impact_time = action_time * SPELL_CONTACT
 		"advance", "retreat":
 			impact_time = .21
@@ -220,7 +266,8 @@ func _landed_strike() -> bool:
 	return not event.get("miss", false) and (event.damage + event.armor_hit > 0 or event.get("first_blood", false)) and event.action in Duel.WEAPON_ACTIONS
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Color("#1a2024"))
+	if not open_preview and kind != "town":
+		draw_rect(Rect2(Vector2.ZERO, size), Color("#1a2024"))
 	match kind:
 		"town":
 			var art := town_art_rect()
@@ -230,16 +277,162 @@ func _draw() -> void:
 			var to_source := _backdrop.get_size() / art.size
 			var crop := Rect2((view.position - art.position) * to_source, view.size * to_source)
 			draw_texture_rect_region(_backdrop, view, crop)
-			var feet := view.position + view.size * Vector2(.49, .94)
-			feet.y += sin(elapsed * 1.8) * 1.25
-			_avatar(feet, view.size.y * .39, left_loadout, false, skin, hair)
+			if _town_ambience != null:
+				_town_ambience.draw_details(self, _backdrop, art, view, elapsed)
+			_draw_town_figures(art, view)
 		"avatar":
-			_avatar(Vector2(size.x * .5, size.y * .96), _portrait_height(), left_loadout, false, skin, hair)
+			var height := _portrait_height()
+			if open_preview:
+				height = minf(height, size.x * 1.06)
+			var center := .45 if open_preview else .5
+			_avatar(Vector2(size.x * center, size.y * .96), height, left_loadout, false, skin, hair)
 		"battle":
 			_draw_battle()
+		"arena_preview":
+			_draw_arena_preview()
 		"spell":
-			_avatar(Vector2(size.x * .24, size.y * .9), size.y * .63, left_loadout, false, skin, hair)
-			_draw_spell(Vector2(size.x * .32, size.y * .60), Vector2(size.x * .70, size.y * .81), minf(size.y * .72, size.x * .35), spell_art, fmod(elapsed, 1.9) / 1.9, 1.0)
+			if _movement_spell_preview():
+				_draw_movement_spell_preview()
+				return
+			var phase := fmod(elapsed, SPELL_PREVIEW_DURATION) / SPELL_PREVIEW_DURATION
+			var resting := open_preview and not _spell_preview_casting()
+			var caster_x := size.x * (.31 if open_preview else .24)
+			var feet_y := size.y * (.80 if open_preview else .9)
+			var caster_height := minf(size.y * .64, size.x * .79) if open_preview else size.y * .63
+			var etching := 0.0
+			var ward := 0.0
+			if preview_spell_effect == "enchant":
+				etching = smoothstep(.24, .55, phase) * (1.0 - smoothstep(.85, 1.0, phase))
+			elif preview_spell_effect == "shield":
+				ward = smoothstep(.10, .51, phase) * (1.0 - smoothstep(.90, 1.0, phase))
+			var pose := _rest_pose(left_loadout)
+			if not resting:
+				if preview_spell_effect == "damage" and spell_art == FIREBALL_ART:
+					_fireball_arm(pose, left_loadout, phase)
+				else:
+					pose.weapon_arm += Vector3(.12, -.33, -.22) * sin(phase * PI)
+			if resting:
+				pose = _rest_pose(left_loadout)
+				etching = .65 if preview_spell_effect == "enchant" else 0.0
+				ward = .72 if preview_spell_effect == "shield" else 0.0
+			var fighter := _avatar(Vector2(caster_x, feet_y), caster_height, left_loadout, false, skin, hair,
+				pose, {}, 0.0, false, Rig.SkinPart.WHOLE, Color.WHITE, etching, preview_etching_rank, ward)
+			if resting:
+				if preview_spell_effect != "shield":
+					_draw_shop_spell_icon()
+				return
+			var target := Vector2(size.x * (.75 if open_preview else .70), size.y * .81)
+			var height := minf(size.y * .72, size.x * .35)
+			if preview_spell_effect == "damage":
+				if spell_art == FIREBALL_ART:
+					target.y = fighter.hand.y
+				elif spell_art == FALLING_EMBER_ART:
+					target.y = feet_y - caster_height * .55
+				_draw_spell(fighter.hand, target, height, spell_art, phase, 1.0)
+			elif preview_spell_effect != "shield":
+				var approach := minf(1.0, phase / .51)
+				var recovery := maxf(0.0, (phase - .51) / .49)
+				var destination := target - Vector2(0, height * .26)
+
+				MagicEffects.cast(self, preview_spell_effect, fighter.hand, destination, height, approach, recovery, 1.0, preview_etching_rank)
+
+func _draw_movement_spell_preview() -> void:
+	# Frame two fighters and reserve enough room to show the full push inside the shop panel.
+	var height := minf(size.y * .60, size.x * .44)
+	if height <= 0.0:
+		return
+	var cast_phase := minf(elapsed / SPELL_PREVIEW_DURATION, 1.0)
+	var approach := minf(cast_phase / MOVEMENT_PREVIEW_CONTACT, 1.0)
+	var recovery := maxf(0.0, (cast_phase - MOVEMENT_PREVIEW_CONTACT) / (1.0 - MOVEMENT_PREVIEW_CONTACT))
+	var reset := clampf((elapsed - (SPELL_PREVIEW_INTERVAL - MOVEMENT_PREVIEW_RESET)) / MOVEMENT_PREVIEW_RESET, 0.0, 1.0)
+	var pulling := preview_spell_effect == "pull"
+	var gap := 3 if pulling else 2
+	var travel := gap - 1 if pulling else gap
+	if not data.rules.distance_based_spell_movement:
+		travel = mini(travel, preview_spell_power)
+	var slide := smoothstep(0.0, .73, recovery) if pulling else 1.0 - pow(1.0 - clampf(recovery / .58, 0.0, 1.0), 3.0)
+	var distance := height * SPACE_PER_FIGHTER_HEIGHT
+	var displacement := travel * distance * slide * (1.0 - smoothstep(0.0, 1.0, reset))
+	var caster_feet := size * Vector2(.20, .74)
+	var rival_feet := caster_feet + Vector2(gap * distance + displacement * (-1.0 if pulling else 1.0), 0.0)
+	_draw_fighter_shadow(caster_feet, height)
+	_draw_fighter_shadow(rival_feet, height)
+
+	var recoil := smoothstep(0.0, .13, recovery) * (1.0 - smoothstep(.48, .94, recovery))
+	var rival_pose := _rest_pose({})
+	rival_pose.weapon_arm += Vector3(.08, -.19, .16) * recoil
+	rival_pose.off_arm += Vector3(-.12, -.18, .20) * recoil
+	var step := sin(reset * TAU * 2.0) * sin(reset * PI)
+	rival_pose.lead_leg = Vector3(-.26, .17, -.04) * step
+	rival_pose.rear_leg = Vector3(.26, -.17, .04) * step
+	var rival := _avatar(rival_feet, height, {}, true, 2, 2, rival_pose, {},
+		recoil * (.17 if pulling else -.22), false, Rig.SkinPart.WHOLE, Color("#bbb8bf"))
+
+	var reach := smoothstep(.05, .37, approach) * (1.0 - smoothstep(.55, 1.0, recovery))
+	var cast_hand := Vector3(883, 536, -.43)
+	if pulling:
+		cast_hand = cast_hand.lerp(Vector3(772, 574, -.72), smoothstep(0.0, .59, recovery))
+	var wrist := _rest_hand(left_loadout).lerp(cast_hand, reach)
+	if pulling:
+		# Keep long weapons out of the rival's silhouette while they stand next to the caster.
+		var hold := smoothstep(.35, .73, recovery) * (1.0 - smoothstep(0.0, .78, reset))
+		wrist = wrist.lerp(Vector3(747, 590, -1.04), hold)
+	var caster_pose := _rest_pose(left_loadout)
+	caster_pose.weapon_arm = Rig.aim_weapon_arm(Vector2(wrist.x, wrist.y), wrist.z)
+	var caster := _avatar(caster_feet, height, left_loadout, false, skin, hair, caster_pose)
+	if cast_phase < 1.0:
+		var effect_height := height * .76
+		if pulling:
+			effect_height = clampf((rival.chest.x - caster.hand.x) * 2.0, height * .34, effect_height)
+		MagicEffects.cast(self, preview_spell_effect, caster.hand, rival.chest, effect_height, approach, recovery, 1.0)
+
+func _draw_fighter_shadow(feet: Vector2, height: float, opacity: float = 1.0) -> void:
+	draw_set_transform(feet, 0.0, Vector2(1.0, .25))
+	draw_circle(Vector2.ZERO, height * .24, Color("#160f14", .28 * opacity), true)
+	draw_set_transform(Vector2.ZERO)
+
+func _draw_shop_spell_icon() -> void:
+	if preview_spell_icon == null:
+		return
+	var art_size := preview_spell_icon.get_size()
+	var limit := minf(size.x * .32, size.y * .25)
+	var extent := art_size * (limit / maxf(art_size.x, art_size.y))
+	var center := Vector2(size.x * .79, size.y * .53)
+	draw_texture_rect(preview_spell_icon, Rect2(center - extent * .5, extent), false)
+
+func _draw_town_figures(art: Rect2, view: Rect2) -> void:
+	var scale := art.size.x / TOWN_DESIGN_SIZE.x
+	var player_feet := view.position + view.size * Vector2(.49, .94)
+	var player_height := view.size.y * .39
+	var player_floor := (player_feet.y - art.position.y) / scale
+	var player_depth := player_floor - TOWN_GROUND_HORIZON
+	if _town_ambience != null:
+		for passerby in _town_ambience.pedestrians(elapsed, player_floor - TOWN_BACKGROUND_GAP):
+			var feet: Vector2 = art.position + passerby.feet * scale
+			_draw_passerby(passerby, feet, scale, player_height, player_depth)
+	_draw_town_player(player_feet, player_height)
+
+func _draw_town_player(feet: Vector2, height: float) -> void:
+	feet.y += sin(elapsed * 1.8) * 1.25
+	_avatar(feet, height, left_loadout, false, skin, hair)
+
+func _draw_passerby(passerby: Dictionary, feet: Vector2, scale: float, player_height: float, player_depth: float) -> void:
+	var depth: float = passerby.feet.y - TOWN_GROUND_HORIZON
+	var starting_depth: float = passerby.start_y - TOWN_GROUND_HORIZON
+	var height: float = player_height * passerby.stature * depth / player_depth
+	var average_depth := depth
+	# Match travel to the changing perspective without resetting the gait as the person grows.
+	if not is_equal_approx(depth, starting_depth):
+		average_depth = (depth - starting_depth) / log(depth / starting_depth)
+	var stride := height * average_depth / depth * TOWN_WALK_STEP / 1536.0
+	var phase := fposmod(passerby.age * passerby.speed * scale / stride, 1.0)
+	var pose := _rest_pose(passerby.loadout)
+	pose.rigid_feet = true
+	var crouch := _walk_step(pose, phase, phase, TOWN_WALK_STEP)
+	_draw_fighter_shadow(feet, height, passerby.tint.a)
+	feet.y += height * crouch
+	_avatar(feet, height, passerby.loadout, passerby.facing_left, passerby.skin, passerby.hair, pose, passerby.look,
+		0.0, false, Rig.SkinPart.WHOLE, passerby.tint)
 
 func town_art_rect() -> Rect2:
 	# Keep all four storefronts inside the visible band even on ultrawide screens.
@@ -247,7 +440,25 @@ func town_art_rect() -> Rect2:
 	var extent := TOWN_DESIGN_SIZE * art_scale
 	return Rect2((size - extent) * .5, extent)
 
-func _draw_arena_backdrop(pan: float) -> void:
+func preview_feet(index: int) -> Vector2:
+	return size * Vector2(.18 if index == 0 else .82, .865)
+
+func preview_fighter_height() -> float:
+	return minf(size.y * .63, size.x * .285)
+
+func _draw_arena_preview() -> void:
+	# Keep the painted arena floor in frame even when a wide window crops out the sky.
+	_draw_arena_backdrop(.5, 1.0)
+	var height := preview_fighter_height()
+	var feet := preview_feet(0)
+	_draw_fighter_shadow(feet, height)
+	_avatar(feet, height, left_loadout, false, skin, hair)
+	if show_rival:
+		feet = preview_feet(1)
+		_draw_fighter_shadow(feet, height)
+		_avatar(feet, height, right_loadout, true, rival_skin, rival_hair, null, rival_look)
+
+func _draw_arena_backdrop(pan: float, vertical: float = .50) -> void:
 	if size.y <= 0 or size.x <= 0 or _backdrop == null:
 		return
 	var region := Rect2(Vector2.ZERO, _backdrop.get_size())
@@ -261,7 +472,7 @@ func _draw_arena_backdrop(pan: float) -> void:
 	# Leave a crop margin for panning the backdrop as the arena camera moves.
 	if full_arena:
 		extent *= .85
-	var crop := Rect2(region.position + (region.size - extent) * Vector2(pan, .50), extent)
+	var crop := Rect2(region.position + (region.size - extent) * Vector2(pan, vertical), extent)
 	draw_texture_rect_region(_backdrop, Rect2(Vector2.ZERO, size), crop)
 
 # Live previews use the catalog. A saved bout uses the equipment recorded when it began.
@@ -302,17 +513,19 @@ func _rest_pose(gear: Dictionary) -> Rig.Pose:
 
 func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, skin_index: int = 0, hair_index: int = 0,
 		pose: Rig.Pose = null, look: Dictionary = {}, root_tilt: float = 0.0, firm_weapon_arm: bool = false,
-		skin_part: Rig.SkinPart = Rig.SkinPart.WHOLE, tint: Color = Color.WHITE) -> FighterPoints:
+		skin_part: Rig.SkinPart = Rig.SkinPart.WHOLE, tint: Color = Color.WHITE, etching: float = 0.0,
+		etching_rank: int = 1, ward: float = 0.0) -> FighterPoints:
 	if height <= 0:
 		return null
 	var scale_value := height / 1024.0
 	var width := scale_value * clampf(float(look.get("build", 100)) / 100.0, .85, 1.2)
 	var body := Transform2D(-root_tilt if facing_left else root_tilt, feet).scaled_local(Vector2(-width if facing_left else width, scale_value))
-	var bones := Rig.transforms(_rest_pose(gear) if pose == null else pose)
+	var rig_pose := _rest_pose(gear) if pose == null else pose
+	var bones := Rig.transforms(rig_pose)
 	var hand := body * bones[Rig.WEAPON_WRIST]
 	var grip := hand.translated_local(Rig.local(Rig.GRIP))
 	# The weapon draws behind the body and armor. Keep the tip position for impact effects.
-	var tip := grip.origin if skin_part == Rig.SkinPart.WITHOUT_ARM else _draw_weapon(gear, grip, tint, facing_left)
+	var tip := grip.origin if skin_part == Rig.SkinPart.WITHOUT_ARM else _draw_weapon(gear, grip, tint, facing_left, etching, etching_rank)
 	var armor: Dictionary = gear.get("armor", {})
 	var boots := _armor_piece(armor, look, "shoes")
 	var pants := _armor_piece(armor, look, "pants")
@@ -320,8 +533,9 @@ func _avatar(feet: Vector2, height: float, gear: Dictionary, facing_left: bool, 
 	var armor_tint := _armor_tint(look, tint)
 	draw_set_transform_matrix(body)
 	Rig.draw_skin(self, bones, skin_index, hair_index, firm_weapon_arm, skin_part, tint,
-		not boots.is_empty(), not pants.is_empty(), _closed_helmet(armor, look), chest.get("sleeve_tint", Color.WHITE))
-	_draw_armor(armor, look, body, bones, skin_part == Rig.SkinPart.BODY, armor_tint)
+		not boots.is_empty(), not pants.is_empty(), _closed_helmet(armor, look), chest.get("sleeve_tint", Color.WHITE),
+		rig_pose.rigid_feet)
+	_draw_armor(armor, look, body, bones, skin_part == Rig.SkinPart.BODY, armor_tint, ward * tint.a, rig_pose.rigid_feet)
 	Armor.draw_weapon_arm(self, chest, body, bones, armor_tint, skin_part)
 	if skin_part == Rig.SkinPart.BODY:
 		draw_set_transform_matrix(body * bones[Rig.NECK])
@@ -358,14 +572,22 @@ func _armor_tint(look: Dictionary, tint: Color) -> Color:
 	var palette := clampi(int(look.get("palette", 0)), 0, RIVAL_PALETTES.size() - 1)
 	return RIVAL_PALETTES[palette] * tint
 
-func _draw_armor(armor: Dictionary, look: Dictionary, body: Transform2D, bones: Array[Transform2D], headless: bool, tint: Color) -> void:
+func _draw_armor(armor: Dictionary, look: Dictionary, body: Transform2D, bones: Array[Transform2D], headless: bool,
+		tint: Color, ward: float, rigid_feet: bool) -> void:
 	for slot in ["pants", "shoes", "chest", "helmet", "shield"]:
 		if slot == "helmet" and headless:
 			continue
 		draw_set_transform_matrix(body if slot in ["pants", "shoes"] else body * bones[Armor.ANCHORS[slot]])
-		Armor.draw(self, _armor_piece(armor, look, slot), slot, bones, tint)
+		var piece := _armor_piece(armor, look, slot)
+		if slot == "shield" and ward > 0.0:
+			Armor.draw(self, piece, slot, bones, Color(tint, tint.a * (1.0 - ward)))
+			var shield_size: Vector2 = piece.get("size", Vector2(230, 365))
+			MagicEffects.ward(self, SHIELD_CENTER, shield_size.y * 1.12, ward)
+		else:
+			Armor.draw(self, piece, slot, bones, tint, rigid_feet)
 
-func _draw_weapon(gear: Dictionary, hand: Transform2D, tint: Color, rival: bool = false) -> Vector2:
+func _draw_weapon(gear: Dictionary, hand: Transform2D, tint: Color, rival: bool = false, etching: float = 0.0,
+		etching_rank: int = 1) -> Vector2:
 	var weapon := _item(gear.get("weapon", ""))
 	if weapon.is_empty():
 		return hand.origin
@@ -373,25 +595,43 @@ func _draw_weapon(gear: Dictionary, hand: Transform2D, tint: Color, rival: bool 
 	var texture := _weapon_texture(sprite.texture)
 	var source := Rect2(Vector2.ZERO, texture.get_size())
 	var grip: Vector2 = sprite.grip
+	var tip: Vector2 = sprite.tip
 	var scale_value: float = sprite.scale
 	var held := hand.rotated_local(_weapon_rotation(gear))
 	var tip_offset: Vector2 = (sprite.tip - grip) * scale_value
 	var contact := held * tip_offset
-	var glow := Vector2(.54, -.57) * source.size * scale_value
+	var art_tip := tip_offset
 	var rival_sprite := Content.weapon_art(weapon.id, true) if rival else {}
 	if not rival_sprite.is_empty():
 		texture = _weapon_texture(rival_sprite.texture)
 		source = Rect2(Vector2.ZERO, texture.get_size())
 		grip = rival_sprite.grip
-		var art_axis: Vector2 = rival_sprite.tip - grip
+		tip = rival_sprite.tip
+		var art_axis := tip - grip
 		# Align the rival art to the same hand position and animation contact point.
 		scale_value = tip_offset.length() / art_axis.length()
 		held = held.rotated_local(art_axis.angle_to(tip_offset))
-		glow = art_axis * scale_value * .62
+		art_tip = art_axis * scale_value
 	draw_set_transform_matrix(held)
-	draw_texture_rect_region(texture, Rect2(-grip * scale_value, source.size * scale_value), source, tint)
-	if tint == Color.WHITE and not str(gear.get("enchant", "")).is_empty():
-		_weapon_glow(glow, 46.0, .6 + sin(elapsed * 4.0) * .12)
+	var bounds := Rect2(-grip * scale_value, source.size * scale_value)
+	var halo: Dictionary = {}
+	var heat := tint
+	if etching > 0.0:
+		if not _weapon_halos.has(texture):
+			_weapon_halos[texture] = MagicEffects.weapon_halo(texture, grip, tip)
+		halo = _weapon_halos[texture]
+		var light_color: Color = MagicEffects.ETCHING_COLORS[etching_rank - 1]
+		var heat_color: Color = MagicEffects.ETCHING_HEAT[etching_rank - 1]
+		heat = tint.lerp(Color(heat_color, tint.a), etching * (.22 + etching_rank * .11))
+		if not halo.is_empty():
+			var margin: Vector2 = bounds.size * halo.padding
+			var light := Rect2(bounds.position - margin, bounds.size + margin * 2.0)
+			draw_texture_rect(halo.texture, light, false, Color(light_color, etching * tint.a * (.62 + etching_rank * .12)))
+	draw_texture_rect_region(texture, bounds, source, heat)
+	if not halo.is_empty():
+		var rune_color := Color("#ffe2a0").lerp(Color("#fffdf1"), (etching_rank - 1) * .5)
+		draw_texture_rect(halo.runes, bounds, false, Color(rune_color, etching * tint.a * (.26 + etching_rank * .21)))
+		MagicEffects.weapon_embers(self, art_tip, elapsed if _spell_preview_casting() else idle_time, etching * tint.a, etching_rank)
 	return contact
 
 func _weapon_texture(path: String) -> Texture2D:
@@ -440,6 +680,7 @@ func _draw_battle() -> void:
 	var feet: Array[Vector2] = []
 	var side := int(event.get("side", -1))
 	var action := str(event.get("action", ""))
+	var utility := str(event.get("utility", ""))
 	var phase := clampf(elapsed / action_time, 0, 1)
 	var animating := side >= 0 and phase < 1
 	var approach := clampf(elapsed / impact_time, 0, 1)
@@ -452,11 +693,11 @@ func _draw_battle() -> void:
 	var visible_positions: Array[float] = [float(positions[0]), float(positions[1])]
 	var pushed := false
 	if animating and previous_positions.size() == 2:
-		pushed = action == "power" and positions[1 - side] != previous_positions[1 - side]
+		pushed = (action == "power" or utility in ["push", "pull"]) and positions[1 - side] != previous_positions[1 - side]
 		for index in 2:
 			var travel := shift
 			if pushed and index != side:
-				var push_time := .32 if event.get("ring_out", false) else .20
+				var push_time := .32 if event.get("ring_out", false) or utility == "pull" else .20
 				var push_progress := clampf((elapsed - impact_time) / push_time, 0.0, 1.0)
 				travel = 1.0 - pow(1.0 - push_progress, 3.0)
 			visible_positions[index] = lerpf(float(previous_positions[index]), visible_positions[index], travel)
@@ -534,13 +775,35 @@ func _draw_battle() -> void:
 		var target := view * Vector2(visible_positions[1 - side], 0)
 		var direction := 1.0 if side == 0 else -1.0
 		var defender := points[1 - side]
-		if event.blocked and defender != null and defender.has_shield:
-			target.x = defender.shield.x - direction * height * .09
 		var spell_phase := clampf(elapsed * SPELL_CONTACT / impact_time, 0.0, 1.0)
-		_draw_spell(points[side].hand, target, height, attack_art, spell_phase, direction, event.miss)
+		var caster := points[side]
+		if utility.is_empty():
+			if attack_art in [FIREBALL_ART, FALLING_EMBER_ART]:
+				# Projectiles and hit sparks meet at the same point on the defender.
+				if impact_anchor_set:
+					target = view * (impact_anchor * Vector2(1.0, height))
+				elif defender != null:
+					target = _guard_contact(defender, height, direction) if event.blocked else defender.chest
+				else:
+					target.y -= height * .55
+			elif event.blocked and defender != null and defender.has_shield:
+				target.x = defender.shield.x - direction * height * .09
+			_draw_spell(caster.hand, target, height, attack_art, spell_phase, direction, event.miss)
+			if attack_art not in [FIREBALL_ART, FALLING_EMBER_ART] and approach < .65:
+				var charge := sin(approach / .65 * PI)
+				var color := Color("#7cbeff") if attack_art == 3 else Color("#ffd795")
+				draw_arc(caster.hand, height * (.07 + .06 * charge), approach * TAU, approach * TAU + PI * 1.65,
+					24, Color(color, charge), 3.0, true)
+		elif utility != "shield" and defender != null:
+			MagicEffects.cast(self, utility, caster.hand, defender.chest, height, approach, recovery, direction, etching_ranks[side])
 	if animating and elapsed >= impact_time:
 		var contact_offset: float = (previous_positions[1 - side] - visible_positions[1 - side]) * view.x.x if pushed else 0.0
 		_draw_impact(feet, points[1 - side], height, side, recovery, contact_offset, view)
+		if event.has("shield_absorbed") and points[1 - side] != null:
+			MagicEffects.ward_break(self, points[1 - side].shield, height, -1.0 if side == 0 else 1.0, recovery)
+		if event.get("enchant_used", false) and points[1 - side] != null:
+			var rank := etching_ranks[side]
+			MagicEffects.burst(self, points[1 - side].chest, height * (.55 + rank * .13), recovery, MagicEffects.ETCHING_COLORS[rank - 1])
 	if not finisher.is_empty() and recovery >= .024:
 		_draw_finisher(feet[1 - side], height, 1 - side, recovery, view)
 
@@ -548,6 +811,7 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		phase: float, recoil: float) -> FighterPoints:
 	var actor := int(event.get("side", -1))
 	var action := str(event.get("action", ""))
+	var utility := str(event.get("utility", ""))
 	var skin_index := skin if index == 0 else rival_skin
 	var hair_index := hair if index == 0 else rival_hair
 	var facing_left := index == 1
@@ -614,26 +878,10 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				feet += Vector2(motion.x * direction, motion.y) * height
 			"advance", "retreat":
 				var forward := action == "advance"
-				var stride := float(1 if forward else -1)
 				var root_progress := smoothstep(.04, .90, phase)
-				var first_step := smoothstep(.04, .49, phase)
-				var follow_step := smoothstep(.49, .94, phase)
-				var first_lift := .5 - .5 * cos(first_step * TAU)
-				var follow_lift := .5 - .5 * cos(follow_step * TAU)
-				var crouch := 51.0 * pulse
 				var spaces := absf(positions[index] - previous_positions[index])
-				var step_size := minf(spaces * SPACE_PER_FIGHTER_HEIGHT * 1536.0, 490.0) * stride
-				var first := Vector2(step_size * (first_step - root_progress), -crouch - 107.0 * first_lift)
-				var second := Vector2(step_size * (follow_step - root_progress), -crouch - 92.0 * follow_lift)
-				feet.y += height * crouch / 1536.0
-				pose.lead_leg = Rig.walk_leg(1, first if forward else second, -.16 * first_lift if forward else .12 * follow_lift)
-				pose.rear_leg = Rig.walk_leg(0, second if forward else first, .12 * follow_lift if forward else -.16 * first_lift)
-				var arm_swing := sin(phase * TAU) * stride
-				pose.spine += .13 * pulse * stride
-				pose.neck = -.09 * pulse * stride
-				pose.head += .06 * (follow_lift - first_lift)
-				pose.weapon_arm += Vector3(.29, -.36, .15) * arm_swing
-				pose.off_arm += Vector3(-.32, -.19, .20) * arm_swing
+				var step_size := minf(spaces * SPACE_PER_FIGHTER_HEIGHT * 1536.0, MAX_WALK_STEP)
+				feet.y += height * _walk_step(pose, phase, root_progress, step_size, forward)
 			"jump", "jump_back":
 				var launch := smoothstep(.0, .14, approach) * (1.0 - smoothstep(.16, .29, approach))
 				var flight := clampf((approach - .17) / .83, 0.0, 1.0)
@@ -658,9 +906,19 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 				var release := smoothstep(.44, 1.0, approach) * (1.0 - recovery)
 				pose.spine += .17 * release
 				pose.head -= .08 * release
-				pose.weapon_arm += Vector3(-.57, -.41, .47) * release + Vector3(.31, -.70, -.28) * (pulse - release)
+				if utility.is_empty() and _casting_art(actor) == FIREBALL_ART:
+					_fireball_arm(pose, loadout, phase)
+				else:
+					pose.weapon_arm += Vector3(-.57, -.41, .47) * release + Vector3(.31, -.70, -.28) * (pulse - release)
 				pose.off_arm += Vector3(-.33, -.42, .25) * pulse
 				pose.lead_leg = Vector3(-.15, .19, -.04) * release
+				if utility == "pull":
+					var reel := smoothstep(.0, .45, recovery) * (1.0 - smoothstep(.55, 1.0, recovery))
+					pose.spine -= .23 * reel
+					pose.weapon_arm += Vector3(.33, .37, -.45) * reel
+				elif utility == "shield":
+					var lift := .60 * smoothstep(.20, .84, approach) * (1.0 - recovery)
+					_brace(pose, lift, true, grip_angle)
 			"guard":
 				_brace(pose, smoothstep(.0, .32, phase) * (1.0 - smoothstep(.67, 1.0, phase)), shielded, grip_angle)
 			"taunt", "sleep", "potion":
@@ -675,6 +933,10 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		root_tilt = -.14 * recoil
 		pose.weapon_arm += Vector3(.09, .07, -.15) * recoil
 		pose.off_arm += Vector3(.07, -.10, .06) * recoil
+		if utility in ["push", "pull"]:
+			var forced := smoothstep(.0, .15, recovery) * (1.0 - smoothstep(.42, .96, recovery))
+			root_tilt = (.23 if utility == "pull" else -.27) * forced
+			pose.lead_leg += Vector3(-.20, .33, -.18) * forced
 		if event.get("ring_out", false):
 			var fall := smoothstep(.46, .98, recovery)
 			if fall >= .96:
@@ -739,8 +1001,17 @@ func _draw_fighter(feet: Vector2, height: float, loadout: Dictionary, index: int
 		pose.lead_leg = pose.lead_leg.lerp(Vector3(-1.78, 1.88, -.10), kneel)
 		pose.weapon_arm = pose.weapon_arm.lerp(Rig.aim_weapon_arm(Vector2(758, 754), 1.15 - grip_angle), kneel)
 		pose.off_arm = pose.off_arm.lerp(Vector3(.18, -.06, -.01), kneel)
+	var etching := .82 + sin(idle_time * 5.0) * .12 if enchantments[index] > 0 else 0.0
+	var ward := 1.0 if wards[index] > 0 else 0.0
+	if actor == index and phase < 1.0:
+		if utility == "enchant":
+			etching = maxf(etching, smoothstep(.38, .95, approach))
+		elif utility == "shield":
+			ward = maxf(ward, smoothstep(.26, .98, approach))
+		elif event.get("enchant_used", false) and enchantments[index] == 0:
+			etching = .82 * (1.0 - smoothstep(.04, .62, recovery))
 	return _avatar(feet, height, loadout, facing_left, skin_index, hair_index, pose, rival_look if facing_left else {},
-		root_tilt, striking or result_winner == index or yielding, skin_part, tint)
+		root_tilt, striking or result_winner == index or yielding, skin_part, tint, etching, etching_ranks[index], ward)
 
 func _victory_pose(pose: Rig.Pose, rest_hand: Vector3, grip_angle: float) -> void:
 	var raise_weapon := smoothstep(.02, .40, celebration_time)
@@ -812,6 +1083,35 @@ func _swing_arm(ready_arm: Vector3, hit_arm: Vector3, follow_arm: Vector3, swing
 	hand_pose = hand_pose.lerp(follow_arm, smoothstep(.03, .35, recovery))
 	hand_pose = hand_pose.lerp(rest, smoothstep(.38, .97, recovery))
 	return Rig.aim_weapon_arm(Vector2(hand_pose.x, hand_pose.y), hand_pose.z)
+
+func _walk_step(pose: Rig.Pose, phase: float, root_progress: float, step_size: float, forward: bool = true) -> float:
+	# Step, transfer weight, then bring the trailing foot back into stance.
+	var direction := 1.0 if forward else -1.0
+	var first_step := smoothstep(.04, .49, phase)
+	var follow_step := smoothstep(.49, .94, phase)
+	var first_lift := .5 - .5 * cos(first_step * TAU)
+	var follow_lift := .5 - .5 * cos(follow_step * TAU)
+	var pulse := sin(phase * PI)
+	var crouch := 51.0 * pulse
+	var first := Vector2(step_size * direction * (first_step - root_progress), -crouch - 107.0 * first_lift)
+	var second := Vector2(step_size * direction * (follow_step - root_progress), -crouch - 92.0 * follow_lift)
+	var first_pitch := 0.0 if pose.rigid_feet else -.16 * first_lift
+	var follow_pitch := 0.0 if pose.rigid_feet else .12 * follow_lift
+	pose.lead_leg = Rig.walk_leg(1, first if forward else second, first_pitch if forward else follow_pitch)
+	pose.rear_leg = Rig.walk_leg(0, second if forward else first, follow_pitch if forward else first_pitch)
+	var arm_swing := sin(phase * TAU) * direction
+	pose.spine += .13 * pulse * direction
+	pose.neck = -.09 * pulse * direction
+	pose.head += .06 * (follow_lift - first_lift)
+	pose.weapon_arm += Vector3(.29, -.36, .15) * arm_swing
+	pose.off_arm += Vector3(-.32, -.19, .20) * arm_swing
+	return crouch / 1536.0
+
+func _fireball_arm(pose: Rig.Pose, gear: Dictionary, phase: float) -> void:
+	# Hold the wrist through contact so the projectile leaves an extended hand.
+	var reach := smoothstep(.02, FIREBALL_RELEASE, phase) * (1.0 - smoothstep(.64, .95, phase))
+	var gesture := _rest_hand(gear).lerp(Vector3(888, 526, -.28), reach)
+	pose.weapon_arm = Rig.aim_weapon_arm(Vector2(gesture.x, gesture.y), gesture.z)
 
 func _brace(pose: Rig.Pose, amount: float, shielded: bool, grip_angle: float = 0.0) -> void:
 	pose.spine += .10 * amount
@@ -901,6 +1201,10 @@ func _draw_swing_trace(fighter: FighterPoints, view: Transform2D, height: float,
 			Color(tint, head * .84), Color(tint, tail * .64)])
 		draw_primitive(corners, colors, PackedVector2Array())
 
+func _guard_contact(defender: FighterPoints, height: float, direction: float) -> Vector2:
+	var guard := defender.shield if defender.has_shield else defender.hand
+	return guard + Vector2(-direction * .085, -.015) * height
+
 func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, side: int, recovery: float,
 		contact_offset: float, view: Transform2D) -> void:
 	var symbol := ""
@@ -917,8 +1221,7 @@ func _draw_impact(feet: Array[Vector2], defender: FighterPoints, height: float, 
 			if finisher == "arm":
 				struck = elbow_at_impact
 			if event.blocked:
-				struck = defender.shield if defender.has_shield else defender.hand
-				struck += Vector2(-direction * .085, -.015) * height
+				struck = _guard_contact(defender, height, direction)
 			var inverse := view.affine_inverse()
 			impact_anchor = inverse * struck / Vector2(1.0, height)
 			wound_anchor = inverse * chest_at_impact / Vector2(1.0, height)
@@ -1206,13 +1509,43 @@ func _draw_sparks(at: Vector2, radius: float, tint: Color, recovery: float) -> v
 		if index % 2 == 0:
 			draw_circle(point, 2.5 + fade, Color(tint.lightened(.38), fade), true, -1, true)
 
-func _weapon_glow(point: Vector2, radius: float, opacity: float) -> void:
-	draw_circle(point, radius * 1.18, Color(1.0, .43, .16, opacity * .12))
-	draw_circle(point, radius * .72, Color(1.0, .57, .23, opacity * .18))
-	draw_arc(point, radius, -.8, 1.8, 14, Color(1.0, .66, .26, opacity), maxf(1.0, radius * .06), true)
+func _draw_flying_spell(hand: Vector2, target: Vector2, height: float, art: int, phase: float, direction: float, missed: bool) -> void:
+	var fireball := art == FIREBALL_ART
+	var tint: Color = SPELL_COLORS[art]
+	var contact := target - Vector2(0, height * .28) if missed else target
+	# Fireball launches from the wrist. Falling Ember enters from above the target.
+	var launch := hand if fireball else contact + Vector2(-direction * .45, -.98) * height
+	var released_at := FIREBALL_RELEASE if fireball else .23
+	if fireball and phase < released_at:
+		var charge := smoothstep(.04, released_at, phase)
+		draw_circle(hand, height * (.025 + .043 * charge), Color(tint, charge * .28), true, -1, true)
+		draw_circle(hand, height * .025 * charge, Color(tint.lightened(.62), charge), true, -1, true)
+		return
+	var flight := clampf((phase - released_at) / (SPELL_CONTACT - released_at), 0.0, 1.0)
+	var travel := contact - launch
+	var distance := flight if fireball else flight * (.45 + .55 * flight)
+	var center := launch + travel * distance
+	var opacity := smoothstep(released_at, released_at + .055, phase)
+	opacity *= 1.0 - smoothstep(SPELL_CONTACT, .73, phase)
+	if opacity > 0.0:
+		var extent := Vector2(.78, .52) * height if fireball else Vector2(.90, .60) * height
+		if fireball:
+			extent *= lerpf(.22, 1.0, smoothstep(0.0, .60, flight))
+		# Anchor the luminous core in the atlas sprite instead of its transparent center.
+		var core := Vector2(.82, .54) if fireball else Vector2(.73, .73)
+		var art_angle := 0.0 if fireball else .59
+		var rotation := (Vector2(travel.x * direction, travel.y).angle() - art_angle) * direction
+		draw_set_transform(center, rotation, Vector2(direction, 1))
+		draw_texture_rect_region(SPELLS, Rect2(-extent * core, extent), _cell(SPELLS, 2, 2, art), Color(1, 1, 1, opacity))
+		draw_set_transform(Vector2.ZERO)
+	if open_preview and not missed and phase >= SPELL_CONTACT:
+		_draw_impact_burst(contact, height * (.16 if fireball else .24), tint, phase - SPELL_CONTACT, direction, not fireball)
 
 func _draw_spell(start: Vector2, target: Vector2, height: float, art: int, phase: float, direction: float, missed: bool = false) -> void:
 	art = clampi(art, 0, SPELL_COLORS.size() - 1)
+	if art in [FIREBALL_ART, FALLING_EMBER_ART]:
+		_draw_flying_spell(start, target, height, art, phase, direction, missed)
+		return
 	var tint: Color = SPELL_COLORS[art]
 	var charge := smoothstep(.01, .23, phase) * (1.0 - smoothstep(.24, .43, phase))
 	if charge > 0.0:
@@ -1226,21 +1559,11 @@ func _draw_spell(start: Vector2, target: Vector2, height: float, art: int, phase
 	var extent := Vector2(1.35, .90) * height
 	var aim := target - Vector2(0, extent.y * .48)
 	var alpha := fade * smoothstep(.21, .38, phase)
-	var mirror := 1.0
 	match art:
-		0:
-			extent *= .66
-			aim = start.lerp(target - Vector2(0, height * .53), flight) - Vector2(extent.x * .40 * direction, 0)
-			alpha *= 1.0 - smoothstep(SPELL_CONTACT, .76, phase)
-			mirror = direction
 		1:
 			extent *= 1.29
 			aim = target - Vector2(0, extent.y * .48)
 			alpha = smoothstep(.50, SPELL_CONTACT, phase) * (1.0 - smoothstep(.65, .91, phase))
-		2:
-			aim -= Vector2(extent.x * .28, -extent.y * .02)
-			aim -= Vector2(extent.x * .62, extent.y * 1.16) * (1.0 - flight)
-			alpha *= 1.0 - smoothstep(SPELL_CONTACT, .82, phase)
 		3:
 			extent.y *= lerpf(.26, 1.12, smoothstep(.40, .67, phase))
 			aim = target - Vector2(0, extent.y * .46)
@@ -1249,9 +1572,7 @@ func _draw_spell(start: Vector2, target: Vector2, height: float, art: int, phase
 		alpha *= 1.0 - smoothstep(.50, .71, phase)
 	if alpha <= 0.0:
 		return
-	draw_set_transform(aim, 0, Vector2(mirror, 1))
-	draw_texture_rect_region(SPELLS, Rect2(-extent * .5, extent), _cell(SPELLS, 2, 2, art), Color(1, 1, 1, alpha))
-	draw_set_transform(Vector2.ZERO)
+	draw_texture_rect_region(SPELLS, Rect2(aim - extent * .5, extent), _cell(SPELLS, 2, 2, art), Color(1, 1, 1, alpha))
 
 func _draw_advanced_spell(start: Vector2, target: Vector2, height: float, art: int, phase: float, flight: float,
 		fade: float, missed: bool) -> void:

@@ -88,13 +88,16 @@ func _play_on(player: AudioStreamPlayer, cue: String, pitch: float) -> void:
 		player.pitch_scale = pitch
 		player.play()
 
-func cast(art_index: int) -> void:
+func cast(art_index: int, utility: String = "") -> void:
+	if not utility.is_empty():
+		play({"shield": "guard", "push": "leap", "pull": "lightning", "enchant": "equip"}.get(utility, ""))
+		return
 	if art_index >= 0 and art_index < SPELLS.size():
 		play(SPELLS[art_index])
 
 func begin_turn(event: Dictionary, spell_art: int) -> void:
 	if event.action == "cast":
-		cast(spell_art)
+		cast(spell_art, event.get("utility", ""))
 	else:
 		play({
 			"advance": "step", "retreat": "step", "jump": "leap", "jump_back": "leap", "lunge": "step",
@@ -105,6 +108,9 @@ func impact(event: Dictionary, weapon_art: int) -> void:
 	var weapon_attack: bool = event.action in Duel.WEAPON_ACTIONS
 	if weapon_attack:
 		_play_on(_effects, "swing", .88 if weapon_art == 1 else 1.1)
+	if event.has("shield_absorbed"):
+		_play_on(_contact, "block", 1.25)
+		return
 	if event.miss or (event.damage + event.armor_hit == 0 and not event.get("first_blood", false)):
 		return
 	if event.blocked or (event.armor_hit > 0 and weapon_attack):

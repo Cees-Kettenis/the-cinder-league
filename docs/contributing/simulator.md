@@ -26,7 +26,7 @@ A matchup with `--death-match` applies tournament combat rules to the chosen bui
 
 ## Reproduce a matchup
 
-Save a scenario as JSON. Give either fighter a stat spread or a loadout, set the opening distance, or script some moves. After the scripted turns, the selected AI presets continue. A reserve spell must differ from the main spell and requires sufficient Magic. Use `cast_reserve` to script it.
+Save a scenario as JSON. Give either fighter a stat spread or a loadout, set the opening distance, or script some moves. After the scripted turns, the selected AI presets continue. List each prepared spell once in `spells`. An empty string leaves that slot empty. Script a cast with `cast_slot_0` for the first slot, `cast_slot_1` for the second, and so on. Set `draught` to `potion` or `armor_potion` to fill the potion pouch. Older scenarios with `spell` and `reserve_spell` still accept `cast` and `cast_reserve`.
 
 ```json
 {
@@ -43,9 +43,9 @@ Save a scenario as JSON. Give either fighter a stat spread or a loadout, set the
   "left_loadout": {
     "weapon": "sword",
     "armor": {"chest": "leather_chest"},
-    "spell": "fireball"
+    "spells": ["fireball", "magic_shield"]
   },
-  "actions": ["cast"]
+  "actions": ["cast_slot_0"]
 }
 ```
 

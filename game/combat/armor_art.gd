@@ -59,7 +59,8 @@ static func draw_weapon_arm(canvas: CanvasItem, chest: Dictionary, body: Transfo
 		canvas.draw_set_transform_matrix(body * bones[joint] * fit)
 		canvas.draw_texture_rect_region(texture, source, source, tint)
 
-static func draw(canvas: CanvasItem, sprite: Dictionary, slot: String, bones: Array[Transform2D], tint: Color) -> void:
+static func draw(canvas: CanvasItem, sprite: Dictionary, slot: String, bones: Array[Transform2D],
+		tint: Color, rigid_feet: bool = false) -> void:
 	if sprite.is_empty():
 		return
 	var texture: Texture2D = sprite.texture
@@ -72,9 +73,10 @@ static func draw(canvas: CanvasItem, sprite: Dictionary, slot: String, bones: Ar
 		canvas.draw_texture_rect(texture, Rect2(origin, size), false, tint)
 		return
 	for part in sprite.mesh:
-		_draw_leg(canvas, texture, part, bones, tint)
+		_draw_leg(canvas, texture, part, bones, tint, rigid_feet)
 
-static func _draw_leg(canvas: CanvasItem, texture: Texture2D, part: Dictionary, bones: Array[Transform2D], tint: Color) -> void:
+static func _draw_leg(canvas: CanvasItem, texture: Texture2D, part: Dictionary, bones: Array[Transform2D],
+		tint: Color, rigid_feet: bool) -> void:
 	var vertices := PackedVector2Array()
 	var uv := PackedVector2Array()
 	var indices := PackedInt32Array()
@@ -89,7 +91,7 @@ static func _draw_leg(canvas: CanvasItem, texture: Texture2D, part: Dictionary, 
 		for edge in 2:
 			var point := Rig.local(Vector2(rest[edge], rest.z))
 			# The inner edges of the waistband meet on the pelvis as the legs move apart.
-			vertices.append(bones[Rig.PELVIS] * point if row_index < joined_rows and edge != side else Rig.bend_armor(point, bones, side))
+			vertices.append(bones[Rig.PELVIS] * point if row_index < joined_rows and edge != side else Rig.bend_armor(point, bones, side, rigid_feet))
 			uv.append(Vector2(source[edge], source.z) / extent)
 		if row_index > 0:
 			var corner: int = row_index * 2

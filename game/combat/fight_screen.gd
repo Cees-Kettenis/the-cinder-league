@@ -39,10 +39,17 @@ func configure(campaign: Campaign, duel: Duel, snapshot: Dictionary, sound: Fole
 	combat_stage.bout_items = snapshot.equipment
 	combat_stage.left_loadout = bout.fighters[0].loadout
 	combat_stage.set_rival(bout.fighters[1], int(_campaign.state.get("level", 1)))
+	for index in bout.fighters.size():
+		var fighter: Dictionary = bout.fighters[index]
+		for action in Duel.spell_actions(fighter):
+			var spell := Duel.spell_for_action(fighter, action)
+			if spell.get("effect", "") == "enchant":
+				combat_stage.etching_ranks[index] = Duel.enchant_rank(spell, fighter)
+				break
 
 func start(font: Font, input_blocked: bool) -> void:
 	_input_blocked = input_blocked
-	hud.build(font)
+	hud.build(font, Duel.spell_actions(bout.fighters[0]))
 	hud.action_selected.connect(play_action)
 	hud.settings_requested.connect(func() -> void: settings_requested.emit())
 	hud.resized.connect(_place_actions)
@@ -59,6 +66,8 @@ func music() -> AudioStream:
 
 func refresh() -> void:
 	stage.positions = bout.positions.duplicate()
+	stage.wards = bout.fighters.map(func(fighter: Dictionary) -> int: return int(fighter.get("magic_shield", 0)))
+	stage.enchantments = bout.fighters.map(func(fighter: Dictionary) -> int: return int(fighter.get("enchant_hits", 0)))
 	stage.queue_redraw()
 	hud.refresh(bout, _locked)
 	hud.show_save_error(_campaign.save_error)
@@ -82,7 +91,7 @@ func _offer_auto_sleep() -> void:
 	if _input_blocked or _locked or bout.active != 0 or not bout.must_sleep():
 		return
 	var turn := bout.turn
-	await get_tree().create_timer(.60).timeout
+	await get_tree().create_timer(.60, false).timeout
 	# The action may have changed or the player may have left the fight during the delay.
 	if is_inside_tree() and turn == bout.turn and bout.must_sleep():
 		play_action("sleep")
@@ -108,11 +117,13 @@ func _play_turn(action: String) -> void:
 	var event := bout.act(action)
 	# Save the resolved turn before waiting for animation so closing mid-strike can still resume it.
 	var outcome := _campaign.record_turn(event.action, bout.winner)
+	if outcome.get("practice_defeat", false):
+		stage.lethal_bout = false
 	hud.action_layer.hide()
 	var fighter: Dictionary = bout.fighters[event.side]
 	var presentation := event
-	if event.action == "cast_reserve":
-		# Reserve spells share the cast animation and keep their own action in the saved history.
+	if Duel.is_spell_action(event.action) and event.action != "cast":
+		# Slot actions share the cast animation and keep their identity in the saved history.
 		presentation = event.duplicate()
 		presentation.action = "cast"
 	stage.animate(presentation)
