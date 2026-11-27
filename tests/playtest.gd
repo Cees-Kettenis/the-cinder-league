@@ -1542,15 +1542,23 @@ func _check_regular_loss_navigation() -> void:
 	var ui = Game.instantiate()
 	root.add_child(ui)
 	ui.game.create(0, "After a loss", 0, 0, ui.data.build_stats("weapon", 10))
+	ui.game.state.xp = int(ui.data.rules.xp_levels[1]) - 1
 	ui._open_bout(ui.game.start_bout(false, 42))
 	ui.fight.bout.winner = 1
+	ui.fight.bout.history.append({"yield_threshold_reached": true})
 	var outcome: Dictionary = ui.game.record_turn("attack", 1)
 	ui.fight.finished.emit(outcome)
 	var result_panel: Node = ui.fight.get_node("BoutResults")
-	_check(result_panel.find_children("*", "ProgressBar", true, false).is_empty()
-		and result_panel.find_children("*", "Label", true, false).any(func(label: Label) -> bool:
-			return label.text == "%+d gold" % outcome.gold),
-		"A regular loss should show the gold penalty and omit the unchanged XP meter")
+	var meters := result_panel.find_children("*", "ProgressBar", true, false)
+	var labels := result_panel.find_children("*", "Label", true, false)
+	var announcement: Node = ui.fight.get_node("BoutAnnouncement")
+	var announcement_labels := announcement.find_children("*", "Label", true, false)
+	_check(meters.size() == 1 and is_equal_approx(meters[0].value, float(ui.game.state.xp)),
+		"A regular loss should keep the current XP visible")
+	_check(announcement_labels.size() == 1 and announcement_labels[0].text == "DEFEAT",
+		"A yield should have a plain defeat announcement")
+	_check(labels.any(func(label: Label) -> bool: return label.text == "%+d gold" % outcome.gold),
+		"A regular loss should show the gold penalty in the reward bar")
 	_check(_find_button(ui.fight, "Retry bout") == null and _find_button(ui.fight, "Return to town") != null
 		and _find_button(ui.fight, "Next Bout") != null, "Results after a loss should offer town and the next bout")
 	ui.show_arena()
