@@ -23,14 +23,8 @@ func build(parent: Control, data: RefCounted, state: Dictionary, stat_icons: Dic
 	for stat in Data.STATS:
 		var icon: String = "power" if stat == "Strength" else stat_icons[stat]
 		_attribute(attributes, icon, stat, int(state.stats[stat]))
-	var portrait := Control.new()
-	portrait.clip_contents = true
-	sheet.add_child(portrait)
-	_column_width(portrait, 240, .42)
-	_portrait_light(portrait)
-	var figure := VBoxContainer.new()
-	portrait.add_child(figure)
-	figure.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var figure := portrait_slot(sheet)
+	_column_width(figure.get_parent(), 240, .42)
 	var summary := VBoxContainer.new()
 	summary.add_theme_constant_override("separation", 10)
 	sheet.add_child(summary)
@@ -39,6 +33,17 @@ func build(parent: Control, data: RefCounted, state: Dictionary, stat_icons: Dic
 	var slots: int = data.spell_slots(int(state.stats.Magic))
 	_combat_stats(summary, fighter, slots)
 	_loadout(summary, fighter, data.items, slots, item_icon)
+	return figure
+
+func portrait_slot(parent: Control) -> VBoxContainer:
+	var portrait := Control.new()
+	portrait.clip_contents = true
+	portrait.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(portrait)
+	_portrait_light(portrait)
+	var figure := VBoxContainer.new()
+	portrait.add_child(figure)
+	figure.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	return figure
 
 func _column_width(column: Control, minimum: int, weight: float) -> void:
@@ -85,15 +90,18 @@ func _combat_stats(parent: Control, fighter: Dictionary, slots: int) -> void:
 	combat.add_child(grid)
 	for entry in [["health", "Max health", fighter.max_hp], ["stamina", "Max stamina", fighter.max_energy],
 			["armor", "Total armor", fighter.max_armor], ["cast", "Spell slots", slots]]:
-		var tile := _tile(grid, 66, false)
-		tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var stack := VBoxContainer.new()
-		stack.add_theme_constant_override("separation", 3)
-		tile.add_child(stack)
-		var title := _row(stack, 5)
-		_glyph(title, entry[0], 19)
-		_palette.label(title, entry[1], 14, ShopView.MUTED)
-		_palette.label(stack, str(entry[2]), 25, ShopView.GOLD)
+		metric(grid, entry[0], entry[1]).text = str(entry[2])
+
+func metric(parent: Control, symbol: String, caption: String) -> Label:
+	var tile := _tile(parent, 66, false)
+	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 3)
+	tile.add_child(stack)
+	var title := _row(stack, 5)
+	_glyph(title, symbol, 19)
+	_palette.label(title, caption, 14, ShopView.MUTED)
+	return _palette.label(stack, "", 25, ShopView.GOLD)
 
 func _loadout(parent: Control, fighter: Dictionary, items: Dictionary, slots: int, item_icon: Callable) -> void:
 	var equipment := _palette.card(parent, 8)

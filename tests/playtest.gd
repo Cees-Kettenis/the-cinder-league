@@ -1533,9 +1533,12 @@ func _check_game_buttons() -> void:
 	_press_escape()
 	_check(ui.current_screen == "allocate", "Escape from results should respect a pending level-up")
 	_check(ui.stat_labels.Stamina.tooltip_text.contains("Leap 3 spaces"), "The Stamina tooltip should show the current leap")
+	var stamina_button: Button = ui.allocation_controls.Stamina.plus
 	for point in 8:
 		ui._change_point("Stamina", 1)
 	_check(ui.stat_labels.Stamina.tooltip_text.contains("Leap 4 spaces"), "The Stamina tooltip should update after reaching the threshold")
+	_check(ui.allocation_controls.Stamina.plus == stamina_button and ui.allocation_metrics.energy.text.contains("→"),
+		"Level-up should update the Stamina projection without replacing its controls")
 	ui.queue_free()
 
 func _check_regular_loss_navigation() -> void:

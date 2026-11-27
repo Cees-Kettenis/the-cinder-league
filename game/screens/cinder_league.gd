@@ -42,6 +42,7 @@ const PAGE_INSET_Y := 14
 const PAGE_GAP := 9
 const SHOP_NAV_HEIGHT := 60
 const BOUT_REWARDS_DELAY := .42
+const VICTORY_GREEN := Color("#8ff0ae")
 const STAT_ICONS := {"Attack": "attack", "Strength": "strength", "Defence": "armor", "Magic": "cast",
 	"Vitality": "health", "Stamina": "stamina", "Charisma": "taunt"}
 const USER_BALANCE := "user://balance.override.json"
@@ -105,6 +106,8 @@ var draft_hair := 0
 var allocation_grid: VBoxContainer
 var points_notice: Label
 var stat_labels: Dictionary = {}
+var allocation_controls: Dictionary = {}
+var allocation_metrics: Dictionary = {}
 var confirm_button: Button
 var creation_error: Label
 var name_input: LineEdit
@@ -451,7 +454,7 @@ func _page(key: String, heading: String, palette: ShopView = null) -> void:
 	else:
 		palette.backdrop(shop_backdrop)
 		shop_backdrop.show()
-		# The shared status bar spans the window. Only the shop and character bodies are inset.
+		# Keep the status bar aligned even when the content has its own margins.
 		_status_bar(shell, palette)
 		if not full_bleed:
 			var body_margin := MarginContainer.new()
@@ -520,8 +523,8 @@ func _show_popup(section: String, back: String = "") -> void:
 		settings_shade.show()
 	if is_instance_valid(fight):
 		fight.set_input_blocked(true)
-	var palette := ShopView.new("amber-ring") if game.state.is_empty() else _arena_palette()
-	settings_popup.theme = _settings_theme(palette)
+	var palette := ShopView.new("amber-ring") if game.state.is_empty() or current_screen == "create" else _arena_palette()
+	settings_popup.theme = _arena_controls_theme(palette)
 	var menu := palette.card(settings_popup, 12)
 	var panel: Control = menu.get_parent()
 	panel.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
@@ -571,7 +574,7 @@ func _settings_close_button(parent: Control, back: String) -> Button:
 	return _button(parent, "Done" if back.is_empty() else "Back",
 		settings_popup.hide if back.is_empty() else _show_popup.bind(back))
 
-func _settings_theme(palette: ShopView) -> Theme:
+func _arena_controls_theme(palette: ShopView) -> Theme:
 	var themed := theme.duplicate() as Theme
 	themed.set_stylebox("panel", "PopupPanel", StyleBoxEmpty.new())
 	themed.set_stylebox("panel", "PopupMenu", palette.frame(palette.base.darkened(.32), palette.edge, 6))
@@ -761,6 +764,9 @@ func _update_shortcut_label(entry: Dictionary) -> void:
 	target.tooltip_text = _shortcut_caption(entry.caption, entry.action)
 
 func _navigation_shortcut(code: int) -> bool:
+	if current_screen == "allocate" and code == key_bindings.settings:
+		_show_settings()
+		return true
 	if current_screen not in ["town", "shop", "character", "arena", "scout", "tournament"]:
 		return false
 	if code == key_bindings.character:
@@ -1154,60 +1160,100 @@ func _create_character(number: int, revision: String = "") -> void:
 	level_mode = false
 	draft_skin = 0
 	draft_hair = 0
-	_page("create", "Create gladiator")
-	_character_form()
+	var palette := ShopView.new("amber-ring")
+	_page("create", "", palette)
+	_character_form(palette)
 
 func _allocate_level() -> void:
 	sound.play("level_up")
 	draft = data.stats_empty()
 	level_mode = true
-	_page("allocate", "Level %d" % (int(game.state.level) + 1))
-	_character_form()
+	var palette := _arena_palette()
+	_page("allocate", "", palette)
+	_character_form(palette)
 
-func _character_form() -> void:
-	var row := _row(content, 11)
+func _character_form(palette: ShopView) -> void:
+	var heading := "Level %d" % (int(game.state.level) + 1) if level_mode else "Create gladiator"
+	_title(content, heading, 31)
+	var row := _row(content, 14)
 	_fill(row, true)
-	var preview := _card(row)
-	_fill(preview.get_parent(), true)
-	creation_stage = _stage(preview, "avatar", 340)
+	var preview := _column(row, 9)
+	_fill(preview, true)
+	preview.custom_minimum_size.x = 352
+	preview.size_flags_stretch_ratio = .43
+	var view := CharacterView.new(palette, serif)
+	if level_mode:
+		var name := _title(preview, game.state.name, 26)
+		name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	else:
+		_character_appearance(preview, palette)
+	var figure := view.portrait_slot(preview)
+	figure.get_parent().custom_minimum_size.y = 280
+	creation_stage = _stage(figure, "avatar", 280)
+	creation_stage.open_preview = true
 	if not level_mode:
 		creation_stage.left_loadout = {"weapon": data.rules.starter_weapon}
-	else:
-		_title(preview, game.state.name, 23)
-	var details := _card(row, 7)
-	_fill(details.get_parent(), true)
-	details.get_parent().custom_minimum_size.x = 470
-	if not level_mode:
-		name_input = LineEdit.new()
-		name_input.placeholder_text = "Gladiator name"
-		name_input.max_length = 32
-		details.add_child(name_input)
-		name_input.text_changed.connect(func(_value: String) -> void: _update_point_total())
-		var looks := _row(details)
-		_label(looks, "Skin")
-		var skin_choice := OptionButton.new()
-		looks.add_child(skin_choice)
-		for tone in ["Warm", "Light", "Brown", "Deep"]:
-			skin_choice.add_item(tone)
-		skin_choice.item_selected.connect(func(index: int) -> void:
-			draft_skin = index
-			creation_stage.skin = index
-			creation_stage.queue_redraw())
-		_label(looks, "Hair tone")
-		var hair_choice := OptionButton.new()
-		looks.add_child(hair_choice)
-		for tone in ["Dark", "Copper", "Ash"]:
-			hair_choice.add_item(tone)
-		hair_choice.item_selected.connect(func(index: int) -> void:
-			draft_hair = index
-			creation_stage.hair = index
-			creation_stage.queue_redraw())
-	points_notice = _title(details, "", 23)
-	allocation_grid = _column(details, 5)
-	confirm_button = _button(details, "Confirm level-up" if level_mode else "Enter town", _confirm_character, true)
+		creation_stage.skin = draft_skin
+		creation_stage.hair = draft_hair
+	var metrics := _row(preview, 8)
+	allocation_metrics = {
+		"health": view.metric(metrics, "health", "Max health"),
+		"energy": view.metric(metrics, "stamina", "Max stamina"),
+		"slots": view.metric(metrics, "cast", "Spell slots"),
+	}
+	var details := palette.card(row, 9)
+	var panel: PanelContainer = details.get_parent()
+	_fill(panel, true)
+	panel.custom_minimum_size.x = 420
+	panel.size_flags_stretch_ratio = .57
+	var top := _row(details)
+	_title(top, "Attributes", 24)
+	_space(top)
+	points_notice = palette.label(top, "", 20, ShopView.GOLD)
+	allocation_grid = _column(details, 6)
+	_fill(allocation_grid, true)
+	confirm_button = _button(details, "Confirm level-up" if level_mode else "Enter town", _confirm_character)
+	palette.style_button(confirm_button, false, true)
+	confirm_button.custom_minimum_size.y = 46
 	creation_error = _wrapped(details, "", 15, RED)
 	creation_error.hide()
-	_draw_allocations()
+	_draw_allocations(palette)
+
+func _character_appearance(preview: Control, palette: ShopView) -> void:
+	preview.theme = _arena_controls_theme(palette)
+	name_input = LineEdit.new()
+	name_input.placeholder_text = "Gladiator name"
+	name_input.accessibility_name = "Gladiator name"
+	name_input.max_length = 32
+	name_input.custom_minimum_size.y = 42
+	name_input.add_theme_stylebox_override("normal", palette.frame(palette.base, palette.edge, 9))
+	name_input.add_theme_stylebox_override("focus", palette.frame(Color.TRANSPARENT, ShopView.GOLD, 0))
+	preview.add_child(name_input)
+	name_input.text_changed.connect(func(_value: String) -> void: _update_point_total())
+	var looks := _row(preview, 10)
+	palette.label(looks, "Skin", 15)
+	var skin_choice := OptionButton.new()
+	skin_choice.accessibility_name = "Skin tone"
+	looks.add_child(skin_choice)
+	_fill(skin_choice)
+	for tone in ["Warm", "Light", "Brown", "Deep"]:
+		skin_choice.add_item(tone)
+	skin_choice.item_selected.connect(func(index: int) -> void:
+		draft_skin = index
+		creation_stage.skin = index
+		creation_stage.queue_redraw())
+	palette.label(looks, "Hair", 15)
+	var hair_choice := OptionButton.new()
+	hair_choice.accessibility_name = "Hair tone"
+	looks.add_child(hair_choice)
+	_fill(hair_choice)
+	for tone in ["Dark", "Copper", "Ash"]:
+		hair_choice.add_item(tone)
+	hair_choice.item_selected.connect(func(index: int) -> void:
+		draft_hair = index
+		creation_stage.hair = index
+		creation_stage.queue_redraw())
 
 func _point_limit() -> int:
 	return game.points_to_allocate() if level_mode else int(data.rules.starting_points)
@@ -1218,30 +1264,46 @@ func _points_left() -> int:
 		remaining -= int(value)
 	return remaining
 
-func _draw_allocations() -> void:
-	_clear(allocation_grid)
+func _draw_allocations(palette: ShopView) -> void:
 	stat_labels.clear()
+	allocation_controls.clear()
 	for stat in Data.STATS:
-		var row := _row(allocation_grid, 5)
-		row.add_child(Symbol.make(STAT_ICONS[stat], 24))
-		var title := _label(row, stat, 17)
-		title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var tile := PanelContainer.new()
+		tile.add_theme_stylebox_override("panel", palette.frame(palette.base.darkened(.06), palette.edge.darkened(.24), 8))
+		tile.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		tile.custom_minimum_size.y = 57
+		allocation_grid.add_child(tile)
+		var row := _row(tile, 8)
+		var glyph := Symbol.make("power" if stat == "Strength" else STAT_ICONS[stat], 27)
+		glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(glyph)
+		var copy := _column(row, 1)
+		copy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_fill(copy)
+		var title := palette.label(copy, stat, 18)
 		title.mouse_filter = Control.MOUSE_FILTER_PASS
-		_fill(title)
 		stat_labels[stat] = title
-		var base_value: int = int(game.state.stats[stat]) if level_mode else 0
-		var value_label := _label(row, "%d" % (base_value + int(draft[stat])), 16, SAND)
-		value_label.custom_minimum_size.x = 29
+		var summary := palette.label(copy, "", 14, ShopView.MUTED)
+		summary.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		summary.mouse_filter = Control.MOUSE_FILTER_PASS
+		var value := palette.label(row, "", 22, ShopView.GOLD)
+		value.custom_minimum_size.x = 93 if level_mode else 36
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		var minus := _button(row, "−", _change_point.bind(stat, -1))
 		minus.accessibility_name = "Remove %s point" % stat
-		minus.disabled = draft[stat] == 0
 		var plus := _button(row, "+", _change_point.bind(stat, 1))
 		plus.accessibility_name = "Add %s point" % stat
-		plus.disabled = _points_left() == 0
+		for button in [minus, plus]:
+			palette.style_button(button)
+			button.add_theme_font_size_override("font_size", 22)
+			button.custom_minimum_size = Vector2(40, 40)
+			button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		allocation_controls[stat] = {"value": value, "summary": summary, "minus": minus, "plus": plus}
 	_update_point_total()
 
 func _update_point_total() -> void:
-	points_notice.text = "%d points left" % _points_left()
+	var remaining := _points_left()
+	points_notice.text = "1 point left" if remaining == 1 else "%d points left" % remaining
 	var values := draft.duplicate()
 	var previous_stats := data.stats_empty()
 	var previous_level := 1
@@ -1254,9 +1316,19 @@ func _update_point_total() -> void:
 			values[stat] += int(previous_stats[stat])
 	var rule: Dictionary = data.rules
 	var projected: Dictionary = data.fighter("", values, loadout)
+	var starting: Dictionary = data.fighter("", previous_stats, loadout) if level_mode else projected
+	var before_metrics := {"health": starting.max_hp, "energy": starting.max_energy,
+		"slots": data.spell_slots(int(previous_stats.Magic))}
+	var after_metrics := {"health": projected.max_hp, "energy": projected.max_energy,
+		"slots": data.spell_slots(int(values.Magic))}
+	for metric in after_metrics:
+		var before_value: int = before_metrics[metric]
+		var after_value: int = after_metrics[metric]
+		allocation_metrics[metric].text = "%d → %d" % [before_value, after_value] if level_mode and before_value != after_value else str(after_value)
 	stat_labels.Attack.tooltip_text = "%d%% hit chance · %d%% crit" % [
 		roundi(Duel.hit_chance(rule, values, false) * 100), roundi(Duel.crit_chance(rule, values.Attack) * 100)]
-	stat_labels.Strength.tooltip_text = "%d weapon damage" % roundi(Duel.strike_damage(rule, projected, false))
+	var weapon_damage := "%d weapon damage" % roundi(Duel.strike_damage(rule, projected, false))
+	stat_labels.Strength.tooltip_text = weapon_damage
 	if rule.damage_per_excess_strength < rule.damage_per_strength:
 		stat_labels.Strength.tooltip_text += ". Strength adds less damage above %s points." % String.num(
 			Duel.strength_damage_threshold(rule, values), 2)
@@ -1269,10 +1341,16 @@ func _update_point_total() -> void:
 	var stamina := int(values.Stamina)
 	var move_bonus := Duel.stamina_move_bonus(rule, stamina)
 	var leap_bonus := Duel.stamina_move_bonus(rule, stamina, true)
+	var step := int(data.distances.advance) + move_bonus
+	var leap := int(data.distances.jump) + leap_bonus
+	var lunge := Duel.lunge_range(rule, stamina)
 	stat_labels.Stamina.tooltip_text = "%d max stamina · Sleep restores %d\nStep %d · Retreat %d · Leap %d spaces\nLunge up to %d spaces" % [
-		projected.max_energy, Duel.recovery(rule, stamina), int(data.distances.advance) + move_bonus,
-		int(data.distances.retreat) + move_bonus, int(data.distances.jump) + leap_bonus, Duel.lunge_range(rule, stamina)]
+		projected.max_energy, Duel.recovery(rule, stamina), step, int(data.distances.retreat) + move_bonus, leap, lunge]
 	stat_labels.Charisma.tooltip_text = "Stronger taunts and more gold"
+	var summaries := {"Attack": stat_labels.Attack.tooltip_text, "Strength": weapon_damage,
+		"Defence": stat_labels.Defence.tooltip_text, "Magic": stat_labels.Magic.tooltip_text.get_slice("\n", 0),
+		"Vitality": "%d HP recovered after your turn" % Duel.regeneration(rule, values.Vitality),
+		"Stamina": "Step %d · Leap %d · Lunge %d" % [step, leap, lunge], "Charisma": stat_labels.Charisma.tooltip_text}
 	var before := {"level": previous_level, "stats": previous_stats}
 	var after := {"level": previous_level + int(level_mode), "stats": values}
 	var unlocked: Dictionary = {}
@@ -1284,13 +1362,22 @@ func _update_point_total() -> void:
 			unlocked[stat].append(item.name)
 	for stat in unlocked:
 		stat_labels[stat].tooltip_text += "\nUnlocks " + ", ".join(unlocked[stat])
-	confirm_button.disabled = _points_left() != 0 or (not level_mode and name_input.text.strip_edges().is_empty())
+	for stat in Data.STATS:
+		var row: Dictionary = allocation_controls[stat]
+		var base_value: int = previous_stats[stat]
+		var value: int = values[stat]
+		row.value.text = "%d → %d" % [base_value, value] if level_mode and base_value != value else str(value)
+		row.summary.text = summaries[stat]
+		row.summary.tooltip_text = stat_labels[stat].tooltip_text
+		row.minus.disabled = draft[stat] == 0
+		row.plus.disabled = remaining == 0
+	confirm_button.disabled = remaining != 0 or (not level_mode and name_input.text.strip_edges().is_empty())
 
 func _change_point(stat: String, delta: int) -> void:
 	if draft[stat] + delta < 0 or (delta > 0 and _points_left() < 1):
 		return
 	draft[stat] += delta
-	_draw_allocations()
+	_update_point_total()
 
 func _confirm_character() -> void:
 	if _points_left() != 0:
@@ -1334,32 +1421,40 @@ func _arena_palette() -> ShopView:
 
 func _status_bar(parent: Control, palette: ShopView) -> void:
 	var town := current_screen == "town"
+	var creating := current_screen == "create"
+	var allocating := current_screen == "allocate"
 	var inset := MarginContainer.new()
 	inset.name = "StatusBar"
 	_page_insets(inset, PAGE_INSET_X, 4, 4)
 	parent.add_child(inset)
 	var lane := _row(inset, 8)
-	var level := "Character · Lv. %d" % game.state.level
-	var toggle: Callable = _close_character if current_screen == "character" else show_character
-	var character := _button(lane, "", toggle)
-	character.accessibility_name = "Character"
-	palette.style_button(character, current_screen == "character")
-	_track_shortcut(character, level, "character", palette.button_copy(character, level, _key_name("character")))
-	_token(lane, "coin", str(int(game.state.gold)), "Gold")
-	var tournament_ready: bool = game.state.level >= game.arena().cap
-	if not game.state.complete and not tournament_ready:
-		var progress := _row(lane, 5)
-		palette.label(progress, "XP", 13, ShopView.MUTED)
-		_xp_bar(progress, palette)
+	var level := "Character · Lv. %d" % (1 if creating else int(game.state.level))
+	if creating or allocating:
+		palette.label(lane, level, 16)
+	else:
+		var toggle: Callable = _close_character if current_screen == "character" else show_character
+		var character := _button(lane, "", toggle)
+		character.accessibility_name = "Character"
+		palette.style_button(character, current_screen == "character")
+		_track_shortcut(character, level, "character", palette.button_copy(character, level, _key_name("character")))
+	var tournament_ready := false
+	if not creating:
+		_token(lane, "coin", str(int(game.state.gold)), "Gold")
+		tournament_ready = int(game.state.level) >= int(game.arena().cap)
+		if not game.state.complete and not tournament_ready:
+			var progress := _row(lane, 5)
+			palette.label(progress, "XP", 13, ShopView.MUTED)
+			_xp_bar(progress, palette)
 	_space(lane)
-	_label(lane, game.arena().name, 16, SAND).size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	if game.state.complete or tournament_ready:
+	palette.label(lane, data.arenas[0].name if creating else game.arena().name, 16, SAND)
+	if not creating and (game.state.complete or tournament_ready):
 		_league_status(lane, palette, "League champion" if game.state.complete else "Tournament ready")
 	var gear := _icon_button(lane, "settings", "Settings", _show_pause if town else _show_settings)
-	_track_shortcut(gear, "Settings", "settings")
+	if not creating:
+		_track_shortcut(gear, "Settings", "settings")
 	gear.custom_minimum_size = Vector2(38, 35)
 	palette.style_button(gear)
-	if not game.tournament_in_progress():
+	if creating or (not allocating and not game.tournament_in_progress()):
 		var home := _icon_button(lane, "home", "Title screen", show_menu)
 		home.custom_minimum_size = Vector2(38, 35)
 		palette.style_button(home)
@@ -2249,8 +2344,8 @@ func _finish_bout(outcome: Dictionary) -> void:
 	var fallen: bool = outcome.get("fallen", false)
 	var practice_defeat: bool = outcome.get("practice_defeat", false)
 	var detail := ""
-	if not venue_music_enabled:
-		sound.play("victory" if won else "defeat")
+	if not won and not venue_music_enabled:
+		sound.play("defeat")
 	var last: Dictionary = bout.history.back() if not bout.history.is_empty() else {}
 	if outcome.get("complete", false) and won:
 		detail = "League champion"
@@ -2326,14 +2421,15 @@ func _announce_bout_result(won: bool, detail: String) -> void:
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var text := _column(overlay, 3)
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var caption := _label(text, "VICTORY" if won else "DEFEAT", 72, Color("#ffdd9b") if won else Color("#efb1a4"))
+	var caption := _label(text, "VICTORY" if won else "DEFEAT", 76,
+		Color("#e3ffed") if won else Color("#efb1a4"))
 	var engraved := FontVariation.new()
 	engraved.base_font = serif
 	engraved.spacing_glyph = 6
 	engraved.variation_embolden = .6
 	caption.add_theme_font_override("font", engraved)
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	caption.add_theme_color_override("font_outline_color", Color("#22161a"))
+	caption.add_theme_color_override("font_outline_color", Color("#152b20") if won else Color("#22161a"))
 	caption.add_theme_constant_override("outline_size", 5)
 	caption.add_theme_color_override("font_shadow_color", Color(0, 0, 0, .75))
 	caption.add_theme_constant_override("shadow_offset_y", 4)
@@ -2343,12 +2439,25 @@ func _announce_bout_result(won: bool, detail: String) -> void:
 		subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		subtitle.add_theme_color_override("font_outline_color", Color("#22161a"))
 		subtitle.add_theme_constant_override("outline_size", 4)
+	var center_pivot := func() -> void: overlay.pivot_offset = overlay.size * .5
+	overlay.resized.connect(center_pivot)
+	center_pivot.call()
 	overlay.modulate.a = 0.0
-	overlay.position.y = -14
+	overlay.position.y = 16 if won else -16
+	overlay.scale = Vector2.ONE * (.84 if won else 1.16)
 	var reveal := overlay.create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	reveal.tween_property(overlay, "modulate:a", 1.0, .35)
-	reveal.tween_property(overlay, "position:y", 0.0, .42)
-	reveal.chain().tween_property(overlay, "modulate:a", 0.0, .38).set_delay(1.12)
+	reveal.tween_property(overlay, "modulate:a", 1.0, .29)
+	reveal.tween_property(overlay, "position:y", 0.0, .38)
+	if won:
+		# Let the word crest with the fanfare, then settle into its emerald color.
+		reveal.tween_property(overlay, "scale", Vector2.ONE * 1.09, .25)
+		reveal.tween_callback(sound.play_victory).set_delay(.18)
+		reveal.tween_method(func(tint: Color) -> void: caption.add_theme_color_override("font_color", tint),
+			caption.get_theme_color("font_color"), VICTORY_GREEN, .32).set_delay(.18)
+		reveal.tween_property(overlay, "scale", Vector2.ONE, .29).set_delay(.25)
+	else:
+		reveal.tween_property(overlay, "scale", Vector2.ONE, .38)
+	reveal.chain().tween_property(overlay, "modulate:a", 0.0, .38).set_delay(1.04)
 
 func _result_button(parent: Control, palette: ShopView, caption: String, callback: Callable,
 		primary: bool, action: String = "") -> Button:

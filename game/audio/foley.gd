@@ -81,6 +81,10 @@ func set_crowd(in_bout: bool) -> void:
 func play(cue: String) -> void:
 	_play_on(_effects, cue, 1.0)
 
+func play_victory() -> void:
+	# Raise the cue two semitones so its fanfare lands in the key of the victory music.
+	_play_on(_effects, "victory", pow(2.0, 2.0 / 12.0))
+
 func _play_on(player: AudioStreamPlayer, cue: String, pitch: float) -> void:
 	if enabled and CLIPS.has(cue):
 		player.stop()
