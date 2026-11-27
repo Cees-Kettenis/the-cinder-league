@@ -1544,7 +1544,13 @@ func _check_regular_loss_navigation() -> void:
 	ui.game.create(0, "After a loss", 0, 0, ui.data.build_stats("weapon", 10))
 	ui._open_bout(ui.game.start_bout(false, 42))
 	ui.fight.bout.winner = 1
-	ui.fight.finished.emit(ui.game.record_turn("attack", 1))
+	var outcome: Dictionary = ui.game.record_turn("attack", 1)
+	ui.fight.finished.emit(outcome)
+	var result_panel: Node = ui.fight.get_node("BoutResults")
+	_check(result_panel.find_children("*", "ProgressBar", true, false).is_empty()
+		and result_panel.find_children("*", "Label", true, false).any(func(label: Label) -> bool:
+			return label.text == "%+d gold" % outcome.gold),
+		"A regular loss should show the gold penalty and omit the unchanged XP meter")
 	_check(_find_button(ui.fight, "Retry bout") == null and _find_button(ui.fight, "Return to town") != null
 		and _find_button(ui.fight, "Next Bout") != null, "Results after a loss should offer town and the next bout")
 	ui.show_arena()
