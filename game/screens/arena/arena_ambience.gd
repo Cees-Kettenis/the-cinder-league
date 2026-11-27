@@ -6,6 +6,7 @@ const BackdropEffects = preload("res://game/screens/backdrop_effects.gd")
 var _effects := BackdropEffects.new()
 var _design_size := Vector2.ZERO
 var _banners: Array = []
+var _drapes: Array[Dictionary] = []
 var _flames: Array = []
 var _lights: Array = []
 var _walkways: Array = []
@@ -17,11 +18,17 @@ func _init(backdrop_stem: String) -> void:
 		return
 	var layout: Script = load(path)
 	var anchors := layout.get_script_constant_map()
-	_design_size = anchors.DESIGN_SIZE
+	_design_size = anchors.get("DESIGN_SIZE", Vector2.ZERO)
 	_banners = anchors.get("BANNERS", [])
 	_flames = anchors.get("FLAMES", [])
 	_lights = anchors.get("LIGHTS", [])
 	_walkways = anchors.get("WALKWAYS", [])
+	for columns: Array in anchors.get("DRAPES", []):
+		var folds := PackedVector3Array(columns)
+		var bounds := Rect2(Vector2(folds[0].x, folds[0].y), Vector2.ZERO)
+		for fold in folds:
+			bounds = bounds.expand(Vector2(fold.x, fold.y)).expand(Vector2(fold.x, fold.z))
+		_drapes.append({"folds": folds, "bounds": bounds})
 
 func draw(canvas: CanvasItem, painting: Texture2D, crop: Rect2, output: Vector2, time: float) -> void:
 	if _design_size == Vector2.ZERO:
@@ -37,6 +44,10 @@ func draw(canvas: CanvasItem, painting: Texture2D, crop: Rect2, output: Vector2,
 		var cloth: Rect2 = _banners[index]
 		if visible.intersects(cloth):
 			_effects.draw_banner(canvas, painting, _design_size, cloth, time + index * 1.18, 1.45)
+	for index in _drapes.size():
+		var drape := _drapes[index]
+		if visible.intersects(drape.bounds):
+			_effects.draw_drape(canvas, painting, _design_size, drape.folds, time + index * .82)
 	for index in _flames.size():
 		var fire: Rect2 = _flames[index]
 		if visible.grow(fire.size.y * .5).intersects(fire):

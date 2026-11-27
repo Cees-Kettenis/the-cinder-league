@@ -37,8 +37,33 @@ func draw_banner(canvas: CanvasItem, painting: Texture2D, design_size: Vector2,
 			points.append(base + shift * strength)
 			uv.append(base / design_size)
 			colors.append(Color(shade, shade, shade))
+	_draw_cloth_mesh(canvas, painting, points, uv, colors, stride)
+
+func draw_drape(canvas: CanvasItem, painting: Texture2D, design_size: Vector2,
+		folds: PackedVector3Array, time: float) -> void:
+	var points := PackedVector2Array()
+	var uv := PackedVector2Array()
+	var colors := PackedColorArray()
+	var left := folds[0].x
+	var width := folds[-1].x - left
+	for row in MESH_ROWS + 1:
+		var v := float(row) / MESH_ROWS
+		for fold in folds:
+			var u := (fold.x - left) / width
+			var base := Vector2(fold.x, lerpf(fold.y, fold.z, v))
+			# The pinned ends and the contour stay fixed while the folds inside rise and settle.
+			var weight := pow(sin(u * PI) * sin(v * PI), 2.0)
+			var wind := sin(time * 2.1 - u * 4.7 - v * 1.2)
+			var shade := 1.0 - (1.0 + wind) * .022 * weight
+			points.append(base + Vector2(.45, 1.8) * wind * weight)
+			uv.append(base / design_size)
+			colors.append(Color(shade, shade, shade))
+	_draw_cloth_mesh(canvas, painting, points, uv, colors, folds.size())
+
+func _draw_cloth_mesh(canvas: CanvasItem, painting: Texture2D, points: PackedVector2Array,
+		uv: PackedVector2Array, colors: PackedColorArray, stride: int) -> void:
 	for row in MESH_ROWS:
-		for col in MESH_COLUMNS:
+		for col in stride - 1:
 			var a := row * stride + col
 			var b := a + 1
 			var c := a + stride
